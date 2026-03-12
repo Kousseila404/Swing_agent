@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source venv/bin/activate)",
+      "Bash(python main.py --help)",
+      "Bash(python -c \":*)",
+      "Bash(pip install streamlit plotly)",
+      "Bash(source /Users/admin/Documents/swing_agent/venv/bin/activate)",
+      "Bash(python -c \"from modules.strategy_optimizer import optimize_ticker; print\\(''OK''\\)\")",
+      "Bash(python test_v6.py)",
+      "Bash(python3 test_v6.py)",
+      "Bash(ls /Users/admin/Documents/swing_agent/*.py)",
+      "Bash(python3 -c \":*)",
+      "Bash(python3 -c \"import requests; print\\(''requests'', requests.__version__\\)\")",
+      "Bash(python3 -c \"import vectorbt; print\\(''vectorbt:'', vectorbt.__version__\\)\")",
+      "Bash(python3 -c \"import optuna; print\\(''optuna:'', optuna.__version__\\)\")",
+      "Bash(pip install vectorbt optuna -q)",
+      "Bash(python3 -c \"import vectorbt as vbt; print\\(''vectorbt:'', vbt.__version__\\)\")",
+      "Bash(python3 main.py --vector-backtest --trials 5)",
+      "Bash(python3 main.py --backtest --ticker AAPL --years 1)",
+      "Bash(python3 -c \"import quantstats as qs; print\\(''quantstats:'', qs.__version__\\)\")",
+      "Bash(python3 -c \"from modules.backtester import BacktestParams, run_backtest; print\\(''✓ Legacy imports OK''\\)\")"
+    ]
+  }
+}

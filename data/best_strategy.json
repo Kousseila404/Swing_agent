@@ -1,0 +1,17 @@
+{
+  "param_ema": 53,
+  "param_adx": 26.243175227107177,
+  "param_rsi": 49.52194994982058,
+  "param_sl": 0.1374729630855373,
+  "param_tp": 0.5021225966116059,
+  "param_time_stop": 9,
+  "param_pos_size": 0.25874177749448773,
+  "cagr_estimated": 0.25821302310935534,
+  "sharpe": 1.6184915265591144,
+  "max_drawdown": -0.07774301054673283,
+  "profit_factor": 1.3274944450690287,
+  "n_trades": 1096,
+  "n_trials": 150,
+  "tested_at": "2026-03-11",
+  "strategy": "MOMENTUM_DIP_V11"
+}
