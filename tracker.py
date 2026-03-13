@@ -29,6 +29,35 @@ LOOP_INTERVAL = 300          # secondes entre chaque cycle (5 min)
 DATE_FMT      = "%Y-%m-%d %H:%M"
 FETCH_TIMEOUT = 10           # secondes max accordées à yfinance
 
+# Colonnes du journal — ordre canonique
+CSV_HEADERS = [
+    "Ticker", "Direction", "Entry", "Stop_Loss", "Take_Profit",
+    "Status", "Entry_Date", "Exit_Price", "Exit_Date",
+]
+
+
+# ─────────────────────────────────────────────────────────────────
+# INITIALISATION DE L'ESPACE DE TRAVAIL
+# ─────────────────────────────────────────────────────────────────
+def _init_workspace() -> None:
+    """
+    Crée les répertoires data/ et logs/ ainsi que le fichier
+    trade_journal.csv (avec headers) s'ils sont absents.
+    Appelé une seule fois au démarrage — idempotent.
+    """
+    # Dossiers
+    CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Fichier CSV — créé uniquement s'il n'existe pas encore
+    if not CSV_PATH.exists():
+        pd.DataFrame(columns=CSV_HEADERS).to_csv(CSV_PATH, index=False)
+        # Utilise print car le logger n'est pas encore initialisé ici
+        print(f"[INIT] Journal créé : {CSV_PATH.resolve()}")
+
+
+_init_workspace()
+
 
 # ─────────────────────────────────────────────────────────────────
 # LOGGING — Console colorée + Fichier neutre
@@ -36,6 +65,7 @@ FETCH_TIMEOUT = 10           # secondes max accordées à yfinance
 class _ColorFormatter(logging.Formatter):
     """Injecte des codes ANSI selon le niveau de log (console uniquement)."""
 
+    _RESET = "\033[0m"
     _COLORS = {
         logging.DEBUG:    "\033[37m",         # Gris
         logging.INFO:     "\033[97m",         # Blanc brillant
@@ -46,7 +76,7 @@ class _ColorFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         color = self._COLORS.get(record.levelno, "")
-        record.levelname = f"{color}{record.levelname:<8}{_RESET}"
+        record.levelname = f"{color}{record.levelname:<8}{self._RESET}"
         return super().format(record)
 
 
