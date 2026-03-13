@@ -156,21 +156,21 @@ def run_pipeline(dry_run: bool = False, single_ticker: Optional[str] = None) -> 
 
 
 def _print_console_alert(scan: ScanResult, verdict) -> None:
-    """Affiche un résumé propre dans la console (mode dry-run)."""
+    """Affiche un résumé dans les logs (mode dry-run)."""
     dir_icon = "🟢" if scan.direction == "LONG" else "🔴"
-    print(f"\n{'━' * 50}")
-    print(f"  🏷️  {scan.ticker} — {scan.name}")
-    print(f"  {dir_icon} Direction : {scan.direction}")
-    print(f"  💰  Prix : {scan.price} ({scan.change_pct:+.2f}%)")
-    print(f"  📊  Volume : {scan.volume:,} ({scan.volume_ratio}x moyenne)")
-    print(f"  📈  RSI : {scan.rsi} → Signal : {scan.signal}")
+    logger.info("━" * 50)
+    logger.info(f"  🏷️  {scan.ticker} — {scan.name}")
+    logger.info(f"  {dir_icon} Direction : {scan.direction}")
+    logger.info(f"  💰  Prix : {scan.price} ({scan.change_pct:+.2f}%)")
+    logger.info(f"  📊  Volume : {scan.volume:,} ({scan.volume_ratio}x moyenne)")
+    logger.info(f"  📈  RSI : {scan.rsi} → Signal : {scan.signal}")
     if verdict:
-        print(f"  🧠  IA : {verdict.sentiment} (confiance {verdict.confidence}%)")
-        print(f"  🎯  Action : {verdict.action} | Risque : {verdict.risk_level}")
-        print(f"  💬  {verdict.reasoning}")
+        logger.info(f"  🧠  IA : {verdict.sentiment} (confiance {verdict.confidence}%)")
+        logger.info(f"  🎯  Action : {verdict.action} | Risque : {verdict.risk_level}")
+        logger.info(f"  💬  {verdict.reasoning}")
     else:
-        print(f"  🧠  IA : Analyse indisponible")
-    print(f"{'━' * 50}")
+        logger.info("  🧠  IA : Analyse indisponible")
+    logger.info("━" * 50)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -193,18 +193,18 @@ def run_macro_mode() -> None:
         regime  = details.get("regime", "INCONNU")
         emoji   = details.get("emoji", "⚪")
 
-        print(f"\n{'═' * 55}")
-        print(f"  {emoji}  RÉGIME MACRO : {regime}")
-        print(f"{'═' * 55}")
-        print(f"  S&P 500    : {details.get('sp500', 'N/A'):>12}")
-        print(f"  EMA 200j   : {details.get('ema200', 'N/A'):>12}")
-        delta = details.get("sp500_vs_ema200_pct")
-        print(f"  Δ EMA200   : {f'{delta:+.1f}%' if delta is not None else 'N/A':>12}")
-        print(f"  VIX        : {details.get('vix', 'N/A'):>12}")
+        delta   = details.get("sp500_vs_ema200_pct")
         allowed = details.get("allowed_directions", [])
-        print(f"  Directions : {', '.join(allowed) if allowed else 'AUCUNE (CRASH PANIC)':>12}")
-        print(f"\n  ℹ️  {details.get('description', '')}")
-        print(f"{'═' * 55}\n")
+        logger.info("═" * 55)
+        logger.info(f"  {emoji}  RÉGIME MACRO : {regime}")
+        logger.info("═" * 55)
+        logger.info(f"  S&P 500    : {details.get('sp500', 'N/A'):>12}")
+        logger.info(f"  EMA 200j   : {details.get('ema200', 'N/A'):>12}")
+        logger.info(f"  Δ EMA200   : {f'{delta:+.1f}%' if delta is not None else 'N/A':>12}")
+        logger.info(f"  VIX        : {details.get('vix', 'N/A'):>12}")
+        logger.info(f"  Directions : {', '.join(allowed) if allowed else 'AUCUNE (CRASH PANIC)':>12}")
+        logger.info(f"  ℹ️  {details.get('description', '')}")
+        logger.info("═" * 55)
 
     except Exception as e:
         logger.error(f"Erreur MacroEngine : {e}")
@@ -682,17 +682,16 @@ def run_vector_backtest_mode(n_trials: int = 20) -> None:
 
     start_time = datetime.now()
 
-    print()
-    print("═" * 65)
-    print("  SWING QUANT V11 — BACKTEST VECTORISÉ + OPTIMISATION OPTUNA")
-    print(f"  Démarrage   : {start_time:%Y-%m-%d %H:%M:%S}")
-    print(f"  Mode        : Isolation totale (AUCUN appel Live / Telegram)")
-    print(f"  Trials      : {n_trials} essais Optuna (TPE Sampler, seed=42)")
-    print(f"  Reporting   : QuantStats (pas PyFolio — compatible Python 3.12)")
-    print("═" * 65)
+    logger.info("═" * 65)
+    logger.info("  SWING QUANT V11 — BACKTEST VECTORISÉ + OPTIMISATION OPTUNA")
+    logger.info(f"  Démarrage   : {start_time:%Y-%m-%d %H:%M:%S}")
+    logger.info("  Mode        : Isolation totale (AUCUN appel Live / Telegram)")
+    logger.info(f"  Trials      : {n_trials} essais Optuna (TPE Sampler, seed=42)")
+    logger.info("  Reporting   : QuantStats (pas PyFolio — compatible Python 3.12)")
+    logger.info("═" * 65)
 
     # ── 1. Chargement du cache ──────────────────────────────────────
-    print("\n[1/4] Chargement du market_cache local...")
+    logger.info("[1/4] Chargement du market_cache local...")
     try:
         data = load_cache_data()
     except FileNotFoundError as exc:
@@ -704,9 +703,8 @@ def run_vector_backtest_mode(n_trials: int = 20) -> None:
         return
 
     # ── 2. Optimisation Optuna ──────────────────────────────────────
-    print(f"\n[2/4] Optimisation Optuna ({n_trials} trials)...")
-    print("       Objectif : Maximiser le Sharpe Ratio QuantStats (S&P500 complet)")
-    print()
+    logger.info(f"[2/4] Optimisation Optuna ({n_trials} trials)...")
+    logger.info("      Objectif : Maximiser le Sharpe Ratio QuantStats (S&P500 complet)")
 
     try:
         best_metrics, study = run_optimization(data=data, n_trials=n_trials)
@@ -717,8 +715,7 @@ def run_vector_backtest_mode(n_trials: int = 20) -> None:
     elapsed_opt = (datetime.now() - start_time).total_seconds()
 
     # ── 3. Affichage console des résultats ─────────────────────────
-    print(f"\n[3/4] Résultats — Backtest MOMENTUM_DIP V11 (QuantStats)")
-    print()
+    logger.info("[3/4] Résultats — Backtest MOMENTUM_DIP V11 (QuantStats)")
 
     def _fmt(v, pct=False, sign=False) -> str:
         if v != v or not (v == v):     # NaN check
@@ -729,50 +726,50 @@ def run_vector_backtest_mode(n_trials: int = 20) -> None:
 
     bm = best_metrics
 
-    print("╔" + "═" * 57 + "╗")
-    print("║  MEILLEURS PARAMÈTRES TROUVÉS PAR OPTUNA (7D)           ║")
-    print("╠" + "═" * 57 + "╣")
-    print(f"║  param_ema       (période EMA tendance) : {bm['param_ema']:>5}           ║")
-    print(f"║  param_adx       (seuil ADX)            : {bm['param_adx']:>8.2f}        ║")
-    print(f"║  param_rsi       (seuil RSI pullback)   : {bm['param_rsi']:>8.2f}        ║")
-    print(f"║  param_sl        (stop loss trailing %) : {bm['param_sl']:>8.2%}        ║")
-    print(f"║  param_tp        (take profit %)        : {bm['param_tp']:>8.2%}        ║")
-    print(f"║  param_time_stop (barres avant sortie)  : {bm['param_time_stop']:>5}           ║")
-    print(f"║  param_pos_size  (% cash par trade)     : {bm['param_pos_size']:>8.2%}        ║")
-    print("╠" + "═" * 57 + "╣")
-    print("║  MÉTRIQUES QUANTSTATS — Portefeuille equal-weight       ║")
-    print("╠" + "═" * 57 + "╣")
-    print(f"║  Sharpe Ratio  (annualisé)      : {_fmt(bm['sharpe'], sign=True):>10}           ║")
-    print(f"║  Sortino Ratio (annualisé)      : {_fmt(bm['sortino'], sign=True):>10}           ║")
-    print(f"║  CAGR          (annualisé)      : {_fmt(bm['cagr'], pct=True, sign=True):>10}           ║")
-    print(f"║  Total Return                   : {_fmt(bm['total_return'], pct=True, sign=True):>10}           ║")
-    print(f"║  Max Drawdown                   : {_fmt(bm['max_drawdown'], pct=True):>10}           ║")
-    print(f"║  Calmar Ratio                   : {_fmt(bm['calmar'], sign=True):>10}           ║")
-    print(f"║  Profit Factor                  : {_fmt(bm['profit_factor']):>10}           ║")
-    print(f"║  Omega Ratio                    : {_fmt(bm['omega']):>10}           ║")
-    print(f"║  Volatilité   (annualisée)      : {_fmt(bm['volatility'], pct=True):>10}           ║")
-    print(f"║  Win Rate     (% jours positifs): {_fmt(bm['win_rate'], pct=True):>10}           ║")
-    print(f"║  Win Rate     (% trades gagnants): {_fmt(bm['trade_wr'], pct=True):>9}           ║")
-    print("╠" + "═" * 57 + "╣")
-    print("║  PARAMÈTRES DE SIMULATION                               ║")
-    print("╠" + "═" * 57 + "╣")
-    print(f"║  Tickers analysés               : {bm['n_tickers']:>10}           ║")
-    print(f"║  Trades exécutés                : {bm['n_trades']:>10}           ║")
-    print(f"║  Frais de courtage              :      0.1% / ordre           ║")
-    print(f"║  Anti-Look-Ahead                :  shift(1) → exécution J+1  ║")
-    print(f"║  Durée optimisation             : {elapsed_opt:>8.1f}s                 ║")
-    print("╚" + "═" * 57 + "╝")
+    logger.info("╔" + "═" * 57 + "╗")
+    logger.info("║  MEILLEURS PARAMÈTRES TROUVÉS PAR OPTUNA (7D)           ║")
+    logger.info("╠" + "═" * 57 + "╣")
+    logger.info(f"║  param_ema       (période EMA tendance) : {bm['param_ema']:>5}           ║")
+    logger.info(f"║  param_adx       (seuil ADX)            : {bm['param_adx']:>8.2f}        ║")
+    logger.info(f"║  param_rsi       (seuil RSI pullback)   : {bm['param_rsi']:>8.2f}        ║")
+    logger.info(f"║  param_sl        (stop loss trailing %) : {bm['param_sl']:>8.2%}        ║")
+    logger.info(f"║  param_tp        (take profit %)        : {bm['param_tp']:>8.2%}        ║")
+    logger.info(f"║  param_time_stop (barres avant sortie)  : {bm['param_time_stop']:>5}           ║")
+    logger.info(f"║  param_pos_size  (% cash par trade)     : {bm['param_pos_size']:>8.2%}        ║")
+    logger.info("╠" + "═" * 57 + "╣")
+    logger.info("║  MÉTRIQUES QUANTSTATS — Portefeuille equal-weight       ║")
+    logger.info("╠" + "═" * 57 + "╣")
+    logger.info(f"║  Sharpe Ratio  (annualisé)      : {_fmt(bm['sharpe'], sign=True):>10}           ║")
+    logger.info(f"║  Sortino Ratio (annualisé)      : {_fmt(bm['sortino'], sign=True):>10}           ║")
+    logger.info(f"║  CAGR          (annualisé)      : {_fmt(bm['cagr'], pct=True, sign=True):>10}           ║")
+    logger.info(f"║  Total Return                   : {_fmt(bm['total_return'], pct=True, sign=True):>10}           ║")
+    logger.info(f"║  Max Drawdown                   : {_fmt(bm['max_drawdown'], pct=True):>10}           ║")
+    logger.info(f"║  Calmar Ratio                   : {_fmt(bm['calmar'], sign=True):>10}           ║")
+    logger.info(f"║  Profit Factor                  : {_fmt(bm['profit_factor']):>10}           ║")
+    logger.info(f"║  Omega Ratio                    : {_fmt(bm['omega']):>10}           ║")
+    logger.info(f"║  Volatilité   (annualisée)      : {_fmt(bm['volatility'], pct=True):>10}           ║")
+    logger.info(f"║  Win Rate     (% jours positifs): {_fmt(bm['win_rate'], pct=True):>10}           ║")
+    logger.info(f"║  Win Rate     (% trades gagnants): {_fmt(bm['trade_wr'], pct=True):>9}           ║")
+    logger.info("╠" + "═" * 57 + "╣")
+    logger.info("║  PARAMÈTRES DE SIMULATION                               ║")
+    logger.info("╠" + "═" * 57 + "╣")
+    logger.info(f"║  Tickers analysés               : {bm['n_tickers']:>10}           ║")
+    logger.info(f"║  Trades exécutés                : {bm['n_trades']:>10}           ║")
+    logger.info("║  Frais de courtage              :      0.1% / ordre           ║")
+    logger.info("║  Anti-Look-Ahead                :  shift(1) → exécution J+1  ║")
+    logger.info(f"║  Durée optimisation             : {elapsed_opt:>8.1f}s                 ║")
+    logger.info("╚" + "═" * 57 + "╝")
 
     # ── Top 5 trials Optuna (God Fitness) ──────────────────────────
-    print("\n  TOP 5 TRIALS OPTUNA (God Fitness = CAGR² / |MaxDD|) :")
-    print(f"  {'#':>3}  {'EMA':>4}  {'ADX':>5}  {'RSI':>5}  {'SL':>5}  {'TP':>5}  {'T':>3}  {'POS':>5}  {'GodFit':>8}")
-    print("  " + "─" * 62)
+    logger.info("  TOP 5 TRIALS OPTUNA (God Fitness = CAGR² / |MaxDD|) :")
+    logger.info(f"  {'#':>3}  {'EMA':>4}  {'ADX':>5}  {'RSI':>5}  {'SL':>5}  {'TP':>5}  {'T':>3}  {'POS':>5}  {'GodFit':>8}")
+    logger.info("  " + "─" * 62)
     top_trials = sorted(study.trials, key=lambda t: t.value or -999, reverse=True)[:5]
     for i, trial in enumerate(top_trials, 1):
         v = trial.value if trial.value is not None else float("nan")
         p = trial.params
         v_s = f"{v:.4f}" if v == v and abs(v) < 1e6 else " -1.000"
-        print(
+        logger.info(
             f"  {i:>3}  "
             f"{p.get('param_ema', 0):>4}  "
             f"{p.get('param_adx', 0):>5.1f}  "
@@ -780,12 +777,12 @@ def run_vector_backtest_mode(n_trials: int = 20) -> None:
             f"{p.get('param_sl', 0):>5.2f}  "
             f"{p.get('param_tp', 0):>5.2f}  "
             f"{p.get('param_time_stop', 0):>3}  "
-            f"{p.get('param_pos_size', 0):>5.2f}  "   # ← NEW
+            f"{p.get('param_pos_size', 0):>5.2f}  "
             f"{v_s:>8}"
         )
 
     # ── 4. Rapport HTML QuantStats ─────────────────────────────────
-    print(f"\n[4/4] Génération du rapport HTML QuantStats...")
+    logger.info("[4/4] Génération du rapport HTML QuantStats...")
     portfolio_returns = best_metrics.get("portfolio_returns")
 
     html_path = None
@@ -808,23 +805,22 @@ def run_vector_backtest_mode(n_trials: int = 20) -> None:
                 title     = title,
                 download_filename = html_filename,
             )
-            print(f"  Rapport HTML sauvegardé → {html_path}")
+            logger.info(f"  Rapport HTML sauvegardé → {html_path}")
         except Exception as exc:
             logger.warning(f"  Impossible de générer le rapport HTML : {exc}")
     else:
-        print("  (Pas assez de données pour le rapport HTML)")
+        logger.info("  (Pas assez de données pour le rapport HTML)")
 
     # ── Métriques QuantStats complètes dans la console ─────────────
     if portfolio_returns is not None and len(portfolio_returns) > 10:
-        print("\n  ─── RAPPORT QUANTSTATS COMPLET ──────────────────────────────")
+        logger.info("─── RAPPORT QUANTSTATS COMPLET ──────────────────────────────")
         try:
             qs.reports.metrics(portfolio_returns, display=True, mode="full")
         except Exception as exc:
             logger.warning(f"  qs.reports.metrics() échoué : {exc}")
 
     elapsed_total = (datetime.now() - start_time).total_seconds()
-    print(f"\n  Durée totale : {elapsed_total:.1f}s")
-    print()
+    logger.info(f"  Durée totale : {elapsed_total:.1f}s")
 
 
 # ─────────────────────────────────────────────────────────────────

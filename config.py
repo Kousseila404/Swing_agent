@@ -8,9 +8,12 @@
 # ─────────────────────────────────────────────────────────────────
 # 1. CLÉS API  (à remplir avant le premier lancement)
 # ─────────────────────────────────────────────────────────────────
+import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+
+_cfg_logger = logging.getLogger("Config")
 
 # Charge le .env depuis le répertoire du fichier config.py (chemin absolu)
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -22,7 +25,7 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 # API LLM — Anthropic (Claude)
 LLM_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
-# ── DEBUG : vérification des clés au démarrage ───────────────────────────────
+# ── Vérification des clés au démarrage (loguée, pas printée) ─────────────────
 def _check_env() -> None:
     keys = {
         "ANTHROPIC_API_KEY": LLM_API_KEY,
@@ -30,8 +33,10 @@ def _check_env() -> None:
         "TELEGRAM_CHAT_ID": TELEGRAM_CHAT_ID,
     }
     for name, val in keys.items():
-        status = "OK" if val else "MANQUANT ⚠️"
-        print(f"[ENV] {name} → {status}")
+        if val:
+            _cfg_logger.debug(f"[ENV] {name} → OK")
+        else:
+            _cfg_logger.warning(f"[ENV] {name} → MANQUANT ⚠️")
 
 _check_env()
 LLM_MODEL   = "claude-sonnet-4-20250514"

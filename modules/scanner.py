@@ -730,17 +730,15 @@ def _get_regime_safe() -> str:
 
 
 def _print_crash_alert() -> None:
-    """Affiche une alerte visuelle CRASH_PANIC dans la console."""
-    border = "🚨" * 35
-    print(f"\n{border}")
-    print("🚨  ALERTE CRITIQUE — CRASH / PANIC DÉTECTÉ                       🚨")
-    print("🚨                                                                  🚨")
-    print("🚨  VIX ≥ 35 : Panique extrême sur les marchés financiers.         🚨")
-    print("🚨  Le Moteur Macro a BLOQUÉ tous les trades.                       🚨")
-    print("🚨  AUCUN scan ni signal ne sera généré.                            🚨")
-    print("🚨                                                                  🚨")
-    print("🚨  ACTIONS RECOMMANDÉES :                                          🚨")
-    print("🚨    1. Fermer toutes les positions ouvertes.                      🚨")
-    print("🚨    2. Passer en cash ou actifs refuges (or, obligations).        🚨")
-    print("🚨    3. Attendre que VIX < 35 pour reprendre le trading.           🚨")
-    print(f"{border}\n")
+    """Logue une alerte CRASH_PANIC au niveau CRITICAL (fichier + console)."""
+    sep = "═" * 58
+    logger.critical(sep)
+    logger.critical("🚨  ALERTE CRITIQUE — CRASH / PANIC DÉTECTÉ")
+    logger.critical("🚨  VIX ≥ 35 : Panique extrême sur les marchés financiers.")
+    logger.critical("🚨  Le Moteur Macro a BLOQUÉ tous les trades.")
+    logger.critical("🚨  AUCUN scan ni signal ne sera généré.")
+    logger.critical("🚨  ACTIONS RECOMMANDÉES :")
+    logger.critical("🚨    1. Fermer toutes les positions ouvertes.")
+    logger.critical("🚨    2. Passer en cash ou actifs refuges (or, obligations).")
+    logger.critical("🚨    3. Attendre que VIX < 35 pour reprendre le trading.")
+    logger.critical(sep)

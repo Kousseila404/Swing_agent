@@ -8,6 +8,7 @@
 from typing import Optional
 import csv
 import math
+import time
 import httpx
 from datetime import datetime
 from pathlib import Path
@@ -269,13 +270,22 @@ def _format_message(scan: ScanResult, verdict: Optional[AIVerdict]) -> str:
     return msg
 
 
-def _send_telegram_message(text: str) -> None:
+def _send_telegram_message(text: str, max_retries: int = 3, retry_delay: float = 5.0) -> None:
     """
-    Envoie un message via l'API Telegram Bot.
-    Utilise le parse_mode HTML pour le formatage.
+    Envoie un message via l'API Telegram Bot avec retry automatique.
+
+    En cas d'échec réseau ou d'erreur HTTP transitoire (5xx), effectue
+    jusqu'à max_retries tentatives avec un délai croissant (5s, 10s, 15s).
+
+    Args:
+        text:        Corps du message HTML.
+        max_retries: Nombre maximum de tentatives (défaut : 3).
+        retry_delay: Délai de base en secondes, multiplié par le numéro de tentative.
+
+    Raises:
+        RuntimeError: Si toutes les tentatives échouent.
     """
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-
     payload = {
         "chat_id": int(config.TELEGRAM_CHAT_ID),
         "text": text,
@@ -283,6 +293,33 @@ def _send_telegram_message(text: str) -> None:
         "disable_web_page_preview": True,
     }
 
-    with httpx.Client(timeout=15.0) as client:
-        response = client.post(url, json=payload)
-        response.raise_for_status()
+    last_exc: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                response = client.post(url, json=payload)
+                response.raise_for_status()
+            return  # Succès — on sort immédiatement
+
+        except httpx.HTTPStatusError as exc:
+            # Erreur 4xx (token invalide, chat_id erroné…) : inutile de réessayer
+            if exc.response.status_code < 500:
+                raise RuntimeError(
+                    f"[Telegram] Erreur HTTP {exc.response.status_code} (non-récupérable) : {exc}"
+                ) from exc
+            last_exc = exc
+
+        except Exception as exc:
+            last_exc = exc
+
+        if attempt < max_retries:
+            wait = retry_delay * attempt  # 5s, 10s, 15s
+            logger.warning(
+                f"[Telegram] Tentative {attempt}/{max_retries} échouée : {last_exc} "
+                f"— Nouvel essai dans {wait:.0f}s"
+            )
+            time.sleep(wait)
+
+    raise RuntimeError(
+        f"[Telegram] Échec après {max_retries} tentatives. Dernière erreur : {last_exc}"
+    )

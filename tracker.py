@@ -29,13 +29,6 @@ LOOP_INTERVAL = 300          # secondes entre chaque cycle (5 min)
 DATE_FMT      = "%Y-%m-%d %H:%M"
 FETCH_TIMEOUT = 10           # secondes max accordées à yfinance
 
-# Codes ANSI pour la mise en couleur console
-_GREEN  = "\033[92m"
-_RED    = "\033[91m"
-_YELLOW = "\033[93m"
-_RESET  = "\033[0m"
-_BOLD   = "\033[1m"
-
 
 # ─────────────────────────────────────────────────────────────────
 # LOGGING — Console colorée + Fichier neutre
@@ -147,24 +140,13 @@ def get_current_price(ticker: str) -> float | None:
 # ─────────────────────────────────────────────────────────────────
 def _log_close(ticker: str, status: str, exit_price: float,
                target: float, entry: float) -> None:
-    """Imprime une ligne récapitulative colorée pour un trade clôturé."""
-    ts   = datetime.now().strftime(DATE_FMT)
+    """Log la clôture d'un trade via le logger (fichier + console colorée)."""
     icon = "✅" if status == "WIN" else "❌"
-    color = _GREEN if status == "WIN" else _RED
-
-    # Impression console avec couleur sur toute la ligne
-    print(
-        f"{icon}  [{ticker}]  {color}{_BOLD}{status}{_RESET}"
-        f"  | Entrée : {entry:.4f}"
-        f"  | Cible  : {target:.4f}"
-        f"  | Sortie : {exit_price:.4f}"
-        f"  | {ts}"
-    )
-
-    # Même info dans le fichier log (sans ANSI)
-    logger.info(
-        f"[{ticker}] CLOSED → {status} | "
-        f"Entry={entry:.4f} Target={target:.4f} Exit={exit_price:.4f}"
+    # WARNING → jaune console (LOSS), INFO → blanc console (WIN)
+    log_fn = logger.warning if status == "LOSS" else logger.info
+    log_fn(
+        f"{icon} [{ticker}] CLOSED → {status} | "
+        f"Entry={entry:.4f} | Target={target:.4f} | Exit={exit_price:.4f}"
     )
 
 
