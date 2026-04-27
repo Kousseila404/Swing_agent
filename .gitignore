@@ -45,3 +45,4 @@ backend/.pytest_cache/
 
 # OS
 .DS_Store
+.github/workflows/
