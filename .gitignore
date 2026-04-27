@@ -1,0 +1,47 @@
+# Python
+.env
+.env.bak*
+*.env.bak*
+.env.*.bak
+venv/
+__pycache__/
+*.pyc
+*.pkl
+
+# Logs
+*.log
+logs/
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Données dynamiques (runtime)
+backend/data/market.duckdb
+backend/data/market.duckdb.wal
+backend/data/market_cache/
+backend/data/*.json
+backend/data/*.jsonl
+backend/data/*.csv
+backend/data/*.duckdb
+backend/data/.jobs/
+backend/data/.universe_backups_quantamental/
+backend/data/charts/
+backend/data/reports/
+backend/data/strategy_reports/
+backend/data/*.html
+backend/tests/__pycache__/
+backend/modules/__pycache__/
+backend/data/.fundamentals_cache/
+backend/data/.universe_history/
+backend/data/.universe_backups*/
+backend/.archive/
+backend/.pytest_cache/
+
+# Snapshots locaux (archives pre-purge, non versionnés)
+.snapshots/
+
+# OS
+.DS_Store

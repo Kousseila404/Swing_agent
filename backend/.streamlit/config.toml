@@ -1,0 +1,48 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  STREAMLIT CONFIG — VPS Ubuntu / PM2 headless                   ║
+# ║  Fichier lu automatiquement par Streamlit au démarrage.         ║
+# ║  Rend inutile de passer des flags --server.* en ligne de cmd.  ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+[server]
+# Désactive l'ouverture automatique du navigateur (obligatoire sur VPS)
+headless = true
+
+# Écoute sur toutes les interfaces réseau IPv4 + IPv6 → accès depuis le Mac
+# "0.0.0.0" = IPv4 seulement (Safari peut préférer IPv6 → timeout)
+# "::" = dual-stack sur Linux (couvre IPv4 ET IPv6)
+address = "::"
+port    = 8501
+
+# Désactive le file watcher : inutile en prod, coûteux en appels
+# système inotify et CPU — était une cause directe de lenteur sur VPS
+fileWatcherType = "none"
+
+# Réduit la consommation mémoire WebSocket (dashboard léger)
+maxMessageSize  = 50
+
+# Limite les uploads (dashboard read-only, précaution supplémentaire)
+maxUploadSize   = 1
+
+# Désactive CORS — nécessaire pour l'accès cross-origin depuis le Mac
+enableCORS = false
+
+# Doit être false si enableCORS = false (sinon Streamlit override CORS → true
+# et bloque les WebSockets depuis une IP externe / reverse proxy)
+enableXsrfProtection = false
+
+[browser]
+# Désactive la télémétrie Streamlit (appels réseau sortants inutiles)
+gatherUsageStats = false
+
+[runner]
+# Désactive la "magie" Python (st.write implicite sur la dernière expr)
+magicEnabled = false
+
+# Reruns rapides — optimise les re-renders sur CPU limité VPS
+fastReruns = true
+
+[logger]
+# Réduit le bruit dans les logs PM2 : seuls WARNING et au-dessus
+# apparaissent dans "pm2 logs swing-dashboard"
+level = "debug"

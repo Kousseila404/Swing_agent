@@ -1,0 +1,17 @@
+[Unit]
+Description=SwingQuant FastAPI Backend
+After=network.target
+
+[Service]
+Type=simple
+User=swing
+WorkingDirectory=/home/swing/swingquant/backend
+ExecStart=/home/swing/swingquant/backend/venv/bin/python -m uvicorn api:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/swing/swingquant/backend/logs/api.log
+StandardError=append:/home/swing/swingquant/backend/logs/api.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

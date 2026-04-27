@@ -1,0 +1,50 @@
+# SwingQuant TITAN — Runtime deps only (prod Docker + systemd)
+# Pour dev (jupyter, matplotlib-inline, ipywidgets, etc.), voir requirements-dev.txt
+# Pour installer: pip install -r requirements-runtime.txt
+
+# ── Core scientific stack ──
+numpy>=1.24.0
+pandas==2.3.3
+scipy==1.13.1
+scikit-learn==1.6.1
+numba>=0.57.1
+llvmlite>=0.40.1
+
+# ── Backtester institutionnel ──
+vectorbt==0.28.2
+optuna==4.7.0
+QuantStats==0.0.77
+
+# ── Data & cache ──
+duckdb>=1.5.0
+pyarrow==21.0.0
+yfinance==1.2.0
+curl_cffi==0.13.0
+
+# ── Web backend ──
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.10.4
+filelock==3.19.1
+
+# ── Utils ──
+python-dotenv==1.2.1
+requests==2.32.5
+httpx==0.28.1
+beautifulsoup4==4.14.3
+lxml==6.0.2
+tabulate==0.9.0
+tenacity==9.1.2
+schedule==1.2.2
+pytz==2026.1.post1
+PyYAML==6.0.3
+colorlog==6.10.1
+
+# ── NLP léger (news sentiment) ──
+vaderSentiment>=3.3.2
+
+# ── Logging structuré (P1.5) ──
+structlog>=24.4.0
+
+# ── Process & zombie lifecycle (.jobs/ API) ──
+psutil>=7.0.0

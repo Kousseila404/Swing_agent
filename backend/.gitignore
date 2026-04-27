@@ -1,0 +1,30 @@
+.env
+venv/
+__pycache__/
+*.log
+*.log.*
+.DS_Store
+.coverage
+.coverage.*
+
+# Caches et données dynamiques (runtime uniquement)
+data/market.duckdb
+data/market.duckdb.wal
+data/trade_journal.duckdb
+data/trade_journal.duckdb.wal
+data/market_cache/
+data/.jobs/
+data/.archive/
+data/.universe_backups_quantamental/
+data/.universe_version
+data/charts/
+data/strategy_reports/
+data/reports/
+data/*.pkl
+data/*.json
+data/*.jsonl
+data/*.csv
+data/*.html
+
+# Keep schema/example files explicitly if needed
+!data/.keep

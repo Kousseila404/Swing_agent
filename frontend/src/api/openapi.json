@@ -1,0 +1,2610 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SwingQuant TITAN API",
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/api/status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get Status",
+        "description": "Santé du système.",
+        "operationId": "get_status_api_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/macro_calendar": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get Macro Calendar",
+        "description": "Calendrier macro avec zones de blackout. Lit data/macro_calendar.json.",
+        "operationId": "get_macro_calendar_api_macro_calendar_get",
+        "parameters": [
+          {
+            "name": "horizon_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 60,
+              "title": "Horizon Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroCalendarResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market_status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get Market Status",
+        "description": "État de l'horloge NYSE côté Alpaca (is_open, next_open, next_close).\n\nUtilisé par le frontend pour désactiver Execute hors heures et par le broker\ncomme fail-closed gate. Si Alpaca injoignable, retourne is_open=None (le\nfrontend affiche un warning neutre plutôt que bloquer).",
+        "operationId": "get_market_status_api_market_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/macro": {
+      "get": {
+        "tags": [
+          "macro"
+        ],
+        "summary": "Get Macro",
+        "description": "Régime macro-économique depuis macro_state.json.",
+        "operationId": "get_macro_api_macro_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolio": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Get Portfolio",
+        "description": "Journal CSV complet + equity state + positions ouvertes.",
+        "operationId": "get_portfolio_api_portfolio_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/equity_curve": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Get Equity Curve",
+        "description": "Courbe d'équité calculée depuis le journal des trades clôturés.",
+        "operationId": "get_equity_curve_api_equity_curve_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EquityCurveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/performance_metrics": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Get Performance Metrics",
+        "description": "Agrégats PnL réalisés + ratios (Sharpe/Sortino/Calmar/DD/Expectancy).",
+        "operationId": "get_performance_metrics_api_performance_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceMetricsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolio/recommendations": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Get Portfolio Recommendations",
+        "description": "Plan d'achat recommandé — top `max_holdings` actions en tendance haussière\npondérées en risk parity (inverse-vol) sur le capital fourni.\n\nPipeline :\n  1. Charge les tickers scorés (cache mtime-keyed de sector_metrics).\n  2. Filtre bullish (momentum 6M > 0).\n  3. Top N par titan_composite_score.\n  4. Poids W_i = (1/σ_i) / Σ(1/σ_j) via volatilité 6M (Polygon/yf).\n  5. Montants $ + shares (entières sauf allow_fractional_shares=true).\n\nQuery params :\n  total_capital            : float, capital total à allouer (défaut 100k).\n  max_holdings             : int, concentration (défaut 20).\n  allow_fractional_shares  : bool, actions fractionnelles (défaut false).\n  sector                   : str, restreint l'univers à un secteur GICS.\n\nRéponse : {allocations: {TICKER: {weight_pct, amount_usd, shares,\n          titan_score, momentum_pct, volatility_pct, imputed_vol, ...}},\n          invested_usd, cash_remaining_usd, n_kept, ...}.\n\nCas des volatilités manquantes (< 60 bars d'historique) :\n  - ≥ 3 tickers avec σ valide → imputation médiane cross-portfolio,\n    flag imputed_vol=true sur les tickers concernés.\n  - < 3 valid → equal_weight_fallback=true (signal insuffisant pour RP).",
+        "operationId": "get_portfolio_recommendations_api_portfolio_recommendations_get",
+        "parameters": [
+          {
+            "name": "total_capital",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 100000.0,
+              "title": "Total Capital"
+            }
+          },
+          {
+            "name": "max_holdings",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Max Holdings"
+            }
+          },
+          {
+            "name": "allow_fractional_shares",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Allow Fractional Shares"
+            }
+          },
+          {
+            "name": "sector",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sector"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/universe/rebuild": {
+      "post": {
+        "tags": [
+          "universe"
+        ],
+        "summary": "Rebuild Quantamental Universe",
+        "description": "Rafraîchit l'univers quantamental en subprocess détaché.\n\nDeux modes (mode=\"staggered\" par défaut) :\n  • staggered → universe_scheduler : budget 50 tickers/jour, skip ceux\n    refreshés < 14j, merge non-destructif. **Quota-friendly** (~150 calls\n    FMP sur 250/j disponibles). Mode recommandé pour les usages réguliers.\n  • full → universe_engine : rebuild intégral (~500 tickers × 3 calls =\n    1500 calls FMP). Crame le quota journalier → **à réserver aux\n    urgences** (corruption universe.json, nouveau déploiement).\n\nTéléchargement lourd → renvoie immédiatement {job_id} pour polling\nvia GET /api/jobs/{job_id}. Refuse (409) si un job est déjà en cours.",
+        "operationId": "rebuild_quantamental_universe_api_universe_rebuild_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UniverseRebuildRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobLaunchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/universe": {
+      "get": {
+        "tags": [
+          "universe"
+        ],
+        "summary": "Get Quantamental Universe",
+        "description": "SOURCE OF TRUTH — univers quantamental long-terme.\nLit data/universe.json. Payload : tickers enrichis (sector, market_cap,\nforward_pe, price targets, recommandations analystes), agrégation\nsectorielle, stats du dernier rebuild.\n\nFiltre optionnel ?sector=Technology pour restreindre la réponse.\n\nConditional GET : émet un ETag basé sur la mtime de universe.json. Le\nclient peut renvoyer `If-None-Match` → 304 Not Modified (zéro payload)\ntant que le rebuild n'a pas tourné. Le filtre `sector` est inclus dans\nl'ETag car il change la réponse.\n\nMétadonnées W8 :\n  - last_updated_timestamp / stale_days / is_stale : âge du cache\n  - is_incomplete par ticker (flag injecté dans chaque entrée)\n  - incomplete_count / incomplete_ratio : agrégat global",
+        "operationId": "get_quantamental_universe_api_universe_get",
+        "parameters": [
+          {
+            "name": "sector",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sector"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sectors": {
+      "get": {
+        "tags": [
+          "sectors"
+        ],
+        "summary": "Get Sectors",
+        "description": "Liste des 11 secteurs GICS enrichis :\n  • Agrégats robustes (médianes/std) depuis universe.json\n  • Distribution des recommandations analystes\n  • Top-3 tickers par upside et market cap\n  • Momentum 6M via ETF sectoriel SPDR (cache 24h)\n  • Rotation Score = 0.4·valuation + 0.3·sentiment + 0.3·upside\n    (composantes normalisées min-max cross-sector, scaled 0-100)\n\nQuery params :\n  refresh_momentum=true  → force re-download yfinance (bypass cache).\n                           Requiert Authorization: Bearer (anti-ban IP).",
+        "operationId": "get_sectors_api_sectors_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "refresh_momentum",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Refresh Momentum"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sectors/{sector}": {
+      "get": {
+        "tags": [
+          "sectors"
+        ],
+        "summary": "Get Sector Detail",
+        "description": "Détail d'un secteur : stats agrégées + tous ses tickers enrichis\n(upside_pct, reco_bucket) pour un rendu direct dans la vue drill-down.",
+        "operationId": "get_sector_detail_api_sectors__sector__get",
+        "parameters": [
+          {
+            "name": "sector",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sector"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get Job",
+        "operationId": "get_job_api_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOutputResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/job/{job_id}/kill": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Kill Job",
+        "description": "Envoie SIGTERM au groupe de process du job puis reap si zombie.",
+        "operationId": "kill_job_api_job__job_id__kill_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericOkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trade/add": {
+      "post": {
+        "tags": [
+          "trades"
+        ],
+        "summary": "Add Trade",
+        "description": "Ajoute un trade manuel dans le journal CSV.",
+        "operationId": "add_trade_api_trade_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTradeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericOkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/trade/close": {
+      "post": {
+        "tags": [
+          "trades"
+        ],
+        "summary": "Close Trade",
+        "description": "Clôture la dernière position OPEN d'un ticker.",
+        "operationId": "close_trade_api_trade_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseTradeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericOkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/proposals": {
+      "get": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "List Proposals",
+        "description": "Liste les propositions + meta du dernier refresh.\n\nEffectue un sweep `expire_pending()` à chaque appel pour que l'UI voie les\nexpirations en temps réel sans dépendre d'un cron séparé.\n\n`last_refresh` expose l'audit du dernier run auto_proposer (gates +\ndiagnostics + ran_at) sans forcer un nouveau refresh. Utile pour que\nl'UI affiche les gates rouges dès l'ouverture de la page.",
+        "operationId": "list_proposals_api_proposals_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "pending|approved|rejected|expired|executed",
+              "title": "Status"
+            },
+            "description": "pending|approved|rejected|expired|executed"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/refresh": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Refresh Proposals",
+        "description": "Run le proposer (gates → allocation → top-N candidats) + enqueue les\npropositions retenues.\n\nRéponse :\n  - `result.gates` : audit complet (toutes gates, ok/ko + détail).\n  - `result.proposals` : ce qui a effectivement été ajouté à la file.\n  - `result.diagnostics` : sélection, portfolio, allocation summary.",
+        "operationId": "refresh_proposals_api_proposals_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest",
+                "default": {
+                  "notify_telegram": true
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/proposals/{proposal_id}/approve": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Approve Proposal",
+        "description": "Approuve la proposition + ouvre le trade dans le journal.\n\nFlow atomique :\n  1. Marque la proposition `approved` (transition pending → approved).\n  2. Écrit la ligne OPEN dans trade_journal.csv sous FileLock.\n  3. Marque la proposition `executed` avec l'order_id généré.\n\nSi l'écriture journal échoue après l'approbation, on tente de revert via\nune nouvelle proposition mais c'est best-effort — on log et on retourne 500.",
+        "operationId": "approve_proposal_api_proposals__proposal_id__approve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{proposal_id}/reject": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Reject Proposal",
+        "description": "Veto utilisateur — la proposition passe en `rejected`.",
+        "operationId": "reject_proposal_api_proposals__proposal_id__reject_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectRequest",
+                "default": {
+                  "reason": "user_veto"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/regenerate": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Regenerate Proposals",
+        "description": "Purge les propositions pending puis relance le proposer.\n\nDifférence avec `/refresh` : on force-expire les pending existants AVANT\nle nouveau run. Permet à l'utilisateur de changer les paramètres (capital,\nmode, include_held) et obtenir un plan cohérent avec ces paramètres, sans\nêtre bloqué par le dédup intra-file (un ticker pending existant empêche\nsa re-proposition).\n\nOn passe par `expired` (pas `rejected`) pour ne PAS déclencher le cooldown\nveto 7 j. Les rejected existants ne sont pas touchés — leur cooldown\nreste actif (protège contre annuler un veto par mégarde).\n\nRéponse : même shape que `/refresh` + `n_expired` dans diagnostics.",
+        "operationId": "regenerate_proposals_api_proposals_regenerate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest",
+                "default": {
+                  "notify_telegram": true
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/proposals/approve_batch": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Approve Proposals Batch",
+        "description": "Bulk-approve avec overrides par proposition.\n\nFlow par item :\n  1. Lookup proposition (404 si absente, 400 si pas pending).\n  2. Applique les overrides (entry/sl/tp/size édités par l'UI).\n  3. Valide SL < Entry < TP etc.\n  4. Idempotence : intra-batch duplicate, déjà OPEN sans allow_top_up.\n  5. Refuse si sector_exposure.over_cap=True sans ack_sector_warning.\n  6. Live-price realignement (seuil 0.5%) pour aligner sur la source\n     tracker → pas de glissement PnL à l'ouverture.\n  7. broker.submit_order — si broker rejet, la proposition reste pending\n     avec rejection_reason=last_broker_error (retry possible).\n  8. Succès → transition pending → approved → executed + order_id.\n\nChaque item est indépendant — une erreur n'annule pas les autres.",
+        "operationId": "approve_proposals_batch_api_proposals_approve_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveBatchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/proposals/reject_batch": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Reject Proposals Batch",
+        "description": "Veto en masse — chaque item peut avoir une raison distincte.",
+        "operationId": "reject_proposals_batch_api_proposals_reject_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RejectBatchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/history/snapshots": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "List Snapshots Endpoint",
+        "description": "Liste les dates de snapshots historiques disponibles (Lot 6 storage).\n\nEndpoint public — l'UI l'utilise pour borner le date-picker du ticker\ndetail aux dates effectivement disponibles.",
+        "operationId": "list_snapshots_endpoint_api_history_snapshots_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/ticker/{ticker}": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Ticker History Endpoint",
+        "description": "Retourne l'historique d'un ticker. Champs par défaut = les scores TITAN\n+ momentum + price (pratique pour grapher la trajectoire score/prix).",
+        "operationId": "ticker_history_endpoint_api_history_ticker__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "YYYY-MM-DD",
+              "title": "Start"
+            },
+            "description": "YYYY-MM-DD"
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CSV des champs à extraire (default = scores TITAN principaux)",
+              "title": "Fields"
+            },
+            "description": "CSV des champs à extraire (default = scores TITAN principaux)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/data_health": {
+      "get": {
+        "tags": [
+          "data_health"
+        ],
+        "summary": "Get Data Health",
+        "description": "État de santé des providers + cache fundamentals + universe.\n\nChamps principaux :\n  - severity_global : ok | warning | critical (calculé sur les composantes)\n  - yf_breaker : tripped, age, cooldown, auto_reset_in\n  - fundamentals_cache : n_cached, ages\n  - universe : fields_missing par champ, fetched_at distribution, sources\n  - fmp : quota_used / quota_max si dispo\n\nEndpoint **public** — pas d'info sensible, just observability.",
+        "operationId": "get_data_health_api_data_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/data_health/refresh_flagged": {
+      "post": {
+        "tags": [
+          "data_health"
+        ],
+        "summary": "Refresh Flagged Tickers",
+        "description": "Invalide le cache pour les tickers ayant un flag dq_sanitize= puis\nlance un refresh staggered ciblé (force=<liste>, min_age_days=0).\n\nUse case : après avoir déployé un fix qualité data (recovery dividend_yield,\nnouveaux bounds, etc.), ce bouton permet de voir l'effet **maintenant**\nsans attendre le cron quotidien de 06:00 UTC.\n\nCoût : N calls yfinance où N = nombre de tickers flaggés (typiquement\n< 50 après stabilisation, peut monter à 300+ après un changement de bounds).\nLe circuit breaker YF reste actif — si ça trip, le job s'arrête proprement.",
+        "operationId": "refresh_flagged_tickers_api_data_health_refresh_flagged_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddTradeRequest": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "entry": {
+            "type": "number",
+            "title": "Entry"
+          },
+          "stop_loss": {
+            "type": "number",
+            "title": "Stop Loss"
+          },
+          "take_profit": {
+            "type": "number",
+            "title": "Take Profit"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "signal": {
+            "type": "string",
+            "title": "Signal",
+            "default": "MANUAL"
+          },
+          "sector": {
+            "type": "string",
+            "title": "Sector",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "direction",
+          "entry",
+          "stop_loss",
+          "take_profit",
+          "size"
+        ],
+        "title": "AddTradeRequest"
+      },
+      "ApproveBatchItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "overrides": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApproveOverride"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ack_sector_warning": {
+            "type": "boolean",
+            "title": "Ack Sector Warning",
+            "default": false
+          },
+          "allow_top_up": {
+            "type": "boolean",
+            "title": "Allow Top Up",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ApproveBatchItem",
+        "description": "Une ligne du bulk-approve — id proposition + overrides + ack."
+      },
+      "ApproveBatchRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApproveBatchItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "title": "ApproveBatchRequest"
+      },
+      "ApproveBatchResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "n_requested": {
+            "type": "integer",
+            "title": "N Requested"
+          },
+          "n_executed": {
+            "type": "integer",
+            "title": "N Executed"
+          },
+          "n_failed": {
+            "type": "integer",
+            "title": "N Failed"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ApproveBatchResult"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "n_requested",
+          "n_executed",
+          "n_failed",
+          "results"
+        ],
+        "title": "ApproveBatchResponse"
+      },
+      "ApproveBatchResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "ticker",
+          "ok",
+          "message"
+        ],
+        "title": "ApproveBatchResult"
+      },
+      "ApproveOverride": {
+        "properties": {
+          "entry": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry"
+          },
+          "stop_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Loss"
+          },
+          "take_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Profit"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "type": "object",
+        "title": "ApproveOverride",
+        "description": "Overrides éditables par l'utilisateur avant l'exécution broker."
+      },
+      "CloseTradeRequest": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "exit_price": {
+            "type": "number",
+            "title": "Exit Price"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "exit_price",
+          "result"
+        ],
+        "title": "CloseTradeRequest"
+      },
+      "EquityCurveResponse": {
+        "properties": {
+          "curve": {
+            "items": {
+              "$ref": "#/components/schemas/EquityPoint"
+            },
+            "type": "array",
+            "title": "Curve"
+          },
+          "final_equity": {
+            "type": "number",
+            "title": "Final Equity"
+          },
+          "initial_equity": {
+            "type": "number",
+            "title": "Initial Equity"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "final_equity",
+          "initial_equity"
+        ],
+        "title": "EquityCurveResponse"
+      },
+      "EquityPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "pnl": {
+            "type": "number",
+            "title": "Pnl"
+          },
+          "equity": {
+            "type": "number",
+            "title": "Equity"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "ticker",
+          "pnl",
+          "equity",
+          "status"
+        ],
+        "title": "EquityPoint"
+      },
+      "EquityState": {
+        "properties": {
+          "starting_equity": {
+            "type": "number",
+            "title": "Starting Equity"
+          },
+          "current_equity": {
+            "type": "number",
+            "title": "Current Equity"
+          },
+          "realized_pnl": {
+            "type": "number",
+            "title": "Realized Pnl",
+            "default": 0.0
+          },
+          "unrealized_pnl": {
+            "type": "number",
+            "title": "Unrealized Pnl",
+            "default": 0.0
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "last_update": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Update"
+          },
+          "open_positions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Open Positions"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "starting_equity",
+          "current_equity"
+        ],
+        "title": "EquityState"
+      },
+      "GenericOkResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "GenericOkResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "JobLaunchResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobMeta"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "job"
+        ],
+        "title": "JobLaunchResponse"
+      },
+      "JobMeta": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "cmd": {
+            "type": "string",
+            "title": "Cmd"
+          },
+          "pid": {
+            "type": "integer",
+            "title": "Pid"
+          },
+          "started": {
+            "type": "string",
+            "title": "Started"
+          },
+          "log_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Path"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "job_id",
+          "name",
+          "cmd",
+          "pid",
+          "started"
+        ],
+        "title": "JobMeta"
+      },
+      "JobOutputResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "cmd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cmd"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lines"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "job_id",
+          "running"
+        ],
+        "title": "JobOutputResponse"
+      },
+      "MacroCalendarEvent": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "days_delta": {
+            "type": "integer",
+            "title": "Days Delta"
+          },
+          "blackout": {
+            "type": "boolean",
+            "title": "Blackout"
+          },
+          "upcoming": {
+            "type": "boolean",
+            "title": "Upcoming"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "type",
+          "label",
+          "days_delta",
+          "blackout",
+          "upcoming"
+        ],
+        "title": "MacroCalendarEvent"
+      },
+      "MacroCalendarResponse": {
+        "properties": {
+          "today": {
+            "type": "string",
+            "title": "Today"
+          },
+          "in_blackout": {
+            "type": "boolean",
+            "title": "In Blackout"
+          },
+          "next_event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MacroCalendarEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/MacroCalendarEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "today",
+          "in_blackout"
+        ],
+        "title": "MacroCalendarResponse"
+      },
+      "MacroResponse": {
+        "properties": {
+          "regime": {
+            "type": "string",
+            "title": "Regime"
+          },
+          "vix": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vix"
+          },
+          "sp500": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sp500"
+          },
+          "ema200": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ema200"
+          },
+          "sp500_vs_ema200_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sp500 Vs Ema200 Pct"
+          },
+          "allowed_directions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Directions"
+          },
+          "last_update": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Update"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "regime"
+        ],
+        "title": "MacroResponse"
+      },
+      "PerformanceMetricsResponse": {
+        "properties": {
+          "capital": {
+            "type": "number",
+            "title": "Capital"
+          },
+          "pnl_total": {
+            "type": "number",
+            "title": "Pnl Total"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          },
+          "total_closed": {
+            "type": "integer",
+            "title": "Total Closed"
+          },
+          "win_rate": {
+            "type": "number",
+            "title": "Win Rate"
+          },
+          "profit_factor": {
+            "type": "number",
+            "title": "Profit Factor"
+          },
+          "open_count": {
+            "type": "integer",
+            "title": "Open Count"
+          },
+          "sharpe": {
+            "type": "number",
+            "title": "Sharpe",
+            "default": 0.0
+          },
+          "sortino": {
+            "type": "number",
+            "title": "Sortino",
+            "default": 0.0
+          },
+          "calmar": {
+            "type": "number",
+            "title": "Calmar",
+            "default": 0.0
+          },
+          "max_drawdown_pct": {
+            "type": "number",
+            "title": "Max Drawdown Pct",
+            "default": 0.0
+          },
+          "avg_win": {
+            "type": "number",
+            "title": "Avg Win",
+            "default": 0.0
+          },
+          "avg_loss": {
+            "type": "number",
+            "title": "Avg Loss",
+            "default": 0.0
+          },
+          "expectancy": {
+            "type": "number",
+            "title": "Expectancy",
+            "default": 0.0
+          },
+          "streak": {
+            "type": "integer",
+            "title": "Streak",
+            "default": 0
+          },
+          "avg_holding_days": {
+            "type": "number",
+            "title": "Avg Holding Days",
+            "default": 0.0
+          },
+          "equity_by_date": {
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Equity By Date"
+          },
+          "pnl_raw": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Pnl Raw"
+          },
+          "pnl_series": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Pnl Series"
+          },
+          "daily_pnl": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Daily Pnl"
+          },
+          "per_ticker_pnl": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Per Ticker Pnl"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "capital",
+          "pnl_total",
+          "wins",
+          "losses",
+          "total_closed",
+          "win_rate",
+          "profit_factor",
+          "open_count"
+        ],
+        "title": "PerformanceMetricsResponse"
+      },
+      "PortfolioResponse": {
+        "properties": {
+          "equity": {
+            "$ref": "#/components/schemas/EquityState"
+          },
+          "journal": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Journal"
+          },
+          "open_positions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Open Positions"
+          },
+          "closed_trades": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Closed Trades"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/PortfolioStats"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "equity",
+          "stats"
+        ],
+        "title": "PortfolioResponse"
+      },
+      "PortfolioStats": {
+        "properties": {
+          "total_trades": {
+            "type": "integer",
+            "title": "Total Trades"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          },
+          "win_rate": {
+            "type": "number",
+            "title": "Win Rate"
+          },
+          "realized_pnl": {
+            "type": "number",
+            "title": "Realized Pnl"
+          },
+          "unrealized_pnl": {
+            "type": "number",
+            "title": "Unrealized Pnl"
+          },
+          "account_equity": {
+            "type": "number",
+            "title": "Account Equity"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "total_trades",
+          "wins",
+          "losses",
+          "win_rate",
+          "realized_pnl",
+          "unrealized_pnl",
+          "account_equity"
+        ],
+        "title": "PortfolioStats"
+      },
+      "RefreshRequest": {
+        "properties": {
+          "total_capital": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Capital"
+          },
+          "max_holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Holdings"
+          },
+          "min_free_slots": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Free Slots"
+          },
+          "min_proposal_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Proposal Usd"
+          },
+          "allowed_regimes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Regimes"
+          },
+          "ttl_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Hours"
+          },
+          "notify_telegram": {
+            "type": "boolean",
+            "title": "Notify Telegram",
+            "default": true
+          },
+          "allow_fractional_shares": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Fractional Shares"
+          },
+          "include_held": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Held"
+          },
+          "top_n_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top N Mode"
+          }
+        },
+        "type": "object",
+        "title": "RefreshRequest",
+        "description": "Override optionnel des defaults du proposer."
+      },
+      "RejectBatchItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Reason",
+            "default": "user_veto"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "RejectBatchItem"
+      },
+      "RejectBatchRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RejectBatchItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "title": "RejectBatchRequest"
+      },
+      "RejectBatchResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "n_requested": {
+            "type": "integer",
+            "title": "N Requested"
+          },
+          "n_rejected": {
+            "type": "integer",
+            "title": "N Rejected"
+          },
+          "n_failed": {
+            "type": "integer",
+            "title": "N Failed"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RejectBatchResult"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "n_requested",
+          "n_rejected",
+          "n_failed",
+          "results"
+        ],
+        "title": "RejectBatchResponse"
+      },
+      "RejectBatchResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "ok",
+          "message"
+        ],
+        "title": "RejectBatchResult"
+      },
+      "RejectRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Reason",
+            "default": "user_veto"
+          }
+        },
+        "type": "object",
+        "title": "RejectRequest"
+      },
+      "StatusResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "trading_blocked": {
+            "type": "boolean",
+            "title": "Trading Blocked"
+          },
+          "nuclear_stop": {
+            "type": "boolean",
+            "title": "Nuclear Stop"
+          },
+          "open_positions": {
+            "type": "integer",
+            "title": "Open Positions"
+          },
+          "max_positions": {
+            "type": "integer",
+            "title": "Max Positions"
+          },
+          "daily_drawdown_pct": {
+            "type": "number",
+            "title": "Daily Drawdown Pct"
+          },
+          "account_equity": {
+            "type": "number",
+            "title": "Account Equity"
+          },
+          "regime": {
+            "type": "string",
+            "title": "Regime"
+          },
+          "vix": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vix"
+          },
+          "broker_mode": {
+            "type": "string",
+            "title": "Broker Mode"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "timestamp",
+          "trading_blocked",
+          "nuclear_stop",
+          "open_positions",
+          "max_positions",
+          "daily_drawdown_pct",
+          "account_equity",
+          "regime",
+          "broker_mode"
+        ],
+        "title": "StatusResponse"
+      },
+      "UniverseRebuildRequest": {
+        "properties": {
+          "indices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indices"
+          },
+          "min_market_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Market Cap"
+          },
+          "workers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workers"
+          },
+          "max_retries": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Retries"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "min_age_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Age Days"
+          },
+          "force": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force"
+          }
+        },
+        "type": "object",
+        "title": "UniverseRebuildRequest",
+        "description": "Payload optionnel pour POST /api/universe/rebuild."
+      },
+      "UniverseResponse": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "last_updated_timestamp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated Timestamp"
+          },
+          "stale_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Days"
+          },
+          "is_stale": {
+            "type": "boolean",
+            "title": "Is Stale",
+            "default": false
+          },
+          "staleness_threshold_days": {
+            "type": "integer",
+            "title": "Staleness Threshold Days",
+            "default": 7
+          },
+          "incomplete_count": {
+            "type": "integer",
+            "title": "Incomplete Count",
+            "default": 0
+          },
+          "incomplete_ratio": {
+            "type": "number",
+            "title": "Incomplete Ratio",
+            "default": 0.0
+          },
+          "source_indices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Indices"
+          },
+          "filter": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Filter"
+          },
+          "stats": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stats"
+          },
+          "sectors": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Sectors"
+          },
+          "tickers": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Tickers"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "rebuilding": {
+            "type": "boolean",
+            "title": "Rebuilding"
+          },
+          "rebuild_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebuild Job Id"
+          },
+          "last_change": {
+            "title": "Last Change"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "count",
+          "rebuilding"
+        ],
+        "title": "UniverseResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

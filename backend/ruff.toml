@@ -1,0 +1,40 @@
+# Ruff config — lint config for SwingQuant backend.
+# Cohérent avec setup.cfg (max-line-length = 120, ignore E221/E272 pour
+# l'alignement vertical des assignations constantes).
+line-length = 120
+target-version = "py312"
+
+extend-exclude = [
+    "venv",
+    "__pycache__",
+    "data",
+    "logs",
+    ".pytest_cache",
+    ".mypy_cache",
+    "docs",
+]
+
+[lint]
+# Règles minimales: erreurs de syntaxe, imports, comparaisons.
+# On démarre doux — durcir progressivement.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    "E221",  # multiple spaces before operator (alignement vertical intentionnel)
+    "E272",  # multiple spaces before keyword
+    "E501",  # line too long (pycodestyle le check déjà via line-length)
+    "E701",  # multiple statements on one line (colon) — `if x: return y` inline acceptable
+    "E702",  # multiple statements on one line (semicolon) — rare, pattern `a = 1; b = 2`
+    "E741",  # ambiguous variable name `l`/`I`/`O` — toléré dans le code legacy/traders
+    "B008",  # function-call-in-default-argument (FastAPI Depends, Security)
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E402", "F401"]  # tests peuvent importer librement
+"__init__.py" = ["F401"]
