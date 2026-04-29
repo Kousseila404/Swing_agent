@@ -115,6 +115,27 @@ Cron complets actuels :
 
 ---
 
+## 4bis. Authentification git (push / API GitHub)
+
+`backend/.env` contient `GITHUB_USER` + `GITHUB_TOKEN` (PAT scope `repo`+`workflow`).
+C'est la **source unique** pour git et tout script qui appelle l'API GitHub.
+
+### Première installation / rotation du PAT
+
+```bash
+# 1. Générer un PAT : https://github.com/settings/tokens (scopes : repo, workflow)
+# 2. Mettre à jour backend/.env (GITHUB_USER, GITHUB_TOKEN)
+# 3. Synchroniser ~/.git-credentials
+make git-creds
+# ou directement :
+scripts/setup_git_creds.sh
+```
+
+Le script régénère `~/.git-credentials` (mode 600) et active `credential.helper=store`.
+Plus aucun prompt sur `git push`.
+
+---
+
 ## 5. Branches & CI
 
 - `main` = dernier état stable.

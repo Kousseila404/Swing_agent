@@ -74,6 +74,9 @@ redeploy: ## Restart systemd swing-api.service (nécessite sudo)
 install-dev: ## (Ré)installe les dev deps dans le venv
 	$(PY) -m pip install -r $(BACKEND)/requirements-dev.txt
 
+git-creds: ## Régénère ~/.git-credentials depuis backend/.env (après rotation PAT)
+	$(ROOT)/scripts/setup_git_creds.sh
+
 clean: ## Supprime caches Python + frontend dist
 	find $(BACKEND) -type d -name __pycache__ -prune -exec rm -rf {} +
 	rm -rf $(BACKEND)/.pytest_cache $(FRONTEND)/dist $(BACKEND)/coverage.xml
