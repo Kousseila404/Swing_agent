@@ -21,7 +21,6 @@ import httpx
 import config
 from modules.log import logger
 
-
 # Client httpx persistant pour éviter la réouverture TCP/TLS à chaque alerte.
 # Sur un cycle tracker normal (~1-3 closes Telegram en rafale), on économise
 # ~100-200 ms de handshake par message. Le Client httpx est thread-safe.

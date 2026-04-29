@@ -6,13 +6,12 @@ cause de ev_to_ebitda et current_ratio (non applicables structurellement).
 from __future__ import annotations
 
 from modules.sector_metrics._scoring import (
+    _MIN_DATA_QUALITY,
     _TITAN_SCORING_FIELDS,
     _TITAN_SCORING_FIELDS_FINANCIALS,
     _compute_data_quality,
     _fields_for_sector,
-    _MIN_DATA_QUALITY,
 )
-
 
 # ── _fields_for_sector ─────────────────────────────────────────────────────
 

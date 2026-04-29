@@ -32,9 +32,10 @@ from __future__ import annotations
 
 import gzip
 import json
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from modules import api_core
 from modules.log import logger
@@ -257,8 +258,9 @@ def _cli_snapshot() -> int:
     """Snapshot manuel — lit l'univers actuel + scoring + macro et persiste.
     Utilisé par le cron quotidien (run_titan.sh).
     """
-    from modules.sector_metrics import get_scored_universe
     import json as _json
+
+    from modules.sector_metrics import get_scored_universe
 
     scored = get_scored_universe()
     if not scored:

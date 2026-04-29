@@ -10,7 +10,7 @@ Couvre :
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -146,7 +146,7 @@ def test_update_status_invalid_target_raises(isolated_proposals):
 
 def test_expire_pending_marks_overdue(isolated_proposals):
     # Crée une proposition déjà expirée (expires_at dans le passé).
-    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    past = datetime.now(UTC) - timedelta(hours=1)
     past_iso = past.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     p = _mk("AAPL")
     p.expires_at = past_iso
@@ -201,7 +201,7 @@ def test_enqueue_accept_ticker_vetoed_before_cooldown(isolated_proposals, monkey
 
     # Manuel : backdate le decided_at à 10 jours.
     data = json.loads(isolated_proposals[0].read_text())
-    old_iso = (datetime.now(timezone.utc) - timedelta(days=10)).replace(
+    old_iso = (datetime.now(UTC) - timedelta(days=10)).replace(
         microsecond=0,
     ).isoformat().replace("+00:00", "Z")
     for item in data:

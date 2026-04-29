@@ -32,17 +32,15 @@ import time
 from dataclasses import asdict, fields
 from typing import Any
 
-from modules import api_core
-from modules.data_validation import sanitize_ratios
-from modules.log import logger
-
 from data_providers.base import (
     FinancialRatios,
     FundamentalProviderBase,
     ProviderError,
     ProviderQuotaExceeded,
 )
-
+from modules import api_core
+from modules.data_validation import sanitize_ratios
+from modules.log import logger
 
 # ─────────────────────────────────────────────────────────────────
 # CHEMINS + CONSTANTES

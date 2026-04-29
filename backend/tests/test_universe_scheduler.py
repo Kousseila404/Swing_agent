@@ -15,7 +15,6 @@ from modules.universe_scheduler import (
     select_refresh_candidates,
 )
 
-
 NOW = datetime(2026, 4, 20, 12, 0, 0)
 
 

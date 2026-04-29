@@ -11,7 +11,6 @@ from data_providers.yfinance_provider import (
     _recover_market_cap,
 )
 
-
 # ── _recover_dividend_yield ─────────────────────────────────────────────────
 
 def test_div_yield_raw_in_bounds_returned_as_is():

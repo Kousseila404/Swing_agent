@@ -189,9 +189,10 @@ def _benchmark_return(start: date, end: date, ticker: str = "SPY") -> float | No
     Fail-open : retourne None si yfinance KO (pas bloquant pour le backtest).
     """
     try:
-        import yfinance as yf
         # +1 jour de buffer à la fin pour garantir le close disponible.
         from datetime import timedelta
+
+        import yfinance as yf
         df = yf.download(
             ticker,
             start=start.isoformat(),
@@ -243,7 +244,7 @@ def run_titan_top_n(
         raise ValueError("Snapshots illisibles")
 
     periods: list[PeriodResult] = []
-    for (d0, s0), (d1, s1) in zip(snapshots[:-1], snapshots[1:]):
+    for (_, s0), (_, s1) in zip(snapshots[:-1], snapshots[1:], strict=True):
         period = _compute_period(s0, s1, top_n)
         periods.append(period)
 

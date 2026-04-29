@@ -37,7 +37,7 @@ jobs:
         # Hard fail : tout module ajouté à la section [mypy-modules.X] strict
         # de mypy.ini doit rester sans erreur. Élargir la liste à mesure que
         # les modules sont nettoyés.
-        run: mypy --config-file mypy.ini modules/support_score.py
+        run: mypy --config-file mypy.ini modules/portfolio/_utils.py
 
       - name: Pytest (avec seuil coverage 55%)
         run: pytest tests/ --cov=modules --cov-config=.coveragerc --cov-report=term --cov-report=xml

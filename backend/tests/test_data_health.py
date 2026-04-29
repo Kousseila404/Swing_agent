@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
 import api
-from modules import api_core, fundamentals_cache as fc
+from modules import api_core
+from modules import fundamentals_cache as fc
 from modules.yf_circuit_breaker import yf_breaker
 
 
@@ -29,7 +30,7 @@ def reset_breaker():
 def isolated_universe(tmp_path, monkeypatch):
     """Crée un universe.json synthétique avec mix de tickers complets/incomplets."""
     p = tmp_path / "universe.json"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fresh = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     stale = (now - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
     very_stale = (now - timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%SZ")

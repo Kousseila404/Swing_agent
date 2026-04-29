@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 _LATEST_PRICE_TTL_SECONDS = 300.0
 _latest_price_cache: dict[
-    tuple[str, ...], tuple[float, dict[str, "LatestPrice"]]
+    tuple[str, ...], tuple[float, dict[str, LatestPrice]]
 ] = {}
 _latest_price_cache_lock = threading.Lock()
 
@@ -39,9 +39,9 @@ _momentum_live_cache_lock = threading.Lock()
 
 
 def fetch_latest_prices_cached(
-    market_provider: "MarketDataProviderBase | None",
+    market_provider: MarketDataProviderBase | None,
     tickers: list[str],
-) -> dict[str, "LatestPrice"]:
+) -> dict[str, LatestPrice]:
     """Snapshot des prix live pour `tickers` juste avant sizing.
 
     Retourne {ticker: LatestPrice} — si pas de provider ou quota provider
@@ -69,7 +69,7 @@ def fetch_latest_prices_cached(
 
 
 def refresh_momentum_live_cached(
-    momentum_provider: "MarketDataProviderBase | None",
+    momentum_provider: MarketDataProviderBase | None,
     tickers: list[str],
 ) -> dict[str, dict[str, float | None]]:
     """Recharge (return_pct, volatility_pct) via

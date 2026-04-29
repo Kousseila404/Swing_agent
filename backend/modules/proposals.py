@@ -21,10 +21,10 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Iterable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from filelock import FileLock
 
@@ -142,7 +142,7 @@ class Proposal:
 # ─────────────────────────────────────────────────────────────────
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso(dt: datetime) -> str:
