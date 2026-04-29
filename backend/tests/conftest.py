@@ -12,6 +12,23 @@ if str(_BACKEND_ROOT) not in sys.path:
 import pytest  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_universe_history(tmp_path_factory, monkeypatch):
+    """Filet de sécurité — empêche les tests qui déclenchent
+    `sector_metrics` de toucher au vrai `data/.universe_history/`.
+
+    Le scoring déclenche un hook `write_snapshot_safe()` (voir
+    `sector_metrics/__init__.py`). Sans cette isolation, n'importe quel test
+    qui appelle le scoring écrase le snapshot du jour live avec ses
+    fixtures (incident 2026-04-27).
+    """
+    from modules import universe_history as uh
+    monkeypatch.setattr(
+        uh, "HISTORY_DIR",
+        tmp_path_factory.mktemp("universe_history_isolated"),
+    )
+
+
 @pytest.fixture
 def tmp_csv(tmp_path):
     """Retourne un chemin CSV temporaire pour les tests de journal."""

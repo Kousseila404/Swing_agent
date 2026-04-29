@@ -541,3 +541,164 @@ def test_age_days_from_iso_parses_z_and_offset():
     assert _age_days_from_iso(None) is None
     assert _age_days_from_iso("not-a-date") is None
     assert _age_days_from_iso(42) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ADTV cap (liquidity gate)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_adtv_cap_clamps_position_to_max_pct_of_dollar_volume():
+    """Position notional > max_pct_of_adtv × (price × avg_volume_3m) →
+    plafonnée. Avec cap=0.5 % et ADTV=100 K shares × $100 = $10 M, le cap
+    ressort à $50 K. Une cible $80 K doit être ramenée à $50 K (500 shares)."""
+    scored = {
+        # Cible théorique: 100% × 80_000 = 80_000$. ADTV = 10 M$. Cap = 50 K$ = 500 shs.
+        "ILLIQ": {**_mk(80, 5.0, 20.0, 100.0), "avg_volume_3m": 100_000.0},
+    }
+    pm = PortfolioManager(scored, max_pct_of_adtv=0.005)
+    plan = pm.calculate_allocations(["ILLIQ"], 80_000).to_dict()
+
+    alloc = plan["allocations"]["ILLIQ"]
+    # Sans cap : 800 shares × $100 = 80 K. Avec cap : 500 shares × $100 = 50 K.
+    assert alloc["shares"] == 500
+    assert alloc["amount_usd"] == pytest.approx(50_000.0, abs=1.0)
+
+    diag = plan["diagnostics"]["adtv_cap"]
+    assert diag["max_pct_of_adtv"] == 0.005
+    assert diag["n_capped"] == 1
+    assert diag["capped"][0]["ticker"] == "ILLIQ"
+    assert diag["capped"][0]["original_shares"] == 800.0
+
+
+def test_adtv_cap_disabled_with_none_does_not_clamp():
+    """max_pct_of_adtv=None → pas de cap appliqué, sizing nominal."""
+    scored = {
+        "ILLIQ": {**_mk(80, 5.0, 20.0, 100.0), "avg_volume_3m": 100_000.0},
+    }
+    pm = PortfolioManager(scored, max_pct_of_adtv=None)
+    plan = pm.calculate_allocations(["ILLIQ"], 80_000).to_dict()
+
+    assert plan["allocations"]["ILLIQ"]["shares"] == 800
+    assert plan["diagnostics"]["adtv_cap"]["n_capped"] == 0
+
+
+def test_adtv_cap_fail_open_when_avg_volume_missing():
+    """Si avg_volume_3m absent du scored row, on n'applique pas le cap
+    (fail-open : universe a déjà filtré sur market_cap > 10 B)."""
+    scored = {
+        "NOVOL": _mk(80, 5.0, 20.0, 100.0),  # pas d'avg_volume_3m
+    }
+    pm = PortfolioManager(scored, max_pct_of_adtv=0.005)
+    plan = pm.calculate_allocations(["NOVOL"], 80_000).to_dict()
+
+    # Sizing nominal : 800 shares.
+    assert plan["allocations"]["NOVOL"]["shares"] == 800
+    assert plan["diagnostics"]["adtv_cap"]["n_capped"] == 0
+
+
+def test_adtv_cap_does_not_clamp_when_position_below_threshold():
+    """Position < cap → aucun changement, n_capped=0."""
+    scored = {
+        # Cible: 5 K$. ADTV = 10 M$. Cap = 50 K$. Position 5K << 50K → pas de cap.
+        "LIQ": {**_mk(80, 5.0, 20.0, 100.0), "avg_volume_3m": 100_000.0},
+    }
+    pm = PortfolioManager(scored, max_pct_of_adtv=0.005)
+    plan = pm.calculate_allocations(["LIQ"], 5_000).to_dict()
+
+    assert plan["allocations"]["LIQ"]["shares"] == 50
+    assert plan["diagnostics"]["adtv_cap"]["n_capped"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HRP — Hierarchical Risk Parity (López de Prado 2016)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _FakeMarketProvider:
+    """Provider de tests : génère des séries journalières synthétiques.
+
+    Le constructeur accepte un mapping {ticker: factor_seed} où des tickers
+    qui partagent la même seed reçoivent des séries fortement corrélées.
+    """
+    name = "fake-hrp"
+
+    def __init__(self, seed_map: dict[str, int]):
+        import numpy as np
+        self._seed_map = seed_map
+        self._np = np
+
+    def get_daily_history_batch(self, tickers, days):
+        import pandas as pd
+        np = self._np
+        dates = pd.date_range("2025-01-01", periods=days)
+        out = {}
+        # Construit un facteur de marché par seed unique.
+        unique_seeds = sorted(set(self._seed_map.values()))
+        factors = {}
+        for s in unique_seeds:
+            rng = np.random.default_rng(s)
+            factors[s] = np.cumprod(1 + rng.normal(0.001, 0.02, days))
+        for t in tickers:
+            seed = self._seed_map.get(t)
+            if seed is None:
+                continue
+            rng = np.random.default_rng(seed * 1000 + hash(t) % 1000)
+            idiosyncratic = np.cumprod(1 + rng.normal(0, 0.003, days))
+            out[t] = pd.Series(100 * factors[seed] * idiosyncratic, index=dates)
+        return out
+
+
+def test_hrp_clusters_correlated_tickers_and_reduces_their_share():
+    """HRP : 4 tickers très corrélés (même facteur) doivent recevoir au total
+    moins de poids que 4 tickers indépendants. Risk-parity 1/σ ignorerait ça."""
+    # 4 corrélés (seed=1) + 4 décorrélés (seeds 10/11/12/13)
+    seed_map = {
+        "TECH1": 1, "TECH2": 1, "TECH3": 1, "TECH4": 1,
+        "UTIL": 10, "HEALTH": 11, "FIN": 12, "CONS": 13,
+    }
+    scored = {t: _mk(80, 5.0, 20.0, 100.0) for t in seed_map}
+    provider = _FakeMarketProvider(seed_map)
+
+    pm = PortfolioManager(scored, market_provider=provider, weighting_method="hrp")
+    plan = pm.calculate_allocations(list(scored), 100_000).to_dict()
+
+    diag = plan["diagnostics"]["hrp"]
+    assert diag["applied"] is True
+    assert plan["diagnostics"]["weight_method"] == "hrp"
+
+    alloc = plan["allocations"]
+    tech_total = sum(alloc[t]["weight_pct"] for t in ["TECH1", "TECH2", "TECH3", "TECH4"])
+    other_total = sum(alloc[t]["weight_pct"] for t in ["UTIL", "HEALTH", "FIN", "CONS"])
+
+    # Les 4 TECH corrélés doivent ensemble peser nettement moins que les 4 autres.
+    # (En 1/σ pur ils auraient 50 %.)
+    assert tech_total < other_total, (
+        f"HRP devrait shrinker les corrélés : TECH={tech_total:.1f}% vs OTHER={other_total:.1f}%"
+    )
+    # Sanity : somme à 100 %.
+    assert abs((tech_total + other_total) - 100.0) < 0.01
+
+
+def test_hrp_falls_back_to_risk_parity_when_no_market_provider():
+    """HRP sans market_provider → fallback transparent vers risk_parity."""
+    scored = {
+        "A": _mk(80, 5.0, 10.0, 100.0),
+        "B": _mk(80, 5.0, 20.0, 100.0),
+        "C": _mk(80, 5.0, 40.0, 100.0),
+        "D": _mk(80, 5.0, 25.0, 100.0),
+    }
+    pm = PortfolioManager(scored, market_provider=None, weighting_method="hrp")
+    plan = pm.calculate_allocations(list(scored), 100_000).to_dict()
+
+    # HRP applied=False, fallback_reason explicite.
+    diag = plan["diagnostics"]["hrp"]
+    assert diag["applied"] is False
+    assert "no_market_provider" in diag.get("fallback_reason", "")
+    # Le poids effectif doit ressembler à du 1/σ (le moins volatil dominant).
+    assert plan["allocations"]["A"]["weight_pct"] > plan["allocations"]["C"]["weight_pct"]
+
+
+def test_hrp_invalid_method_raises():
+    """weighting_method invalide → ValueError au constructeur (fail-fast)."""
+    scored = {"A": _mk(80, 5.0, 10.0, 100.0)}
+    with pytest.raises(ValueError, match="weighting_method"):
+        PortfolioManager(scored, weighting_method="markowitz")

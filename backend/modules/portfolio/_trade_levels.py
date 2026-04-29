@@ -35,12 +35,17 @@ _FALLBACK_TP_PCT = 0.15   # +15 %
 # Bornes de sanité — calibrées pour horizon LT (30 j ouvrés). Évite des SL/TP
 # aberrants sur un outlier de vol (ex: penny stock σ annualisée 300 % → SL
 # à −100 % = absurde) tout en laissant respirer un hold 1-3 mois.
-# Les bornes préservent le RR 2:1 visé (ratio MAX_TP/MAX_SL = 2.5, ratio MIN = 2.5) ;
-# léger désalignement acceptable car MIN/MAX ne sont atteints que sur queues.
+# Recalibrage 2026-04-27 : SL max élargi à −30 %, TP max +100 %.
+# Recalibrage 2026-04-29 (P3 transition) : TP max élargi à +200 % pour ne plus
+# plafonner les vrais winners power-law (un name TITAN 90 sur 1-3 mois peut
+# délivrer +150 %). Filet conservé contre les outliers de vol (penny σ 300 %
+# → tp brut +412 % serait absurde). Pas de retrait complet du plafond tant que
+# thesis_stop n'a pas 20+ trades clos pour valider la sortie fondamentale.
+# Le ratio R/R cible reste 2:1 sur la zone non-clampée (k_tp/k_sl = 4/2).
 _MIN_SL_PCT = 0.04   # −4 % (stop minimum — un hold 2 mois mérite +3 % de corde)
-_MAX_SL_PCT = 0.20   # −20 % (stop max — au-delà, risque position trop élevé)
+_MAX_SL_PCT = 0.30   # −30 % (garde-fou catastrophe LT — pas anti-bruit)
 _MIN_TP_PCT = 0.10   # +10 % (pas de TP ridicule sur un LT)
-_MAX_TP_PCT = 0.50   # +50 % (permet aux vraies convictions de cuire)
+_MAX_TP_PCT = 2.00   # +200 % (filet anti-outlier vol, mais ne plafonne plus les vrais winners)
 
 
 def suggest_trade_levels(

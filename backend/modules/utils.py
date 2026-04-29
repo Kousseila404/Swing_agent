@@ -85,6 +85,7 @@ CSV_SCHEMA = [
     "Exit_Date",       # Horodatage de clôture   vide jusqu'à clôture par tracker
     "Last_Alert_Pct",  # Dernier % de gain ayant déclenché une alerte (2.5/5.0/10.0)
     "Last_TS_Update",  # Date YYYY-MM-DD de la dernière mise à jour trailing stop (1 fois/jour max)
+    "Last_TS_Mode",    # Audit S2.3 — mode du dernier TS appliqué : "ATR" | "PCT" | "" (jamais activé)
     "Order_ID",        # ID ordre broker (PAPER-xxx pour PaperBroker, UUID Alpaca pour live)
     "Signal",          # Type de signal   ex: "CHANDELIER_MOMENTUM" | "MOMENTUM_DIP" | "MEAN_REVERSION"
     "Sector",          # ETF proxy secteur ex: "SOXX" | "XLF" | "XLE" (attribution sectorielle)

@@ -179,19 +179,27 @@ def test_lot3_sector_relative_levels_playing_field():
     """Un secteur 'low ROE par nature' (Utilities ROE ~10%) doit pouvoir
     placer son meilleur élément au top, même si en absolu ses ROE sont bas
     vs Tech."""
+    # Audit S3.2 — _MIN_SECTOR_SIZE_FOR_RELATIVE relevé de 5 à 8 ; il faut
+    # au moins 8 tickers par secteur pour que le rank intra-secteur s'applique.
     universe = _build_universe([
-        # Tech : ROE haut par nature (5 tickers, le plus petit nb pour rank intra)
+        # Tech : ROE haut par nature (8 tickers)
         ("T1", "Technology", {"roe": 0.30}),
         ("T2", "Technology", {"roe": 0.40}),
         ("T3", "Technology", {"roe": 0.50}),
         ("T4", "Technology", {"roe": 0.60}),
         ("T5", "Technology", {"roe": 0.70}),
-        # Utilities : ROE bas par nature (5 tickers)
+        ("T6", "Technology", {"roe": 0.65}),
+        ("T7", "Technology", {"roe": 0.55}),
+        ("T8", "Technology", {"roe": 0.45}),
+        # Utilities : ROE bas par nature (8 tickers)
         ("U1", "Utilities",  {"roe": 0.05}),
         ("U2", "Utilities",  {"roe": 0.07}),
         ("U3", "Utilities",  {"roe": 0.09}),
         ("U4", "Utilities",  {"roe": 0.11}),
         ("U5", "Utilities",  {"roe": 0.15}),  # top de son secteur
+        ("U6", "Utilities",  {"roe": 0.06}),
+        ("U7", "Utilities",  {"roe": 0.08}),
+        ("U8", "Utilities",  {"roe": 0.10}),
     ])
     scored = _score_universe(universe)
     # En sector-relative, U5 (top des Utilities) doit avoir un Quality_score
@@ -211,22 +219,24 @@ def test_lot3_sector_relative_levels_playing_field():
 def test_lot3_small_sector_falls_back_to_global():
     """Si un secteur a < _MIN_SECTOR_SIZE_FOR_RELATIVE tickers, fallback global."""
     from modules.sector_metrics._scoring import _percentile_rank_by_sector
-    # 3 tickers en Energy (sous le seuil 5) + 6 en Tech (au-dessus)
+    # 3 tickers en Energy (sous le seuil 8) + 9 en Tech (au-dessus)
     values = {
         "E1": 0.10, "E2": 0.15, "E3": 0.20,
         "T1": 0.30, "T2": 0.40, "T3": 0.50,
         "T4": 0.60, "T5": 0.70, "T6": 0.80,
+        "T7": 0.55, "T8": 0.45, "T9": 0.35,
     }
     sectors = {
         "E1": "Energy", "E2": "Energy", "E3": "Energy",
         "T1": "Technology", "T2": "Technology", "T3": "Technology",
         "T4": "Technology", "T5": "Technology", "T6": "Technology",
+        "T7": "Technology", "T8": "Technology", "T9": "Technology",
     }
     out = _percentile_rank_by_sector(values, sectors, higher_is_better=True)
     # E1/E2/E3 fallback global → leurs valeurs (0.10/0.15/0.20) sont les
     # 3 plus basses sur 9 → percentile-rank ~5/16/27
     assert out["E1"] < 30, "E1 (smallest sector, lowest value) should be low globally"
-    # T6 est le max global → ~94
+    # T6 est le max global → top quartile
     assert out["T6"] > 80, "T6 (largest value) should be top globally"
 
 
@@ -281,6 +291,7 @@ def test_lot4_low_dq_penalized():
         ev_to_ebitda=None, debt_to_equity=None, current_ratio=None,
     )
     # Need at least 5 tickers in sector for sector-relative ranking
+    # Audit S3.2 — secteur ≥ 8 pour exercer le rank intra-secteur.
     universe = {
         "SPARSE": sparse,
         "T1": _mk_ticker("T1", "Technology"),
@@ -288,16 +299,21 @@ def test_lot4_low_dq_penalized():
         "T3": _mk_ticker("T3", "Technology"),
         "T4": _mk_ticker("T4", "Technology"),
         "T5": _mk_ticker("T5", "Technology"),
+        "T6": _mk_ticker("T6", "Technology"),
+        "T7": _mk_ticker("T7", "Technology"),
+        "T8": _mk_ticker("T8", "Technology"),
     }
     scored = _score_universe(universe)
     # Lot 12 : 11 fields total, SPARSE en a 3 None → 8/11 ≈ 0.727
     assert 0.70 <= scored["SPARSE"]["data_quality"] <= 0.75
-    # Coef = 0.5 + 0.5 × 0.727 ≈ 0.864
-    assert 0.83 <= scored["SPARSE"]["data_quality_coef"] <= 0.90
-    # Et composite final < raw (de quelques %)
+    # Audit S3.1 — _DQ_MIN_COEF=0.95 (au lieu de 0.5) : pénalité douce car DQ
+    # est déjà filtrée par le gate hard `_MIN_DATA_QUALITY=0.70`. Coef = 0.95
+    # + 0.05 × 0.727 ≈ 0.986.
+    assert 0.98 <= scored["SPARSE"]["data_quality_coef"] <= 0.995
+    # Et composite final ≤ raw (la pénalité est ténue).
     assert (
         scored["SPARSE"]["titan_composite_score"]
-        < scored["SPARSE"]["titan_composite_raw"]
+        <= scored["SPARSE"]["titan_composite_raw"]
     )
 
 
@@ -482,10 +498,13 @@ def test_lot8_f_score_no_data_neutral():
 
 
 def test_lot8_pillar_weights_sum_to_one_with_piotroski():
-    """Lot 12 : 7-pilier full mode + 6-pilier no-sentiment mode doivent sommer à 1."""
+    """Lot 17 : 9-pilier full mode + 8-pilier no-sentiment mode doivent sommer à 1.
+    Pilier Insider ajouté."""
     from modules.sector_metrics._scoring import (
         _W_TITAN_G_NO_SENTIMENT,
         _W_TITAN_GROWTH,
+        _W_TITAN_IN_NO_SENTIMENT,
+        _W_TITAN_INSIDER,
         _W_TITAN_M_NO_SENTIMENT,
         _W_TITAN_MOMENTUM,
         _W_TITAN_P_NO_SENTIMENT,
@@ -493,19 +512,22 @@ def test_lot8_pillar_weights_sum_to_one_with_piotroski():
         _W_TITAN_Q_NO_SENTIMENT,
         _W_TITAN_QUALITY,
         _W_TITAN_R_NO_SENTIMENT,
+        _W_TITAN_REVISIONS,
         _W_TITAN_RISK,
+        _W_TITAN_RV_NO_SENTIMENT,
         _W_TITAN_SENTIMENT,
         _W_TITAN_V_NO_SENTIMENT,
         _W_TITAN_VALUE,
     )
     full = (_W_TITAN_QUALITY + _W_TITAN_VALUE + _W_TITAN_RISK
             + _W_TITAN_SENTIMENT + _W_TITAN_MOMENTUM + _W_TITAN_PIOTROSKI
-            + _W_TITAN_GROWTH)
-    assert abs(full - 1.0) < 1e-9, f"7-pillar weights sum = {full}"
+            + _W_TITAN_GROWTH + _W_TITAN_REVISIONS + _W_TITAN_INSIDER)
+    assert abs(full - 1.0) < 1e-9, f"9-pillar weights sum = {full}"
     no_sent = (_W_TITAN_Q_NO_SENTIMENT + _W_TITAN_V_NO_SENTIMENT
                + _W_TITAN_R_NO_SENTIMENT + _W_TITAN_M_NO_SENTIMENT
-               + _W_TITAN_P_NO_SENTIMENT + _W_TITAN_G_NO_SENTIMENT)
-    assert abs(no_sent - 1.0) < 1e-9, f"6-pillar (no sentiment) sum = {no_sent}"
+               + _W_TITAN_P_NO_SENTIMENT + _W_TITAN_G_NO_SENTIMENT
+               + _W_TITAN_RV_NO_SENTIMENT + _W_TITAN_IN_NO_SENTIMENT)
+    assert abs(no_sent - 1.0) < 1e-9, f"8-pillar (no sentiment) sum = {no_sent}"
 
 
 def test_lot8_payload_exposes_piotroski():

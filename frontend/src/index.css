@@ -18,6 +18,73 @@
   --text-muted: #94a3b8;
   --glass-shadow: 0 8px 40px rgba(0,0,0,0.5);
   --glass-blur: blur(16px);
+  /* Aliases pour code récent (BriefingPage, ProposalsPage). */
+  --text: var(--text-main);
+  --text-primary: var(--text-main);
+  --bg-tertiary: rgba(255,255,255,0.03);
+  --border: var(--panel-border);
+  --accent: var(--accent-primary);
+  /* Tokens densité — overridés par [data-density="compact"]. */
+  --row-py: 0.875rem;
+  --row-px: 1rem;
+  --nav-py: 0.8rem;
+  --nav-fs: 0.95rem;
+  --card-pad: 1.25rem;
+}
+
+/* ── THEME LIGHT ── */
+[data-theme="light"] {
+  --bg-dark: #f5f7fb;
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --panel-border: rgba(15, 23, 42, 0.10);
+  --accent-primary: #2563eb;
+  --accent-secondary: #7c3aed;
+  --success: #047857;
+  --danger: #dc2626;
+  --warning: #b45309;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --glass-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
+  --bg-tertiary: rgba(15,23,42,0.04);
+}
+[data-theme="light"] body {
+  background-image:
+    radial-gradient(ellipse at 5% 40%, rgba(37,99,235,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 95% 20%, rgba(124,58,237,0.05) 0%, transparent 50%) !important;
+}
+[data-theme="light"] .scan-table th { background: rgba(15,23,42,0.04); }
+[data-theme="light"] .scan-row:hover { background: rgba(15,23,42,0.04); }
+[data-theme="light"] .nav-item:hover { background: rgba(15,23,42,0.05); }
+[data-theme="light"] .nav-item.active {
+  background: linear-gradient(90deg, rgba(37,99,235,0.10), transparent);
+}
+[data-theme="light"] .as-ticker-btn:hover,
+[data-theme="light"] .as-sector-header:hover,
+[data-theme="light"] .as-sector-header.open,
+[data-theme="light"] .as-ticker-chip:hover {
+  background: rgba(15,23,42,0.05);
+}
+[data-theme="light"] .as-ticker-chip.active,
+[data-theme="light"] .as-ticker-btn.active {
+  background: rgba(37,99,235,0.10);
+}
+
+/* ── DENSITY COMPACT ── */
+[data-density="compact"] {
+  --row-py: 0.45rem;
+  --row-px: 0.7rem;
+  --nav-py: 0.55rem;
+  --nav-fs: 0.88rem;
+  --card-pad: 0.85rem;
+}
+[data-density="compact"] .scan-table th,
+[data-density="compact"] .scan-table td {
+  padding: var(--row-py) var(--row-px);
+}
+[data-density="compact"] .scan-table { font-size: 0.82rem; }
+[data-density="compact"] .nav-item {
+  padding: var(--nav-py) 0.85rem;
+  font-size: var(--nav-fs);
 }
 
 /* ── RESET ── */
@@ -346,13 +413,22 @@ body {
 .scan-table th {
   padding: 0.875rem 1rem; text-align: left; font-weight: 600; font-size: 0.8rem;
   text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);
-  border-bottom: 1px solid var(--panel-border); background: rgba(0,0,0,0.2);
-  position: sticky; top: 0; z-index: 1;
+  border-bottom: 1px solid var(--panel-border);
+  /* Sticky header (Tier C #2) — fond opaque pour ne PAS laisser passer les
+     lignes par-dessous au scroll, et shadow subtile pour matérialiser la
+     séparation. backdrop-filter en complément si supporté. */
+  background: var(--panel-bg, #1f2937);
+  position: sticky; top: 0; z-index: 2;
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.35);
 }
 .scan-table td { padding: 0.875rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
 .scan-row { transition: background 0.15s; }
 .scan-row:hover { background: rgba(255,255,255,0.025); }
 .scan-row:last-child td { border-bottom: none; }
+
+/* Keyboard cursor (j/k navigation via TableKeyNav) */
+.kbd-cursor { background: rgba(59,130,246,0.12) !important;
+              box-shadow: inset 3px 0 0 0 var(--accent-primary); }
 
 .scan-ticker-cell { display: flex; align-items: center; gap: 0.75rem; }
 .scan-ticker-logo { font-size: 1.25rem; }

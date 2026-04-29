@@ -44,11 +44,11 @@ def test_invalid_price_returns_none():
 
 
 def test_clamp_high_volatility():
-    """Penny stock σ=300 % → sl_pct brut ≈ 207 % doit être clampé à 20 %."""
+    """Penny stock σ=300 % → sl_pct brut ≈ 207 % doit être clampé à 30 %."""
     r = suggest_trade_levels(10.0, 300.0)
     assert r["method"] == "sigma_scaled"
-    assert r["sl_pct"] == 20.0   # _MAX_SL_PCT (LT)
-    assert r["tp_pct"] == 50.0   # _MAX_TP_PCT (LT)
+    assert r["sl_pct"] == 30.0    # _MAX_SL_PCT (LT, recalibré 2026-04-27)
+    assert r["tp_pct"] == 200.0   # _MAX_TP_PCT (LT P3, recalibré 2026-04-29)
 
 
 def test_clamp_low_volatility():

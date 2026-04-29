@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response, Security
 from filelock import FileLock
 
 import config
@@ -25,6 +25,7 @@ from modules.api_schemas import (
     PerformanceMetricsResponse,
     PortfolioResponse,
 )
+from modules.backfill_entry_scores import backfill_journal
 from modules.duckdb_journal import journal_mtime, read_journal_df
 from modules.log import logger
 
@@ -562,5 +563,21 @@ def _empty_recommendations_payload(
             "severe_threshold_hours":  48.0,
         },
     }
+
+
+@router.post("/portfolio/backfill_entry_scores")
+def post_backfill_entry_scores(
+    dry_run: bool = True,
+    _auth: None = Security(api_core.require_auth),
+) -> dict[str, Any]:
+    """Backfill rétroactif des *_Entry pour les positions OPEN sans entry scores.
+
+    Lookup `universe_history` autour de la date d'entrée et populate
+    Titan_Score_Entry / Quality_Entry / etc. depuis la snapshot la plus proche.
+
+    Par défaut `dry_run=True` (juste retourne le diff). Pass `?dry_run=false`
+    pour écrire dans le CSV (backup automatique en .archive/).
+    """
+    return backfill_journal(dry_run=dry_run, sync_duckdb=True)
 
 

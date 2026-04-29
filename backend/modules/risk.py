@@ -130,21 +130,45 @@ def regime_adjusted_risk(
     """
     Ajuste le pourcentage de risque par trade selon le régime macro et le VIX.
 
-    Règles :
-    - CRASH_PANIC : 0.0 (aucun trade)
-    - BEAR_MARKET : 50% de la taille normale
-    - VIX > 25    : 75% de la taille normale
-    - VIX > 20    : 90% de la taille normale
-    - BULL_MARKET calme (VIX < 20) : 100%
+    Audit S2.5 (2026-04-27) — alignement sur `config.VIX_BULL_MAX` (=30) et
+    `config.VIX_PANIC_MIN` (=35) pour cohérence avec macro_engine. Les seuils
+    20/25 hardcodés étaient désynchronisés : avec VIX_BULL_MAX=30, un VIX=29
+    déclenchait 0.75× alors que le régime restait officiellement BULL.
+
+    Règles (BULL_MARKET seulement, scaling progressif jusqu'à VIX_BULL_MAX) :
+    - CRASH_PANIC          : 0.0
+    - BEAR_MARKET          : 0.5
+    - BULL_MARKET — VIX scaling :
+        VIX ≤ low_calm        → 1.00  (régime calme)
+        low_calm < VIX ≤ mid  → 0.90
+        mid < VIX ≤ high      → 0.75
+        VIX > high            → 0.60  (proche du seuil PANIC)
+
+    low_calm/mid/high sont calculés depuis `config.VIX_BULL_MAX` :
+        low_calm = 0.50 × VIX_BULL_MAX  (15 si max=30)
+        mid      = 0.67 × VIX_BULL_MAX  (20 si max=30)
+        high     = 0.83 × VIX_BULL_MAX  (25 si max=30)
     """
     if regime == "CRASH_PANIC":
         return 0.0
     if regime == "BEAR_MARKET":
         return base_risk_pct * 0.5
-    # BULL_MARKET — scale by VIX
-    if vix > 25.0:
+
+    # BULL_MARKET — scaling adossé à VIX_BULL_MAX (default 30 si config absent).
+    try:
+        import config
+        vix_bull_max = float(getattr(config, "VIX_BULL_MAX", 30.0))
+    except Exception:
+        vix_bull_max = 30.0
+    low_calm = 0.50 * vix_bull_max
+    mid      = 0.67 * vix_bull_max
+    high     = 0.83 * vix_bull_max
+
+    if vix > high:
+        return base_risk_pct * 0.60
+    if vix > mid:
         return base_risk_pct * 0.75
-    if vix > 20.0:
+    if vix > low_calm:
         return base_risk_pct * 0.90
     return base_risk_pct
 

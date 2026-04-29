@@ -886,6 +886,51 @@
         ]
       }
     },
+    "/api/proposals/manual": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Manual Proposal",
+        "description": "Crée une proposition manuelle pour un ticker (bypass cron auto_proposer).\n\nUse case : la page Univers a un ticker en TITAN ≥ 70 que l'utilisateur veut\nmettre dans la file d'attente d'achat sans attendre le cron quotidien (ex.\nupgrade silencieuse détectée via le drift Δ7j).\n\nRéutilise le pipeline existant :\n  - prix + vol depuis `sector_metrics.get_scored_universe()` (cache mtime)\n  - SL/TP via `suggest_trade_levels` (σ-adaptive Long-Term)\n  - cooldowns veto/win et dédup pending appliqués automatiquement par\n    `proposals.enqueue_batch` (un ticker pending → 409 silencieux)\n\nRéponse :\n  - `ok=True` + `proposal` si insertion réussie\n  - `ok=False` + `reason` si dédup ou échec de calcul des niveaux",
+        "operationId": "manual_proposal_api_proposals_manual_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/proposals/approve_batch": {
       "post": {
         "tags": [
@@ -1093,6 +1138,51 @@
         }
       }
     },
+    "/api/backtest/quick": {
+      "post": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Backtest Quick",
+        "description": "Lance un backtest TITAN sur la whitelist `tickers` (vue filtrée UI).\n\nExigences minimales :\n  - ≥ 2 snapshots dans `universe_history` (sinon on ne peut pas calculer\n    une période de rebalance)\n  - ≥ `top_n` tickers dans la whitelist (sinon ranking dégénéré)\n\nRetourne {periods, stats, equity_curve, weights_final, n_skipped_periods}\n+ meta {n_tickers_input, n_snapshots, benchmark_return}.",
+        "operationId": "backtest_quick_api_backtest_quick_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickBacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/data_health": {
       "get": {
         "tags": [
@@ -1136,6 +1226,1087 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/audit/full": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Get Audit Full",
+        "description": "Snapshot complet pour la page Audit React.\n\nAgrège backtest TITAN top-N + WFO + registry delisted + historique\nsnapshots, puis construit la checklist et le verdict global\n\"TITAN bat-il le marché ?\".",
+        "operationId": "get_audit_full_api_audit_full_get",
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Si true, force le re-run du backtest (sinon cache 24h).",
+              "default": false,
+              "title": "Refresh"
+            },
+            "description": "Si true, force le re-run du backtest (sinon cache 24h)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Audit Full Api Audit Full Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delisted": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Get Delisted",
+        "description": "Registry des tickers historiquement présents dans universe.json.\n\nSortie :\n    {\n      \"n_total\":     int,        # tickers ever vu (inclut actifs)\n      \"n_delisted\":  int,        # actuellement marqués delisted\n      \"n_active\":    int,        # actuellement actifs\n      \"delisted\":    [...],      # détail des tickers retirés (trié desc)\n      \"registry_path\": str,\n    }",
+        "operationId": "get_delisted_api_delisted_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Delisted Api Delisted Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wfo": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Get Wfo Weights",
+        "description": "Dernier résultat de `python -m modules.wfo_calibration`.\n\nLit `data/wfo_weights.json` si présent. 404 si jamais exécuté.\n\nInclut une comparaison directe avec les poids prod hardcodés dans\n`sector_metrics/_scoring.py` (utile pour repérer un drift).",
+        "operationId": "get_wfo_weights_api_wfo_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Wfo Weights Api Wfo Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wfo/history": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Get Wfo History",
+        "description": "Série temporelle des runs `wfo_monitor` — utile pour grapher\nl'évolution de l'IC composite et le drift des poids dans le temps.\n\nSource : `data/wfo_history.jsonl` (1 ligne JSON par run, append-only).\n\nSortie :\n    {\n      \"n_total\":   int,     # nb total d'entrées dans le fichier\n      \"n_returned\":int,     # nb effectivement servi (≤ limit)\n      \"history\":   [...],   # entries triées chronologiquement croissant\n      \"latest\":    dict | None,  # dernière entry (le plus récent)\n      \"threshold_ic\": float,\n    }",
+        "operationId": "get_wfo_history_api_wfo_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Nombre d'entrées historiques à retourner (les plus récentes).",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Nombre d'entrées historiques à retourner (les plus récentes)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Wfo History Api Wfo History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ticker_analysis/{ticker}": {
+      "get": {
+        "tags": [
+          "ticker_analysis"
+        ],
+        "summary": "Ticker Analysis",
+        "description": "Factsheet structurée d'un ticker — 100 % données existantes, no IA.",
+        "operationId": "ticker_analysis_api_ticker_analysis__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Ticker Analysis Api Ticker Analysis  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/peers/{ticker}": {
+      "get": {
+        "tags": [
+          "peers"
+        ],
+        "summary": "Peers",
+        "operationId": "peers_api_peers__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 15,
+              "minimum": 1,
+              "default": 5,
+              "title": "N"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Peers Api Peers  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/watchlist": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Get Watchlist",
+        "operationId": "get_watchlist_api_watchlist_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Watchlist Api Watchlist Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Post Watchlist",
+        "operationId": "post_watchlist_api_watchlist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchlistAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Post Watchlist Api Watchlist Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/watchlist/{ticker}": {
+      "delete": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Delete Watchlist",
+        "operationId": "delete_watchlist_api_watchlist__ticker__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Watchlist Api Watchlist  Ticker  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notes/{ticker}": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Get Notes",
+        "operationId": "get_notes_api_notes__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Notes Api Notes  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Post Note",
+        "operationId": "post_note_api_notes__ticker__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Post Note Api Notes  Ticker  Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notes/{note_id}": {
+      "put": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Put Note",
+        "operationId": "put_note_api_notes__note_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "note_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Note Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Put Note Api Notes  Note Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Delete Note Endpoint",
+        "operationId": "delete_note_endpoint_api_notes__note_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "note_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Note Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Note Endpoint Api Notes  Note Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/titan_alerts": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Get Titan Alerts",
+        "operationId": "get_titan_alerts_api_titan_alerts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Titan Alerts Api Titan Alerts Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Post Titan Alert",
+        "operationId": "post_titan_alert_api_titan_alerts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TitanAlertCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Post Titan Alert Api Titan Alerts Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/titan_alerts/{alert_id}": {
+      "delete": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Delete Titan Alert",
+        "operationId": "delete_titan_alert_api_titan_alerts__alert_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Alert Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Titan Alert Api Titan Alerts  Alert Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/calendar": {
+      "get": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "Get Calendar",
+        "description": "Catalyseurs agrégés sur la fenêtre [today, today + days].\n\nOutput :\n  {\n    \"today\": \"2026-04-28\",\n    \"horizon_days\": 30,\n    \"events\": [\n        {date, days_delta, type, ticker?, label, source, scope},\n        ...\n    ],\n    \"scope\": {n_open: int, n_watchlist: int, n_macro: int},\n  }",
+        "operationId": "get_calendar_api_calendar_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 120,
+              "minimum": 1,
+              "default": 30,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Calendar Api Calendar Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/news/{ticker}": {
+      "get": {
+        "tags": [
+          "news"
+        ],
+        "summary": "Get News",
+        "operationId": "get_news_api_news__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 60,
+              "minimum": 1,
+              "default": 14,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get News Api News  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/news/portfolio/firehose": {
+      "get": {
+        "tags": [
+          "news"
+        ],
+        "summary": "Portfolio News Firehose",
+        "description": "News agrégées sur positions OPEN + watchlist, triées par date desc.\n\nRate-limited (cache disque 1h par ticker — voir finnhub_news). Si la\nfenêtre est large + beaucoup de tickers, le 1er appel peut prendre\njusqu'à N×1.5s ; les suivants sont cache hits instantanés.",
+        "operationId": "portfolio_news_firehose_api_news_portfolio_firehose_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1,
+              "default": 7,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "max_per_ticker",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "default": 5,
+              "title": "Max Per Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Portfolio News Firehose Api News Portfolio Firehose Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sec_filings/{ticker}": {
+      "get": {
+        "tags": [
+          "sec_filings"
+        ],
+        "summary": "Get Sec Filings",
+        "operationId": "get_sec_filings_api_sec_filings__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Sec Filings Api Sec Filings  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/monitor/preview": {
+      "get": {
+        "tags": [
+          "monitor"
+        ],
+        "summary": "Preview Alerts",
+        "description": "Dry run : scanne positions OPEN et retourne les signaux sans envoyer.",
+        "operationId": "preview_alerts_api_monitor_preview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Preview Alerts Api Monitor Preview Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/monitor/run": {
+      "post": {
+        "tags": [
+          "monitor"
+        ],
+        "summary": "Run Alerts",
+        "description": "Run réel : envoie le message Telegram s'il y a des signaux.",
+        "operationId": "run_alerts_api_monitor_run_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Alerts Api Monitor Run Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/sector_benchmark/portfolio": {
+      "get": {
+        "tags": [
+          "sector_benchmark"
+        ],
+        "summary": "Benchmark Portfolio Endpoint",
+        "description": "Pour chaque position OPEN, calcule le return depuis l'achat\n+ return de l'ETF sectoriel + alpha (delta).",
+        "operationId": "benchmark_portfolio_endpoint_api_sector_benchmark_portfolio_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Benchmark Portfolio Endpoint Api Sector Benchmark Portfolio Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sector_benchmark/{ticker}": {
+      "get": {
+        "tags": [
+          "sector_benchmark"
+        ],
+        "summary": "Benchmark Ticker Endpoint",
+        "operationId": "benchmark_ticker_endpoint_api_sector_benchmark__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "entry_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "YYYY-MM-DD",
+              "title": "Entry Date"
+            },
+            "description": "YYYY-MM-DD"
+          },
+          {
+            "name": "sector",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sector"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Benchmark Ticker Endpoint Api Sector Benchmark  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/attribution": {
+      "get": {
+        "tags": [
+          "attribution"
+        ],
+        "summary": "Get Attribution",
+        "operationId": "get_attribution_api_attribution_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Attribution Api Attribution Get"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -1809,6 +2980,75 @@
         ],
         "title": "MacroResponse"
       },
+      "ManualProposalRequest": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "target_amount_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Amount Usd"
+          },
+          "ttl_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Hours"
+          },
+          "signal": {
+            "type": "string",
+            "title": "Signal",
+            "default": "MANUAL_PUSH"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker"
+        ],
+        "title": "ManualProposalRequest",
+        "description": "Push manuel d'un ticker depuis la page Univers (Tier S #3).\nBypass auto_proposer — utile pour les overrides Watch (TITAN 70-80) avec\nsignal externe (Support ON, F-Score ≥ 7) que le cron n'aurait pas retenus.\nLes SL/TP sont calculés via suggest_trade_levels comme pour les autos."
+      },
+      "NoteCreateRequest": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "title": "NoteCreateRequest"
+      },
+      "NoteUpdateRequest": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "title": "NoteUpdateRequest"
+      },
       "PerformanceMetricsResponse": {
         "properties": {
           "capital": {
@@ -2024,6 +3264,46 @@
           "account_equity"
         ],
         "title": "PortfolioStats"
+      },
+      "QuickBacktestRequest": {
+        "properties": {
+          "tickers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Tickers"
+          },
+          "top_n": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Top N",
+            "default": 10
+          },
+          "benchmark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark",
+            "default": "SPY"
+          },
+          "weighting": {
+            "type": "string",
+            "pattern": "^(equal|score|risk_parity)$",
+            "title": "Weighting",
+            "default": "equal"
+          }
+        },
+        "type": "object",
+        "title": "QuickBacktestRequest",
+        "description": "Backtest minimaliste exposé pour la page Univers (Tier B #1).\n\nOn reste *simple* :\n  - Whitelist de tickers (la \"vue filtrée\" côté UI)\n  - top_n borné à 30 pour éviter une vue de ranking dégénérée\n  - benchmark optionnel (default SPY)\n\nPas d'override de slippage/lag — l'utilisateur expert peut toujours\nappeler `python -m modules.backtest` en CLI pour tuner finement."
       },
       "RefreshRequest": {
         "properties": {
@@ -2323,6 +3603,44 @@
         ],
         "title": "StatusResponse"
       },
+      "TitanAlertCreate": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "direction": {
+            "type": "string",
+            "pattern": "^(above|below)$",
+            "title": "Direction",
+            "default": "above"
+          },
+          "threshold": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Threshold"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "threshold"
+        ],
+        "title": "TitanAlertCreate"
+      },
       "UniverseRebuildRequest": {
         "properties": {
           "indices": {
@@ -2598,6 +3916,52 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WatchlistAddRequest": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          },
+          "target_buy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Buy"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker"
+        ],
+        "title": "WatchlistAddRequest"
       }
     },
     "securitySchemes": {

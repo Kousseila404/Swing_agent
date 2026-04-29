@@ -21,6 +21,8 @@
 ║    GET  /api/sectors                /api/sectors/{sector}        ║
 ║    GET  /api/history/snapshots      /api/history/ticker/{t}      ║
 ║    GET  /api/data_health            /api/data_health/refresh_flagged (POST) ║
+║    GET  /api/delisted               /api/wfo                     ║
+║    GET  /api/wfo/history                                         ║
 ║    GET  /api/jobs/{id}              /api/job/{id}/kill           ║
 ║    GET  /api/proposals              /api/proposals/refresh (POST) ║
 ║    POST /api/proposals/regenerate   /api/proposals/approve_batch ║
@@ -48,9 +50,10 @@ sys.path.insert(0, str(_BASE))
 from modules import api_core  # noqa: E402
 from modules.log import logger  # noqa: E402
 from routers import (  # noqa: E402
+    attribution as attribution_router,
+    audit as audit_router,
     backtest as backtest_router,
-)
-from routers import (
+    calendar as calendar_router,
     data_health as data_health_router,
 )
 from routers import (
@@ -58,8 +61,11 @@ from routers import (
 )
 from routers import (
     macro as macro_router,
-)
-from routers import (
+    monitor as monitor_router,
+    news as news_router,
+    peers as peers_router,
+    sec_filings as sec_filings_router,
+    sector_benchmark as sector_benchmark_router,
     portfolio as portfolio_router,
 )
 from routers import (
@@ -70,12 +76,12 @@ from routers import (
 )
 from routers import (
     system as system_router,
-)
-from routers import (
+    ticker_analysis as ticker_analysis_router,
     trades as trades_router,
 )
 from routers import (
     universe as universe_router,
+    watchlist as watchlist_router,
 )
 
 # ─────────────────────────────────────────────────────────────────
@@ -155,6 +161,16 @@ app.include_router(trades_router.router)
 app.include_router(proposals_router.router)
 app.include_router(backtest_router.router)
 app.include_router(data_health_router.router)
+app.include_router(audit_router.router)
+app.include_router(ticker_analysis_router.router)
+app.include_router(peers_router.router)
+app.include_router(watchlist_router.router)
+app.include_router(calendar_router.router)
+app.include_router(news_router.router)
+app.include_router(sec_filings_router.router)
+app.include_router(monitor_router.router)
+app.include_router(sector_benchmark_router.router)
+app.include_router(attribution_router.router)
 
 
 # ─────────────────────────────────────────────────────────────────

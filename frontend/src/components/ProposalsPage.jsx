@@ -24,6 +24,45 @@ import {
 import { fmtNum, fmtPctRaw, fmtPrice, fmtSignedPct } from '../utils/format';
 import { factorColor } from '../utils/colors';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import PresetBar from './common/PresetBar';
+import TickerAnalysisModal from './TickerAnalysisModal';
+import TickerSpark from './common/TickerSpark';
+import { loadProposalDefaults } from '../utils/preferences';
+
+// Lot 14 — palette tilt flags (qarp/garp/consistent/cheap-junk/falling-knife).
+const TILT_PALETTE = {
+  qarp:          { bg: 'rgba(34,197,94,0.18)',  fg: '#22c55e', label: 'QARP',
+                   title: 'Quality At Reasonable Price (boost composite)' },
+  garp:          { bg: 'rgba(132,204,22,0.16)', fg: '#a3e635', label: 'GARP',
+                   title: 'Growth At Reasonable Price (boost composite)' },
+  consistent:    { bg: 'rgba(96,165,250,0.16)', fg: '#60a5fa', label: 'CONSISTENT',
+                   title: 'Métriques fondamentales consistantes (boost)' },
+  cheap_junk:    { bg: 'rgba(248,113,113,0.18)',fg: '#f87171', label: 'CHEAP JUNK',
+                   title: 'Bas prix mais qualité dégradée (pénalité)' },
+  falling_knife: { bg: 'rgba(248,113,113,0.18)',fg: '#fb7185', label: 'KNIFE',
+                   title: 'Falling knife : dump récent + tendance neg (pénalité)' },
+};
+
+function TiltBadges({ flags }) {
+  if (!Array.isArray(flags) || flags.length === 0) return null;
+  return (
+    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+      {flags.map(f => {
+        const p = TILT_PALETTE[f] || {
+          bg: 'rgba(148,163,184,0.10)', fg: 'var(--text-muted)',
+          label: f.toUpperCase(), title: f,
+        };
+        return (
+          <span key={f} title={p.title} style={{
+            fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.04em',
+            padding: '0.08rem 0.4rem', borderRadius: 4,
+            background: p.bg, color: p.fg,
+          }}>{p.label}</span>
+        );
+      })}
+    </span>
+  );
+}
 
 const STATUS_FILTERS = [
   { id: 'pending',  label: 'À décider',   color: 'var(--accent)'     },
@@ -169,10 +208,14 @@ function KpiCell({ label, value, sub, tone }) {
 }
 
 function RefreshPanel({ onRun, onRegenerate, isPending, isRegenerating, nPending, defaults }) {
-  const [capital, setCapital] = useState(defaults?.total_capital ?? 100_000);
-  const [maxHoldings, setMaxHoldings] = useState(defaults?.max_holdings ?? 20);
-  const [mode, setMode] = useState('free_slots'); // 'free_slots' | 'max_holdings'
-  const [allowFractional, setAllowFractional] = useState(false);
+  // Priorité : params du dernier refresh (defaults props) > settings utilisateur > hard-coded.
+  const userPrefs = loadProposalDefaults();
+  const [capital, setCapital] = useState(defaults?.total_capital ?? userPrefs.total_capital);
+  const [maxHoldings, setMaxHoldings] = useState(defaults?.max_holdings ?? userPrefs.max_holdings);
+  const [mode, setMode] = useState(defaults?.top_n_mode ?? userPrefs.top_n_mode);
+  const [allowFractional, setAllowFractional] = useState(
+    defaults?.allow_fractional_shares ?? userPrefs.allow_fractional_shares,
+  );
   const [includeHeld, setIncludeHeld] = useState(false);
 
   return (
@@ -324,11 +367,119 @@ function RefreshPanel({ onRun, onRegenerate, isPending, isRegenerating, nPending
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Badge Support — affiche le PRIX du support détecté + niveau qualitatif.
+// Le score 0-100 reste accessible via tooltip (power-users).
+// ─────────────────────────────────────────────────────────────────
+function SupportBadge({ support }) {
+  if (!support || !support.level || support.level === 'INSUFFICIENT_DATA') {
+    return (
+      <div style={{
+        display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+        fontSize: '0.62rem', color: 'var(--text-muted)', lineHeight: 1.1,
+      }}>
+        <span style={{ fontSize: '0.95rem', fontWeight: 700 }}>—</span>
+        <span style={{ fontSize: '0.55rem', opacity: 0.7 }}>no data</span>
+      </div>
+    );
+  }
+  const palette = {
+    ON_SUPPORT:   { bg: 'rgba(34,197,94,0.18)',  fg: '#4ade80', border: 'rgba(34,197,94,0.6)',  label: 'SUPPORT' },
+    NEAR_SUPPORT: { bg: 'rgba(251,191,36,0.15)', fg: '#fbbf24', border: 'rgba(251,191,36,0.5)', label: 'PROCHE'  },
+    OFF_SUPPORT:  { bg: 'rgba(148,163,184,0.08)',fg: 'var(--text-muted)', border: 'var(--border)', label: 'HORS' },
+  }[support.level] || { bg: 'transparent', fg: 'var(--text-muted)', border: 'var(--border)', label: '?' };
+
+  // Prix de support à afficher : swing low (priorité = vrai support technique)
+  // sinon MA200 (support de tendance long-terme), sinon "—" avec score en fallback.
+  const priceLevel = Number.isFinite(support.nearest_swing_low)
+    ? support.nearest_swing_low
+    : (Number.isFinite(support.ma200_value) ? support.ma200_value : null);
+  const priceSource = Number.isFinite(support.nearest_swing_low)
+    ? 'swing'
+    : (Number.isFinite(support.ma200_value) ? 'MA200' : null);
+
+  const mainDisplay = priceLevel != null
+    ? `$${priceLevel.toFixed(2)}`
+    : `${support.score?.toFixed?.(0) ?? '?'}/100`;
+
+  const tooltip = [
+    `Niveau : ${support.level}`,
+    `Score qualité signal : ${support.score?.toFixed?.(1) ?? '—'} / 100`,
+    '',
+    priceLevel != null
+      ? `Prix support affiché : $${priceLevel.toFixed(2)} (source: ${priceSource})`
+      : 'Aucun niveau de support technique détecté',
+    '',
+    support.ma200_proximity != null
+      ? `MA200 proximity : ${support.ma200_proximity.toFixed(0)} / 100${support.ma200_value ? ` (MA200 = $${support.ma200_value.toFixed(2)})` : ''}`
+      : 'MA200 : N/A (historique < 200j)',
+    `Swing low proximity : ${support.swing_low_proximity?.toFixed?.(0) ?? '—'} / 100${support.nearest_swing_low ? ` (swing = $${support.nearest_swing_low.toFixed(2)})` : ''}`,
+    `Pullback depth : ${support.pullback_depth?.toFixed?.(0) ?? '—'} / 100`,
+    support.pct_from_52w_high != null ? `52w drawdown : ${support.pct_from_52w_high.toFixed(1)}%` : '',
+    support.method !== 'full' ? `(method: ${support.method})` : '',
+  ].filter(Boolean).join('\n');
+
+  return (
+    <div title={tooltip} style={{
+      display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+      padding: '0.18rem 0.5rem', borderRadius: 5,
+      background: palette.bg, color: palette.fg,
+      border: `1px solid ${palette.border}`,
+      lineHeight: 1.1, minWidth: 64,
+    }}>
+      <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '0.85rem' }}>
+        {mainDisplay}
+      </span>
+      <span style={{ fontSize: '0.55rem', fontWeight: 700, letterSpacing: '0.04em', opacity: 0.95 }}>
+        {palette.label}
+      </span>
+    </div>
+  );
+}
+
+// Lot 18 — Buy Signal verdict palette (synchronisé avec backend buy_signal.py).
+const BUY_VERDICT_STYLE = {
+  STRONG_BUY:        { bg: 'rgba(34,197,94,0.22)',  fg: '#22c55e', label: '🟢 STRONG BUY', glow: true },
+  BUY:               { bg: 'rgba(132,204,22,0.20)', fg: '#84cc16', label: '🟢 BUY', glow: true },
+  WATCH:             { bg: 'rgba(251,191,36,0.18)', fg: '#fbbf24', label: '👁 WATCH', glow: false },
+  EARNINGS_BLACKOUT: { bg: 'rgba(248,113,113,0.18)',fg: '#f87171', label: '⏸ EARNINGS', glow: false },
+  CHEAP_JUNK:        { bg: 'rgba(248,113,113,0.18)',fg: '#f87171', label: '⚠ TRAP', glow: false },
+  FALLING_KNIFE:     { bg: 'rgba(248,113,113,0.18)',fg: '#f87171', label: '🔻 KNIFE', glow: false },
+  SKIP:              { bg: 'rgba(148,163,184,0.10)',fg: 'var(--text-muted)', label: '— SKIP', glow: false },
+  NO_DATA:           { bg: 'rgba(148,163,184,0.08)',fg: 'var(--text-muted)', label: '? N/A', glow: false },
+};
+
+function BuySignalChip({ signal }) {
+  if (!signal || !signal.verdict) return null;
+  const s = BUY_VERDICT_STYLE[signal.verdict] || BUY_VERDICT_STYLE.SKIP;
+  const tooltip = signal.label || signal.verdict;
+  return (
+    <span title={tooltip} style={{
+      display: 'inline-flex', alignItems: 'center',
+      fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.04em',
+      padding: '0.15rem 0.5rem', borderRadius: 4,
+      background: s.bg, color: s.fg,
+      border: `1px solid ${s.fg}`,
+      textShadow: s.glow ? `0 0 8px ${s.fg}66` : 'none',
+      whiteSpace: 'nowrap',
+    }}>
+      {s.label}
+    </span>
+  );
+}
+
+// Garde isInBuyZone basé sur le NOUVEAU verdict buy_signal pour le row highlighting.
+function isInBuyZone(ctx) {
+  const v = ctx?.buy_signal?.verdict;
+  return v === 'STRONG_BUY' || v === 'BUY';
+}
+
+
+// ─────────────────────────────────────────────────────────────────
 // Ligne de proposition — table éditable
 // ─────────────────────────────────────────────────────────────────
 function ProposalRow({
   p, rank, selected, onToggle, edits, setEdit, sectorAck, onToggleSectorAck,
-  topUpAck, onToggleTopUpAck,
+  topUpAck, onToggleTopUpAck, onOpenAnalysis,
 }) {
   const ctx = p.context || {};
   const secExp = ctx.sector_exposure || {};
@@ -346,12 +497,20 @@ function ProposalRow({
     return v != null && v !== '' ? v : def;
   };
 
+  const inBuyZone = isInBuyZone(ctx);
   const rowBg = !isPending
     ? 'rgba(148,163,184,0.04)'
-    : selected ? 'rgba(34,197,94,0.06)' : undefined;
+    : inBuyZone
+      ? 'rgba(34,197,94,0.08)'
+      : selected ? 'rgba(34,197,94,0.06)' : undefined;
+  const rowStyle = {
+    ...(rowBg ? { background: rowBg } : {}),
+    ...(inBuyZone && isPending ? { boxShadow: 'inset 3px 0 0 0 #4ade80' } : {}),
+  };
 
   return (
-    <tr className="scan-row" style={rowBg ? { background: rowBg } : undefined}>
+    <tr className="scan-row" data-ticker={p.ticker}
+        style={Object.keys(rowStyle).length ? rowStyle : undefined}>
       <td style={{ textAlign: 'center' }}>
         <input type="checkbox" disabled={!isPending}
                checked={selected} onChange={onToggle}
@@ -365,8 +524,20 @@ function ProposalRow({
 
       <td>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <strong style={{ fontSize: '0.95rem' }}>{p.ticker}</strong>
+          <button type="button" onClick={() => onOpenAnalysis?.(p.ticker)}
+                  title="Cliquer pour ouvrir l'analyse complète"
+                  style={{
+                    background: 'transparent', border: 'none', padding: 0,
+                    margin: 0, cursor: 'pointer',
+                    fontSize: '0.95rem', fontWeight: 800,
+                    color: 'var(--accent-primary)',
+                    textDecoration: 'underline dotted',
+                    textUnderlineOffset: 3,
+                  }}>
+            {p.ticker}
+          </button>
           <StatusBadge status={p.status} />
+          {ctx.buy_signal && isPending && <BuySignalChip signal={ctx.buy_signal} />}
           {alreadyHeld && (
             <span style={{
               fontSize: '0.6rem', padding: '0.08rem 0.4rem', borderRadius: 4,
@@ -423,6 +594,38 @@ function ProposalRow({
               {topUpAck ? 'top-up ✓' : 'top-up'}
             </label>
           )}
+          <TiltBadges flags={ctx.titan_tilt_flags} />
+          {Number.isFinite(ctx.days_until_earnings) && ctx.days_until_earnings >= 0 && ctx.days_until_earnings <= 14 && (
+            <span title={`Earnings ${ctx.next_earnings_date || ''}`} style={{
+              fontSize: '0.6rem', fontWeight: 800,
+              padding: '0.08rem 0.4rem', borderRadius: 4,
+              background: ctx.days_until_earnings < 7
+                ? 'rgba(248,113,113,0.18)' : 'rgba(251,191,36,0.18)',
+              color: ctx.days_until_earnings < 7 ? '#f87171' : '#fbbf24',
+            }}>
+              📅 EARN {ctx.days_until_earnings}j
+            </span>
+          )}
+          {Number.isFinite(ctx.revisions_score) && (
+            <span
+              title={`Earnings revisions score : ${fmtNum(ctx.revisions_score, 1)} / 100`}
+              style={{
+                fontSize: '0.6rem', fontWeight: 800,
+                padding: '0.08rem 0.4rem', borderRadius: 4,
+                background: ctx.revisions_score >= 70
+                  ? 'rgba(34,197,94,0.16)'
+                  : ctx.revisions_score >= 50
+                    ? 'rgba(251,191,36,0.14)'
+                    : 'rgba(148,163,184,0.10)',
+                color: ctx.revisions_score >= 70
+                  ? '#22c55e'
+                  : ctx.revisions_score >= 50
+                    ? '#fbbf24'
+                    : 'var(--text-muted)',
+              }}>
+              ↗ REV {fmtNum(ctx.revisions_score, 0)}
+            </span>
+          )}
         </div>
       </td>
 
@@ -435,6 +638,10 @@ function ProposalRow({
             {fmtNum(ctx.titan_score, 1)}
           </span>
         )}
+      </td>
+
+      <td style={{ textAlign: 'center' }}>
+        <SupportBadge support={ctx.support} />
       </td>
 
       <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: '0.78rem',
@@ -466,6 +673,10 @@ function ProposalRow({
 
       <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
         {fmtPrice(ctx.amount_usd, 0)}
+      </td>
+
+      <td style={{ textAlign: 'center' }}>
+        <TickerSpark ticker={p.ticker} width={70} height={20} />
       </td>
 
       <td style={{ textAlign: 'right', fontFamily: 'monospace',
@@ -662,6 +873,7 @@ export default function ProposalsPage() {
   const [topUpAck, setTopUpAck] = useState(() => new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [analysisTicker, setAnalysisTicker] = useState(null);
   const toastIdRef = useRef(0);
   const toast = (text, type = 'ok') => {
     const id = ++toastIdRef.current;
@@ -685,10 +897,20 @@ export default function ProposalsPage() {
   const sortedItems = useMemo(() => {
     const source = proposalsQ.data?.proposals || [];
     const copy = [...source];
-    const key = sortMode === 'score'
-      ? p => p.context?.titan_score ?? 0
-      : p => p.context?.weight_pct ?? 0;
-    copy.sort((a, b) => (key(b) - key(a)));
+    const titanKey  = p => p.context?.titan_score ?? 0;
+    const weightKey = p => p.context?.weight_pct ?? 0;
+    if (sortMode === 'buy_zone') {
+      // Tri composite : buy-zone d'abord (TITAN ≥80 + ON_SUPPORT), puis score desc.
+      copy.sort((a, b) => {
+        const za = isInBuyZone(a.context) ? 1 : 0;
+        const zb = isInBuyZone(b.context) ? 1 : 0;
+        if (za !== zb) return zb - za;
+        return titanKey(b) - titanKey(a);
+      });
+    } else {
+      const key = sortMode === 'score' ? titanKey : weightKey;
+      copy.sort((a, b) => (key(b) - key(a)));
+    }
     return copy;
   }, [proposalsQ.data, sortMode]);
 
@@ -912,6 +1134,16 @@ export default function ProposalsPage() {
         defaults={lastRefresh?.requested_params}
       />
 
+      <PresetBar
+        scope="proposals"
+        label="Vues proposals"
+        current={{ statusFilter, sortMode }}
+        onApply={(p) => {
+          if (p?.statusFilter !== undefined) setStatusFilter(p.statusFilter);
+          if (p?.sortMode     !== undefined) setSortMode(p.sortMode);
+        }}
+      />
+
       {/* Filtres + tri */}
       <div style={{
         display: 'flex', gap: 8, flexWrap: 'wrap',
@@ -937,9 +1169,18 @@ export default function ProposalsPage() {
             display: 'inline-flex', border: '1px solid var(--border)',
             borderRadius: 6, overflow: 'hidden', fontSize: '0.72rem',
           }}>
+            <button type="button" onClick={() => setSortMode('buy_zone')}
+                    title="Met en haut les propositions TITAN ≥ 80 + sur support technique"
+                    style={{
+                      padding: '0.3rem 0.6rem', border: 'none',
+                      background: sortMode === 'buy_zone' ? 'rgba(34,197,94,0.6)' : 'transparent',
+                      color: sortMode === 'buy_zone' ? '#0b1220' : 'var(--text-muted)',
+                      fontWeight: 700, cursor: 'pointer',
+                    }}>✓ Buy Zone</button>
             <button type="button" onClick={() => setSortMode('score')}
                     style={{
                       padding: '0.3rem 0.6rem', border: 'none',
+                      borderLeft: '1px solid var(--border)',
                       background: sortMode === 'score' ? 'var(--accent-primary)' : 'transparent',
                       color: sortMode === 'score' ? '#0b1220' : 'var(--text-muted)',
                       fontWeight: 600, cursor: 'pointer',
@@ -999,12 +1240,14 @@ export default function ProposalsPage() {
                   <th style={{ width: 32, textAlign: 'right', paddingRight: 6 }}>#</th>
                   <th>Ticker & secteur</th>
                   <th style={{ width: 58, textAlign: 'center' }}>TITAN</th>
+                  <th style={{ width: 96, textAlign: 'center' }} title="Niveau de support technique détecté (prix). Hover pour breakdown qualité.">Support</th>
                   <th style={{ width: 70, textAlign: 'right' }}>Poids</th>
                   <th style={{ width: 110 }}>Entry</th>
                   <th style={{ width: 110 }}>SL</th>
                   <th style={{ width: 110 }}>TP</th>
                   <th style={{ width: 80 }}>Size</th>
                   <th style={{ width: 90, textAlign: 'right' }}>Notional</th>
+                  <th style={{ width: 80, textAlign: 'center' }} title="Sparkline prix sur l'historique disponible">Tendance</th>
                   <th style={{ width: 72, textAlign: 'right' }}>Mom 6M</th>
                   <th>Expire / décision</th>
                 </tr>
@@ -1023,6 +1266,7 @@ export default function ProposalsPage() {
                     onToggleSectorAck={() => toggleSet(setSectorAck, p.id)}
                     topUpAck={topUpAck.has(p.id)}
                     onToggleTopUpAck={() => toggleSet(setTopUpAck, p.id)}
+                    onOpenAnalysis={setAnalysisTicker}
                   />
                 ))}
               </tbody>
@@ -1049,6 +1293,13 @@ export default function ProposalsPage() {
           isPending={approveM.isPending}
           onConfirm={handleApprove}
           onCancel={() => setConfirmOpen(false)}
+        />
+      )}
+
+      {analysisTicker && (
+        <TickerAnalysisModal
+          ticker={analysisTicker}
+          onClose={() => setAnalysisTicker(null)}
         />
       )}
     </div>

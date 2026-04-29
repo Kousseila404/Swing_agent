@@ -91,7 +91,30 @@ def _set_trading_blocked(blocked: bool) -> None:
 
 
 def estimate_portfolio_equity(df: pd.DataFrame) -> float:
-    """Estime l'équité courante (paper trading) : ACCOUNT_SIZE + PnL réalisé + latent."""
+    """Estime l'équité courante.
+
+    Audit S2.4 (2026-04-27) — en mode `BROKER_MODE=alpaca`, l'equity réelle vit
+    chez le broker (cash drag, dividends, fees, frais d'emprunt). Le killswitch
+    -4 % daily se déclenchait sur l'equity *paper* (CSV) qui ignore tous ces
+    frottements → décisions désynchronisées vs réalité comptable du compte.
+
+    En mode alpaca on délègue à `get_broker().get_account_equity()` (fail-open
+    sur le calcul CSV si l'API broker tombe — ne jamais bloquer le killswitch
+    sur un problème réseau).
+    """
+    broker_mode = str(getattr(config, "BROKER_MODE", "paper")).lower().strip()
+    if broker_mode == "alpaca":
+        try:
+            from modules.broker_gateway import get_broker
+            live_equity = float(get_broker().get_account_equity())
+            if live_equity > 0:
+                return live_equity
+        except Exception as exc:
+            logger.warning(
+                f"[Killswitch] broker.get_account_equity échec → "
+                f"fallback CSV : {exc}"
+            )
+
     base_equity = float(getattr(config, "ACCOUNT_SIZE", 100_000))
 
     realized_pnl = 0.0

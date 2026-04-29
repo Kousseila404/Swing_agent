@@ -237,3 +237,176 @@ def test_mark_sl_alert_sent_persists(_isolate: Path):
     evaluation.mark_sl_alert_sent("AAPL")
     data = json.loads((_isolate / "alert_cooldown.json").read_text())
     assert "AAPL" in data["sl_proximity"]
+
+
+# ─────────────────────────────────────────────────────────────────
+# thesis_stop Phase 2 — alerte BROKEN dans evaluate_trades
+# ─────────────────────────────────────────────────────────────────
+
+def test_thesis_break_triggers_alert(monkeypatch, _isolate: Path):
+    """Position OPEN avec TITAN_Entry=85 et current=50 → BROKEN → alerte envoyée."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
+    # Stub scored_universe : current TITAN très en dessous de l'entrée
+    fake_scored = {"AAPL": {
+        "sector": "Tech", "titan_composite_score": 50.0,
+        "quality_score": 60, "momentum_score": 40,
+        "piotroski_score": 50, "f_score": 5, "revisions_score": 60,
+        "titan_tilt_flags": [],
+    }}
+    import modules.sector_metrics as sm
+    monkeypatch.setattr(sm, "get_scored_universe", lambda: fake_scored)
+
+    sent: list[tuple] = []
+    monkeypatch.setattr(
+        evaluation, "send_thesis_break_alert",
+        lambda *a, **k: (sent.append((a, k)), True)[1],
+    )
+
+    df = _df(_open_trade(
+        Ticker="AAPL", Entry=100, Stop_Loss=95, Take_Profit=200,
+        Titan_Score_Entry=85, F_Score_Entry="8/9",
+    ))
+    out, closed, _ = evaluation.evaluate_trades(df)
+    assert closed == 0
+    assert len(sent) == 1, "Alerte BROKEN attendue (TITAN −35 ≤ −20)"
+    # Cooldown persisté
+    data = json.loads((_isolate / "alert_cooldown.json").read_text())
+    assert "AAPL" in data.get("thesis_break", {})
+
+
+def test_thesis_intact_no_alert(monkeypatch):
+    """TITAN_Entry=80 et current=78 → INTACT → pas d'alerte."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
+    fake_scored = {"AAPL": {
+        "sector": "Tech", "titan_composite_score": 78.0,
+        "quality_score": 75, "momentum_score": 70,
+        "piotroski_score": 70, "f_score": 7,
+        "titan_tilt_flags": [],
+    }}
+    import modules.sector_metrics as sm
+    monkeypatch.setattr(sm, "get_scored_universe", lambda: fake_scored)
+
+    sent: list = []
+    monkeypatch.setattr(
+        evaluation, "send_thesis_break_alert",
+        lambda *a, **k: sent.append(1),
+    )
+
+    df = _df(_open_trade(Ticker="AAPL", Entry=100, Stop_Loss=95, Take_Profit=200,
+                         Titan_Score_Entry=80, F_Score_Entry="7/9"))
+    evaluation.evaluate_trades(df)
+    assert sent == [], "INTACT ne doit pas alerter"
+
+
+def test_thesis_break_respects_cooldown(monkeypatch, _isolate: Path):
+    """Cooldown 24h : alerte envoyée hier → on ne renvoie pas aujourd'hui."""
+    recent = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    (_isolate / "alert_cooldown.json").write_text(json.dumps({
+        "thesis_break": {"AAPL": recent},
+    }))
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
+    fake_scored = {"AAPL": {
+        "sector": "Tech", "titan_composite_score": 50.0,
+        "titan_tilt_flags": [],
+    }}
+    import modules.sector_metrics as sm
+    monkeypatch.setattr(sm, "get_scored_universe", lambda: fake_scored)
+
+    sent: list = []
+    monkeypatch.setattr(
+        evaluation, "send_thesis_break_alert",
+        lambda *a, **k: sent.append(1),
+    )
+
+    df = _df(_open_trade(Ticker="AAPL", Entry=100, Stop_Loss=95, Take_Profit=200,
+                         Titan_Score_Entry=85))
+    evaluation.evaluate_trades(df)
+    assert sent == [], "Cooldown 24h doit bloquer la 2e alerte"
+
+
+def test_can_send_thesis_alert_past_cooldown(_isolate: Path):
+    """24h passées → autorisé."""
+    old = (datetime.now() - timedelta(hours=25)).strftime("%Y-%m-%d %H:%M:%S")
+    (_isolate / "alert_cooldown.json").write_text(json.dumps({
+        "thesis_break": {"AAPL": old},
+    }))
+    assert evaluation.can_send_thesis_alert("AAPL") is True
+
+
+# ─────────────────────────────────────────────────────────────────
+# Throttle thesis_check — 1×/heure
+# ─────────────────────────────────────────────────────────────────
+
+def test_should_run_thesis_check_no_state(_isolate: Path):
+    assert evaluation.should_run_thesis_check() is True
+
+
+def test_should_run_thesis_check_throttled(_isolate: Path):
+    """Dernier run il y a 30 min → throttle (interval = 60 min)."""
+    recent = (datetime.now() - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+    (_isolate / "alert_cooldown.json").write_text(json.dumps({
+        "thesis_check_last_run": recent,
+    }))
+    assert evaluation.should_run_thesis_check() is False
+
+
+def test_should_run_thesis_check_past_interval(_isolate: Path):
+    """Dernier run il y a 70 min → autorisé."""
+    old = (datetime.now() - timedelta(minutes=70)).strftime("%Y-%m-%d %H:%M:%S")
+    (_isolate / "alert_cooldown.json").write_text(json.dumps({
+        "thesis_check_last_run": old,
+    }))
+    assert evaluation.should_run_thesis_check() is True
+
+
+# ─────────────────────────────────────────────────────────────────
+# Price alerts intraday wiring
+# ─────────────────────────────────────────────────────────────────
+
+def test_evaluate_trades_fires_intraday_price_alerts(monkeypatch, _isolate: Path):
+    """Si un price_alert est posé sur AAPL avec target=99 (below) et prix=98,
+    evaluate_trades doit le fire via evaluate_alerts."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 98.0)
+
+    fired_calls: list[dict] = []
+
+    def fake_evaluate(prices):
+        # Simule un fire
+        return [{
+            "ticker": "AAPL", "direction": "below",
+            "target_price": 99.0, "current_price": prices.get("AAPL"),
+            "note": "test tier",
+        }]
+
+    sent: list[tuple] = []
+
+    import modules.price_alerts as pa_mod
+    monkeypatch.setattr(pa_mod, "evaluate_alerts", fake_evaluate)
+    monkeypatch.setattr(
+        evaluation, "send_price_alert_fired",
+        lambda **kw: (sent.append(kw), True)[1],
+    )
+
+    df = _df(_open_trade(Ticker="AAPL", Entry=100, Stop_Loss=80, Take_Profit=200))
+    evaluation.evaluate_trades(df)
+    assert fired_calls == [] and len(sent) == 1
+    assert sent[0]["ticker"] == "AAPL"
+    # Throttle marqué
+    data = json.loads((_isolate / "alert_cooldown.json").read_text())
+    assert "price_alerts_last_run" in data
+
+
+def test_should_run_price_alerts_check_throttled(_isolate: Path):
+    recent = (datetime.now() - timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+    (_isolate / "alert_cooldown.json").write_text(json.dumps({
+        "price_alerts_last_run": recent,
+    }))
+    assert evaluation.should_run_price_alerts_check() is False
+
+
+def test_should_run_price_alerts_check_past_interval(_isolate: Path):
+    old = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    (_isolate / "alert_cooldown.json").write_text(json.dumps({
+        "price_alerts_last_run": old,
+    }))
+    assert evaluation.should_run_price_alerts_check() is True

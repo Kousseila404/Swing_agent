@@ -30,6 +30,7 @@ from .base import (
 )
 from .fmp_provider import FMPProvider
 from .polygon_provider import PolygonProvider
+from .stooq_provider import StooqProvider
 from .yfinance_provider import YFinanceProvider
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "ProviderUnavailable",
     "FMPProvider",
     "PolygonProvider",
+    "StooqProvider",
     "YFinanceProvider",
     "get_providers",
 ]

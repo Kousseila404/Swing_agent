@@ -41,6 +41,12 @@ CB_STATE_PATH        = _BACKEND_ROOT / "data" / "circuit_breaker_state.json"
 HEARTBEAT_PATH       = _BACKEND_ROOT / "data" / "tracker_heartbeat.json"
 
 SL_ALERT_COOLDOWN_HOURS = 4
+THESIS_ALERT_COOLDOWN_HOURS = 24  # Anti-spam thesis_stop : 1 alerte BROKEN/jour/ticker
+THESIS_CHECK_INTERVAL_MIN = 60    # Throttle global : on n'évalue thesis_stop qu'1×/heure
+                                   # (le préfetch scored_universe coûte ~5 MB JSON parse).
+PRICE_ALERTS_CHECK_INTERVAL_MIN = 5  # Intraday price_alerts : check toutes les 5 min.
+                                      # Le cron daily 16:30 NY (run_monitor_alerts) reste
+                                      # le filet pour les tickers hors-portefeuille.
 
 
 # ─────────────────────────────────────────────────────────────────

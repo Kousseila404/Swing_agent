@@ -118,6 +118,10 @@ export const fetchProposals = ({ status = null, limit = 200 } = {}) => {
 };
 
 export const refreshProposals  = (body = {}) => post('/proposals/refresh', body);
+// Push manuel d'un ticker depuis la page Univers (bypass cron auto_proposer).
+// Réutilise le pipeline SL/TP σ-adaptive et la dédup pending/cooldown.
+export const pushManualProposal = (ticker, opts = {}) =>
+  post('/proposals/manual', { ticker, ...opts });
 // Purge les pending (via expired, pas rejected → pas de cooldown veto) puis
 // relance le proposer. Utile pour changer les paramètres sans perdre 7j.
 export const regenerateProposals = (body = {}) => post('/proposals/regenerate', body);
@@ -139,6 +143,26 @@ export const rejectProposalsBatch  = (items) =>
 // HISTORIQUE TICKER + DATA HEALTH
 // ─────────────────────────────────────────────────────────────────
 export const fetchSnapshotsList = () => get('/history/snapshots');
+// Backtest TITAN sur une whitelist de tickers (vue filtrée page Univers).
+// body = { tickers: [], top_n?: int, benchmark?: str, weighting?: 'equal'|'score'|'risk_parity' }
+export const runQuickBacktest = (body) => post('/backtest/quick', body);
+// Alertes TITAN seuil utilisateur (Tier B #3).
+export const fetchTitanAlerts  = () => get('/titan_alerts');
+export const addTitanAlert     = (body) => post('/titan_alerts', body);
+export const deleteTitanAlert  = (id) =>
+  _del(`/titan_alerts/${encodeURIComponent(id)}`);
+// Alertes prix multi-niveaux (entry_plan tiers).
+export const fetchPriceAlerts  = (ticker) =>
+  get(`/price_alerts${ticker ? `?ticker=${encodeURIComponent(ticker)}` : ''}`);
+export const fetchPriceAlertsStats = () => get('/price_alerts/stats');
+export const addPriceAlert     = (body) => post('/price_alerts', body);
+export const deletePriceAlert  = (id) =>
+  _del(`/price_alerts/${encodeURIComponent(id)}`);
+// Thesis status — vue cockpit positions OPEN.
+export const fetchThesisStatus = () => get('/thesis_status');
+// Backfill rétroactif des *_Entry depuis universe_history (admin).
+export const backfillEntryScores = (dryRun = true) =>
+  post(`/portfolio/backfill_entry_scores?dry_run=${dryRun ? 'true' : 'false'}`, {});
 export const fetchDataHealth    = () => get('/data_health');
 export const refreshFlaggedTickers = () => post('/data_health/refresh_flagged', {});
 export const fetchTickerHistory = (ticker, opts = {}) => {
@@ -149,3 +173,86 @@ export const fetchTickerHistory = (ticker, opts = {}) => {
   const qs = params.toString();
   return get(`/history/ticker/${encodeURIComponent(ticker)}${qs ? `?${qs}` : ''}`);
 };
+
+// ─────────────────────────────────────────────────────────────────
+// AUDIT — delisted registry + WFO weights/history (Audit S1.1 + S1.3).
+// Endpoints publics read-only.
+// ─────────────────────────────────────────────────────────────────
+export const fetchDelisted    = () => get('/delisted');
+export const fetchWfoWeights  = () => get('/wfo');
+export const fetchWfoHistory  = ({ limit = 50 } = {}) =>
+  get(`/wfo/history?limit=${encodeURIComponent(limit)}`);
+export const fetchAuditFull   = ({ refresh = false } = {}) =>
+  get(`/audit/full${refresh ? '?refresh=true' : ''}`);
+
+export const fetchTickerAnalysis = (ticker) =>
+  get(`/ticker_analysis/${encodeURIComponent(ticker.toUpperCase())}`);
+
+export const fetchPeers = (ticker, n = 5) =>
+  get(`/peers/${encodeURIComponent(ticker.toUpperCase())}?n=${n}`);
+
+export const fetchCatalystCalendar = (days = 30) =>
+  get(`/calendar?days=${days}`);
+
+export const fetchNews = (ticker, days = 14) =>
+  get(`/news/${encodeURIComponent(ticker.toUpperCase())}?days=${days}`);
+
+export const fetchNewsFirehose = (days = 7, maxPerTicker = 5) =>
+  get(`/news/portfolio/firehose?days=${days}&max_per_ticker=${maxPerTicker}`);
+
+export const fetchSecFilings = (ticker, limit = 30) =>
+  get(`/sec_filings/${encodeURIComponent(ticker.toUpperCase())}?limit=${limit}`);
+
+export const fetchMonitorPreview = () => get('/monitor/preview');
+export const runMonitorAlerts    = () => post('/monitor/run', {});
+
+export const fetchSectorBenchmarkPortfolio = () => get('/sector_benchmark/portfolio');
+
+export const fetchAttribution = () => get('/attribution');
+
+// ─────────────────────────────────────────────────────────────────
+// WATCHLIST + NOTES
+// ─────────────────────────────────────────────────────────────────
+export const fetchWatchlist = () => get('/watchlist');
+
+export const addToWatchlist = (payload) => post('/watchlist', payload);
+
+const _del = (path) =>
+  fetch(`${BASE}${path}`, { method: 'DELETE', headers: { ..._authHeaders() } })
+    .then(async r => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, status: r.status, ...data };
+      return { ok: true, ...data };
+    })
+    .catch(() => ({ ok: false, error: 'Réseau indisponible' }));
+
+const _put = (path, body = {}) =>
+  fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ..._authHeaders(),
+    },
+    body: JSON.stringify(body),
+  })
+    .then(async r => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, status: r.status, ...data };
+      return { ok: true, ...data };
+    })
+    .catch(() => ({ ok: false, error: 'Réseau indisponible' }));
+
+export const removeFromWatchlist = (ticker) =>
+  _del(`/watchlist/${encodeURIComponent(ticker.toUpperCase())}`);
+
+export const fetchNotes = (ticker) =>
+  get(`/notes/${encodeURIComponent(ticker.toUpperCase())}`);
+
+export const addNote = (ticker, body) =>
+  post(`/notes/${encodeURIComponent(ticker.toUpperCase())}`, { body });
+
+export const updateNote = (noteId, body) =>
+  _put(`/notes/${encodeURIComponent(noteId)}`, { body });
+
+export const deleteNote = (noteId) =>
+  _del(`/notes/${encodeURIComponent(noteId)}`);

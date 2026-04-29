@@ -120,6 +120,18 @@ class RejectBatchResponse(BaseModel):
     results:     list[RejectBatchResult]
 
 
+class ManualProposalRequest(BaseModel):
+    """Push manuel d'un ticker depuis la page Univers (Tier S #3).
+    Bypass auto_proposer — utile pour les overrides Watch (TITAN 70-80) avec
+    signal externe (Support ON, F-Score ≥ 7) que le cron n'aurait pas retenus.
+    Les SL/TP sont calculés via suggest_trade_levels comme pour les autos.
+    """
+    ticker:        str
+    target_amount_usd: float | None = None  # default 5% du capital
+    ttl_hours:     float | None = None
+    signal:        str = "MANUAL_PUSH"
+
+
 # ─────────────────────────────────────────────────────────────────
 # GET — list
 # ─────────────────────────────────────────────────────────────────
@@ -445,6 +457,115 @@ def regenerate_proposals(
         "requested_params": {**req.dict(exclude_none=True), "regenerate": True},
     })
     return payload
+
+
+# ─────────────────────────────────────────────────────────────────
+# POST /manual — push d'un ticker depuis la page Univers (Tier S #3)
+# ─────────────────────────────────────────────────────────────────
+
+@router.post("/manual")
+def manual_proposal(
+    req: ManualProposalRequest,
+    _auth: None = Security(api_core.require_auth),
+):
+    """Crée une proposition manuelle pour un ticker (bypass cron auto_proposer).
+
+    Use case : la page Univers a un ticker en TITAN ≥ 70 que l'utilisateur veut
+    mettre dans la file d'attente d'achat sans attendre le cron quotidien (ex.
+    upgrade silencieuse détectée via le drift Δ7j).
+
+    Réutilise le pipeline existant :
+      - prix + vol depuis `sector_metrics.get_scored_universe()` (cache mtime)
+      - SL/TP via `suggest_trade_levels` (σ-adaptive Long-Term)
+      - cooldowns veto/win et dédup pending appliqués automatiquement par
+        `proposals.enqueue_batch` (un ticker pending → 409 silencieux)
+
+    Réponse :
+      - `ok=True` + `proposal` si insertion réussie
+      - `ok=False` + `reason` si dédup ou échec de calcul des niveaux
+    """
+    from modules.portfolio._trade_levels import suggest_trade_levels
+    from modules.sector_metrics import get_scored_universe
+
+    ticker = req.ticker.upper().strip()
+    if not ticker or len(ticker) > 12:
+        raise HTTPException(400, f"Ticker invalide: {req.ticker!r}")
+
+    try:
+        scored = get_scored_universe() or {}
+    except Exception as exc:
+        logger.error(f"[Proposals/manual] scoring KO: {exc}", exc_info=True)
+        raise HTTPException(503, "Univers scoré indisponible") from exc
+
+    row = scored.get(ticker)
+    if row is None:
+        raise HTTPException(404, f"Ticker {ticker} absent de l'univers scoré")
+
+    price = row.get("current_price") or row.get("price")
+    if not price or not isinstance(price, (int, float)) or price <= 0:
+        raise HTTPException(422, f"Prix invalide pour {ticker}: {price!r}")
+
+    vol_pct = row.get("volatility_pct")
+    levels = suggest_trade_levels(price=float(price), volatility_pct=vol_pct)
+    sl = levels.get("sl")
+    tp = levels.get("tp")
+    if not sl or not tp:
+        raise HTTPException(422, f"SL/TP non calculables pour {ticker}")
+
+    # Sizing : par défaut 5% du capital de référence (DEFAULT_TOTAL_CAPITAL=100k
+    # → 5k par position, aligné avec max_holdings=20). L'utilisateur édite via
+    # ApproveBatch overrides s'il veut autre chose à l'exécution.
+    target_usd = req.target_amount_usd
+    if target_usd is None:
+        target_usd = auto_proposer.DEFAULT_TOTAL_CAPITAL / auto_proposer.DEFAULT_MAX_HOLDINGS
+    if target_usd <= 0:
+        raise HTTPException(400, "target_amount_usd doit être > 0")
+    size = max(1, int(target_usd / float(price)))
+
+    ttl = req.ttl_hours if req.ttl_hours is not None else proposals.DEFAULT_TTL_HOURS
+
+    proposal = proposals.make_proposal(
+        ticker=ticker,
+        direction="LONG",
+        entry=float(price),
+        stop_loss=float(sl),
+        take_profit=float(tp),
+        size=size,
+        sector=str(row.get("sector") or ""),
+        signal=req.signal,
+        ttl_hours=ttl,
+        context={
+            "titan_score":      row.get("titan_composite_score"),
+            "quality_score":    row.get("quality_score"),
+            "value_score":      row.get("value_score"),
+            "risk_score":       row.get("risk_score"),
+            "momentum_score":   row.get("momentum_score"),
+            "piotroski_score":  row.get("piotroski_score"),
+            "f_score":          row.get("f_score"),
+            "f_score_max":      row.get("f_score_max"),
+            "growth_score":     row.get("growth_score"),
+            "volatility_pct":   vol_pct,
+            "price_live":       float(price),
+            "amount_usd":       round(size * float(price), 2),
+            "levels_method":    levels.get("method"),
+            "suggested_sl_pct": levels.get("sl_pct"),
+            "suggested_tp_pct": levels.get("tp_pct"),
+            "manual":           True,
+        },
+    )
+
+    inserted = proposals.enqueue_batch([proposal])
+    if not inserted:
+        # Dédup silencieux (pending existant, cooldown veto, cooldown win).
+        return {
+            "ok": False,
+            "reason": "dedup_or_cooldown",
+            "message": (
+                f"{ticker} non inséré : déjà pending, ou en cooldown veto/win. "
+                "Vérifier la file actuelle ou /api/proposals/{id}/reject pour reset."
+            ),
+        }
+    return {"ok": True, "proposal": inserted[0]}
 
 
 # ─────────────────────────────────────────────────────────────────

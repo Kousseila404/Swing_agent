@@ -12,10 +12,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { addTrade, closeTrade, fetchEquityCurve, fetchPortfolio } from '../api/client';
+import { addTrade, closeTrade, fetchEquityCurve, fetchPortfolio, fetchThesisStatus } from '../api/client';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
-import { parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
+import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
 
 function downloadFile(filename, content, type = 'text/csv') {
   const blob = new Blob([content], { type });
@@ -27,11 +28,62 @@ function downloadFile(filename, content, type = 'text/csv') {
   URL.revokeObjectURL(url);
 }
 
+const THESIS_BADGE_PALETTE = {
+  BROKEN:  { bg: 'rgba(248,113,113,0.20)', fg: '#f87171', icon: '🔴', short: 'BROKEN' },
+  WARN:    { bg: 'rgba(251,191,36,0.20)',  fg: '#fbbf24', icon: '⚠️', short: 'WARN' },
+  INTACT:  { bg: 'rgba(34,197,94,0.16)',   fg: '#22c55e', icon: '🟢', short: 'OK' },
+  NO_DATA: null, // pas de badge si pas de data
+};
+
+function ThesisBadge({ thesis }) {
+  if (!thesis) return null;
+  const p = THESIS_BADGE_PALETTE[thesis.status];
+  if (!p) return null;
+  const drift = thesis.drift || {};
+  const tooltipLines = [];
+  if (drift.titan != null) tooltipLines.push(`Drift TITAN ${drift.titan > 0 ? '+' : ''}${drift.titan} pts`);
+  if (drift.f_score != null && drift.f_score !== 0) {
+    tooltipLines.push(`F-Score ${drift.f_score > 0 ? '+' : ''}${drift.f_score}`);
+  }
+  for (const r of (thesis.reasons_break || []).slice(0, 2)) tooltipLines.push(`🔴 ${r}`);
+  for (const r of (thesis.reasons_warn || []).slice(0, 2)) tooltipLines.push(`⚠ ${r}`);
+  return (
+    <span
+      title={tooltipLines.join('\n') || `Thèse ${thesis.status}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 3,
+        marginLeft: 6, padding: '0.1rem 0.4rem',
+        fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.04em',
+        borderRadius: 4, background: p.bg, color: p.fg,
+        verticalAlign: 'middle', cursor: 'help',
+      }}
+    >
+      {p.icon} {p.short}
+    </span>
+  );
+}
+
 export default function PortfolioPage() {
   const qc = useQueryClient();
 
   const portfolioQ = useQuery({ queryKey: ['portfolio'], queryFn: fetchPortfolio, refetchInterval: 15_000 });
   const curveQ     = useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, refetchInterval: 15_000 });
+  const benchQ     = useSectorBenchmarkPortfolio();
+  const thesisQ    = useQuery({ queryKey: ['thesis_status'], queryFn: fetchThesisStatus, refetchInterval: 5 * 60_000 });
+
+  const thesisByTicker = useMemo(() => {
+    const idx = {};
+    for (const it of thesisQ.data?.items || []) {
+      const t = String(it.ticker || '').toUpperCase();
+      // En cas de doublon (multiple OPEN même ticker), garde le pire status.
+      const order = { BROKEN: 3, WARN: 2, INTACT: 1, NO_DATA: 0 };
+      const prev = idx[t];
+      if (!prev || (order[it.status] ?? 0) > (order[prev.status] ?? 0)) {
+        idx[t] = it;
+      }
+    }
+    return idx;
+  }, [thesisQ.data]);
 
   const [tab, setTab]                     = useState('open');
   const [closingTicker, setClosingTicker] = useState('');
@@ -125,6 +177,15 @@ export default function PortfolioPage() {
 
   const closedTrades = useMemo(() => data?.closed_trades || [], [data]);
 
+  // Index ticker → benchmark pour lookup O(1) en table.
+  const benchByTicker = useMemo(() => {
+    const map = {};
+    for (const it of (benchQ.data?.items || [])) {
+      if (it.ticker) map[it.ticker.toUpperCase()] = it;
+    }
+    return map;
+  }, [benchQ.data]);
+
   const tickerOptions = useMemo(() => {
     const set = new Set(closedTrades.map(t => t.Ticker).filter(Boolean));
     return ['Tous', ...Array.from(set).sort()];
@@ -201,6 +262,13 @@ export default function PortfolioPage() {
         <KPI label="Win Rate" value={`${stats?.win_rate ?? 0}%`} color="pos" />
         <KPI label="Positions ouvertes" value={`${livePositions.length} / 5`} />
         <KPI label="Trades clôturés" value={stats?.total_trades ?? 0} />
+        {benchQ.data?.avg_alpha_pct != null && (
+          <KPI
+            label="Alpha moyen vs ETF"
+            value={`${benchQ.data.avg_alpha_pct >= 0 ? '+' : ''}${benchQ.data.avg_alpha_pct.toFixed(2)}%`}
+            color={benchQ.data.avg_alpha_pct >= 0 ? 'pos' : 'neg'}
+          />
+        )}
       </div>
 
       {/* ── Drawdown Gauge ── */}
@@ -254,6 +322,8 @@ export default function PortfolioPage() {
                     <th>Taille</th>
                     <th>RR</th>
                     <th>Date</th>
+                    <th title="Alpha = return position − return ETF sectoriel sur la même fenêtre">vs ETF</th>
+                    <th>Détention</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -263,8 +333,12 @@ export default function PortfolioPage() {
                     const pct  = p.pct_from_entry;
                     const dirIsLong = p.Direction === 'LONG';
                     return (
-                      <tr key={p.Ticker} className="scan-row" id={`open-${p.Ticker}`}>
-                        <td><strong>{p.Ticker}</strong></td>
+                      <tr key={p.Ticker} className="scan-row" id={`open-${p.Ticker}`}
+                          data-ticker={p.Ticker}>
+                        <td>
+                          <strong>{p.Ticker}</strong>
+                          <ThesisBadge thesis={thesisByTicker[String(p.Ticker || '').toUpperCase()]} />
+                        </td>
                         <td>
                           <span className="scan-signal-badge" style={{ color: dirIsLong ? 'var(--success)' : 'var(--danger)', borderColor: (dirIsLong ? 'var(--success)' : 'var(--danger)') + '50' }}>
                             {dirIsLong ? '▲' : '▼'} {p.Direction}
@@ -289,6 +363,55 @@ export default function PortfolioPage() {
                         <td>{p.Size}</td>
                         <td>{p.RR || '—'}</td>
                         <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{(p.Date || '').slice(0, 10)}</td>
+                        <td style={{ fontSize: '0.74rem' }}>
+                          {(() => {
+                            const b = benchByTicker[String(p.Ticker || '').toUpperCase()];
+                            if (!b || b.error || b.return_pct == null) {
+                              return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+                            }
+                            const alpha = b.alpha_pct;
+                            const hasAlpha = Number.isFinite(alpha);
+                            const tone = hasAlpha
+                              ? (alpha >= 0 ? 'var(--success)' : 'var(--danger)')
+                              : 'var(--text-muted)';
+                            return (
+                              <div title={`Position ${b.return_pct >= 0 ? '+' : ''}${b.return_pct.toFixed(2)}% · ${b.etf || 'ETF ?'} ${b.etf_return_pct != null ? (b.etf_return_pct >= 0 ? '+' : '') + b.etf_return_pct.toFixed(2) + '%' : '—'}`}>
+                                <div style={{ fontFamily: 'monospace', fontWeight: 600,
+                                              color: b.return_pct >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                                  {b.return_pct >= 0 ? '+' : ''}{b.return_pct.toFixed(1)}%
+                                </div>
+                                {hasAlpha && (
+                                  <div style={{ fontSize: '0.65rem', color: tone, fontWeight: 600 }}>
+                                    {b.etf} {alpha >= 0 ? '+' : ''}{alpha.toFixed(1)}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td style={{ fontSize: '0.74rem' }}>
+                          {(() => {
+                            const hp = holdingPeriod(p.Date);
+                            if (!hp) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+                            const tone = hp.ltcg_eligible ? 'var(--success)'
+                                       : hp.days_to_ltcg <= 60 ? 'var(--warning)'
+                                       : 'var(--text-muted)';
+                            return (
+                              <div title={hp.ltcg_eligible
+                                ? `Position détenue ${hp.days_held}j — éligible LTCG (long-term capital gains, taxe réduite US)`
+                                : `Position détenue ${hp.days_held}j — encore ${hp.days_to_ltcg}j avant LTCG`}>
+                                <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                                  {hp.days_held}j
+                                </div>
+                                <div style={{ fontSize: '0.65rem', color: tone, fontWeight: 600 }}>
+                                  {hp.ltcg_eligible
+                                    ? '✓ LTCG'
+                                    : `LTCG dans ${hp.days_to_ltcg}j`}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td>
                           {closingTicker === p.Ticker ? (
                             <div className="inline-close-form">

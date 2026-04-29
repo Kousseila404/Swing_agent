@@ -87,25 +87,64 @@ def _prev_year_col(df: Any) -> Any | None:
         return None
 
 
-def _prev_year_ratios(tk: "yf.Ticker") -> dict[str, float | None]:
-    """Extrait les ratios Piotroski Y-1 depuis les annuels yfinance.
+def _col_date(df: Any | None, idx: int) -> str | None:
+    """Retourne la date (ISO) de la colonne `idx` d'un DataFrame yfinance
+    annuel. Les colonnes de `tk.balance_sheet` / `tk.financials` sont des
+    Timestamps pandas correspondant à la date de fin de période fiscale.
 
-    Les 5 champs nécessaires pour F3/F5/F6/F8/F9 :
+    None si le DF est vide / hors bornes / colonne non datée.
+
+    Audit S3.x rigoureux (2026-04-27) — permet de remplacer le lag fixe
+    de 90 j par un check par-ticker `period_end + 90 j ≤ as_of`. Compagnies
+    à FY décalée (Sept 30, Mar 31) ne sont plus jugées sur le calendrier
+    civil mais sur leur vrai calendrier fiscal.
+    """
+    if df is None:
+        return None
+    try:
+        if not hasattr(df, "columns") or df.empty:
+            return None
+        if df.shape[1] <= idx:
+            return None
+        col = df.columns[idx]
+        # pandas Timestamp / datetime / np.datetime64 → strftime
+        if hasattr(col, "strftime"):
+            return col.strftime("%Y-%m-%d")
+        return str(col)[:10]
+    except Exception:
+        return None
+
+
+def _prev_year_ratios(tk: "yf.Ticker") -> dict[str, float | None]:
+    """Extrait les ratios Piotroski Y-1 + dates de période fiscale depuis
+    les annuels yfinance.
+
+    Les 5 ratios nécessaires pour F3/F5/F6/F8/F9 :
       - return_on_assets_prev_year : Net Income Y-1 / Total Assets Y-1
       - debt_to_equity_prev_year   : Total Debt Y-1 / Total Stockholder Equity Y-1
       - current_ratio_prev_year    : Current Assets Y-1 / Current Liabilities Y-1
       - shares_outstanding_prev_year : Ordinary Shares Number Y-1
       - gross_margin_prev_year     : Gross Profit Y-1 / Total Revenue Y-1
 
+    Plus 2 dates ISO :
+      - fundamentals_period_end    : fin de période fiscale Y0 (la plus récente)
+      - fundamentals_period_end_y1 : fin de période fiscale Y-1
+
+    Permet à `_piotroski_score_pillar(as_of, publication_lag_days)` de
+    refuser un Y-1 dont la période fiscale n'a pas encore été publiée à
+    `as_of` (vrai check par-ticker, plus rigoureux que le lag 90j fixe).
+
     Fail-open : si un appel yfinance pète, on renvoie {} (scoring retombe
     sur le cas 4 critères absolus — pas de régression).
     """
-    out: dict[str, float | None] = {
+    out: dict[str, float | str | None] = {
         "return_on_assets_prev_year":   None,
         "debt_to_equity_prev_year":     None,
         "current_ratio_prev_year":      None,
         "shares_outstanding_prev_year": None,
         "gross_margin_prev_year":       None,
+        "fundamentals_period_end":      None,
+        "fundamentals_period_end_y1":   None,
     }
     try:
         bs = tk.balance_sheet            # DataFrame annuel (cols = years desc)
@@ -116,6 +155,10 @@ def _prev_year_ratios(tk: "yf.Ticker") -> dict[str, float | None]:
 
     bs_prev = _prev_year_col(bs)
     fin_prev = _prev_year_col(fin)
+    # On extrait les dates même si une seule des deux sources marche : la
+    # bs_prev est plus fiable que fin (P&L parfois absent en free yfinance).
+    out["fundamentals_period_end"]    = _col_date(bs, 0) or _col_date(fin, 0)
+    out["fundamentals_period_end_y1"] = _col_date(bs, 1) or _col_date(fin, 1)
     if bs_prev is None and fin_prev is None:
         return out
 
@@ -166,6 +209,178 @@ def _prev_year_ratios(tk: "yf.Ticker") -> dict[str, float | None]:
     if gp_prev is not None and rev_prev is not None and rev_prev != 0:
         out["gross_margin_prev_year"] = gp_prev / rev_prev
 
+    return out
+
+
+def _scrape_revisions_and_earnings(tk: "yf.Ticker") -> dict[str, Any]:
+    """Scrape les révisions analyste, l'earnings surprise history et le prochain
+    earnings depuis yfinance. Tout fail-open — si une source pète, on retourne
+    le dict avec None pour les fields concernés.
+
+    Champs produits :
+      • upgrades_30d / downgrades_30d / upgrades_90d / downgrades_90d
+      • revisions_net_score ∈ [-1, 1]
+      • earnings_surprise_pct_last / earnings_surprise_avg_4q / earnings_beat_rate_8q
+      • next_earnings_date (ISO)
+    """
+    out: dict[str, Any] = {
+        "upgrades_30d":                 None,
+        "downgrades_30d":               None,
+        "upgrades_90d":                 None,
+        "downgrades_90d":               None,
+        "revisions_net_score":          None,
+        "earnings_surprise_pct_last":   None,
+        "earnings_surprise_avg_4q":     None,
+        "earnings_beat_rate_8q":        None,
+        "next_earnings_date":           None,
+    }
+
+    # ── Recommendations history (upgrades / downgrades) ─────────────────
+    # `tk.recommendations` retourne un DataFrame avec colonnes
+    # [period, strongBuy, buy, hold, sell, strongSell] ou (legacy) un index
+    # daté avec [Action, From Grade, To Grade, Firm]. On gère les deux schémas.
+    try:
+        rec = tk.recommendations
+        if rec is not None and not rec.empty:
+            up_30 = down_30 = up_90 = down_90 = 0
+            now_ts = pd.Timestamp.utcnow().tz_localize(None)
+
+            cols = set(rec.columns) if hasattr(rec, "columns") else set()
+            if {"strongBuy", "buy", "sell", "strongSell"} & cols:
+                # Schéma actuel yfinance : aggrégat par période ('0m','-1m'…).
+                # On considère 0m+(-1m) pour 30d. On compare au snapshot deux
+                # périodes plus tôt pour estimer net upgrades/downgrades :
+                # une montée de strongBuy+buy = up, une montée sell+strongSell = down.
+                df = rec.copy()
+                if "period" in df.columns:
+                    df = df.set_index("period")
+                # Index attendu : '0m', '-1m', '-2m', '-3m'
+                def _bull(r) -> int:
+                    return int((r.get("strongBuy") or 0) + (r.get("buy") or 0))
+                def _bear(r) -> int:
+                    return int((r.get("sell") or 0) + (r.get("strongSell") or 0))
+                if "0m" in df.index and "-1m" in df.index:
+                    bull_now  = _bull(df.loc["0m"])
+                    bear_now  = _bear(df.loc["0m"])
+                    bull_1m   = _bull(df.loc["-1m"])
+                    bear_1m   = _bear(df.loc["-1m"])
+                    up_30   = max(0, bull_now - bull_1m)
+                    down_30 = max(0, bear_now - bear_1m)
+                if "0m" in df.index and "-3m" in df.index:
+                    bull_now  = _bull(df.loc["0m"])
+                    bear_now  = _bear(df.loc["0m"])
+                    bull_3m   = _bull(df.loc["-3m"])
+                    bear_3m   = _bear(df.loc["-3m"])
+                    up_90   = max(0, bull_now - bull_3m)
+                    down_90 = max(0, bear_now - bear_3m)
+            else:
+                # Schéma legacy daté : on classe les actions sur 30/90j.
+                if not isinstance(rec.index, pd.DatetimeIndex):
+                    try:
+                        rec.index = pd.to_datetime(rec.index)
+                    except Exception:
+                        pass
+                if isinstance(rec.index, pd.DatetimeIndex):
+                    rec = rec.copy()
+                    if rec.index.tz is not None:
+                        rec.index = rec.index.tz_localize(None)
+                    cutoff_30 = now_ts - pd.Timedelta(days=30)
+                    cutoff_90 = now_ts - pd.Timedelta(days=90)
+                    actions = rec.get("Action") if "Action" in rec.columns else None
+                    if actions is not None:
+                        a30 = actions[rec.index >= cutoff_30]
+                        a90 = actions[rec.index >= cutoff_90]
+                        # yfinance 'Action' ∈ {'main', 'reit', 'up', 'down', 'init'}
+                        up_30   = int((a30 == "up").sum())
+                        down_30 = int((a30 == "down").sum())
+                        up_90   = int((a90 == "up").sum())
+                        down_90 = int((a90 == "down").sum())
+
+            out["upgrades_30d"]   = up_30
+            out["downgrades_30d"] = down_30
+            out["upgrades_90d"]   = up_90
+            out["downgrades_90d"] = down_90
+            denom = up_90 + down_90
+            if denom > 0:
+                out["revisions_net_score"] = (up_90 - down_90) / denom
+    except Exception as e:
+        logger.debug(f"[YF revisions] scrape failed: {e}")
+
+    # ── Earnings surprise history (PEAD signal) ─────────────────────────
+    try:
+        eh = None
+        # tk.earnings_history retourne DF avec colonnes
+        # ['epsEstimate', 'epsActual', 'epsDifference', 'surprisePercent']
+        if hasattr(tk, "earnings_history"):
+            eh = tk.earnings_history
+        if eh is not None and not eh.empty and "surprisePercent" in eh.columns:
+            sp = pd.to_numeric(eh["surprisePercent"], errors="coerce").dropna()
+            if len(sp):
+                out["earnings_surprise_pct_last"] = float(sp.iloc[-1])
+                if len(sp) >= 1:
+                    out["earnings_surprise_avg_4q"] = float(sp.tail(4).mean())
+                # Beat = surprisePercent > 0 (surprise positive = beat).
+                last_n = sp.tail(8)
+                if len(last_n) >= 4:
+                    out["earnings_beat_rate_8q"] = float((last_n > 0).mean())
+    except Exception as e:
+        logger.debug(f"[YF earnings_history] scrape failed: {e}")
+
+    # ── Next earnings date ──────────────────────────────────────────────
+    # `tk.calendar` peut être un dict {Earnings Date: [Timestamp]} ou un DF.
+    try:
+        cal = tk.calendar
+        next_date: Any = None
+        if isinstance(cal, dict):
+            ed = cal.get("Earnings Date") or cal.get("earningsDate")
+            if isinstance(ed, list) and ed:
+                next_date = ed[0]
+            elif ed is not None:
+                next_date = ed
+        elif cal is not None and hasattr(cal, "iloc") and not cal.empty:
+            row_idx = "Earnings Date"
+            if row_idx in cal.index:
+                next_date = cal.loc[row_idx].iloc[0]
+        if next_date is not None:
+            if hasattr(next_date, "strftime"):
+                out["next_earnings_date"] = next_date.strftime("%Y-%m-%d")
+            else:
+                out["next_earnings_date"] = str(next_date)[:10]
+    except Exception as e:
+        logger.debug(f"[YF calendar] scrape failed: {e}")
+
+    return out
+
+
+def _scrape_dividend_safety(tk: "yf.Ticker", info: dict[str, Any]) -> dict[str, Any]:
+    """Champs pour le Dividend Safety Score. yfinance.info expose payoutRatio
+    et fiveYearAvgDividendYield directement ; dividendsPaid vient du cashflow
+    annuel (négatif chez yfinance par convention)."""
+    out: dict[str, Any] = {
+        "payout_ratio":                 _safe_float(info.get("payoutRatio")),
+        "dividends_paid":               None,
+        "five_year_avg_dividend_yield": None,
+    }
+    raw_fy = _safe_float(info.get("fiveYearAvgDividendYield"))
+    if raw_fy is not None:
+        # yfinance bug : peut renvoyer en % (4.2) au lieu de ratio (0.042).
+        if raw_fy > 1.0:
+            raw_fy = raw_fy / 100.0
+        if 0.0 <= raw_fy <= 0.25:
+            out["five_year_avg_dividend_yield"] = raw_fy
+
+    try:
+        cf = tk.cashflow
+        if cf is not None and not cf.empty and cf.shape[1] >= 1:
+            for k in ("Cash Dividends Paid", "Dividends Paid"):
+                if k in cf.index:
+                    v = _safe_float(cf.loc[k].iloc[0])
+                    if v is not None:
+                        # yfinance retourne dividendsPaid négatif → on prend |v|.
+                        out["dividends_paid"] = abs(v)
+                        break
+    except Exception as e:
+        logger.debug(f"[YF dividends_paid] scrape failed: {e}")
     return out
 
 
@@ -323,6 +538,9 @@ class YFinanceProvider(FundamentalProviderBase, MarketDataProviderBase):
         # hit yfinance 1× de plus. Fail-open → pas de régression si les
         # annuels sont absents (ex: nouvelles IPOs < 1 an).
         prev = _prev_year_ratios(tk) if tk is not None else {}
+        # Lot 16 — Revisions / Earnings Surprise / Dividend Safety. Fail-open.
+        rev_data = _scrape_revisions_and_earnings(tk) if tk is not None else {}
+        div_safety = _scrape_dividend_safety(tk, info) if tk is not None else {}
 
         return FinancialRatios(
             ticker=ticker,
@@ -334,6 +552,11 @@ class YFinanceProvider(FundamentalProviderBase, MarketDataProviderBase):
             exchange=info.get("exchange") or info.get("fullExchangeName"),
             market_cap=_recover_market_cap(info, current_price, shares_outstanding),
             current_price=current_price,
+            # Audit S3.x — ADTV 3M : yfinance expose `averageVolume` (3M) et
+            # `averageVolume10days` (10j). On préfère le 3M, plus robuste.
+            avg_volume_3m=_safe_float(
+                info.get("averageVolume") or info.get("averageVolume10days")
+            ),
             forward_pe=_safe_float(info.get("forwardPE")),
             trailing_pe=_safe_float(info.get("trailingPE")),
             peg_ratio=_safe_float(info.get("pegRatio") or info.get("trailingPegRatio")),
@@ -374,6 +597,21 @@ class YFinanceProvider(FundamentalProviderBase, MarketDataProviderBase):
             current_ratio_prev_year=prev.get("current_ratio_prev_year"),
             shares_outstanding_prev_year=prev.get("shares_outstanding_prev_year"),
             gross_margin_prev_year=prev.get("gross_margin_prev_year"),
+            fundamentals_period_end=prev.get("fundamentals_period_end"),
+            fundamentals_period_end_y1=prev.get("fundamentals_period_end_y1"),
+            # Lot 16 — Revisions / Earnings Surprise / Dividend Safety.
+            upgrades_30d=rev_data.get("upgrades_30d"),
+            downgrades_30d=rev_data.get("downgrades_30d"),
+            upgrades_90d=rev_data.get("upgrades_90d"),
+            downgrades_90d=rev_data.get("downgrades_90d"),
+            revisions_net_score=rev_data.get("revisions_net_score"),
+            earnings_surprise_pct_last=rev_data.get("earnings_surprise_pct_last"),
+            earnings_surprise_avg_4q=rev_data.get("earnings_surprise_avg_4q"),
+            earnings_beat_rate_8q=rev_data.get("earnings_beat_rate_8q"),
+            next_earnings_date=rev_data.get("next_earnings_date"),
+            payout_ratio=div_safety.get("payout_ratio"),
+            dividends_paid=div_safety.get("dividends_paid"),
+            five_year_avg_dividend_yield=div_safety.get("five_year_avg_dividend_yield"),
             source_provider=self.name,
             fetched_at=fetched_at,
         )
