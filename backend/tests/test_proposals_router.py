@@ -9,7 +9,7 @@ Couvre :
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,7 +48,8 @@ def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(api_core, "CSV_PATH", csv_path)
     monkeypatch.setattr(api_core, "CSV_LOCK_PATH", tmp_path / "trade_journal.csv.lock")
     # CRITIQUE : force PaperBroker — sinon /approve → vrais ordres Alpaca (test leak).
-    from modules import broker_gateway, utils as mod_utils
+    from modules import broker_gateway
+    from modules import utils as mod_utils
     monkeypatch.setattr(mod_utils, "CSV_PATH", csv_path)
     monkeypatch.setattr(mod_utils, "CSV_LOCK_PATH", tmp_path / "trade_journal.csv.lock")
     monkeypatch.setattr(broker_gateway, "CSV_PATH", csv_path)
@@ -234,7 +235,7 @@ def test_list_triggers_expiration_sweep(client, isolated_storage):
         entry=10.0, stop_loss=9.0, take_profit=15.0, size=1,
         sector="?", signal="AUTO_PROPOSAL",
     )
-    p.expires_at = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(
+    p.expires_at = (datetime.now(UTC) - timedelta(hours=1)).replace(
         microsecond=0).isoformat().replace("+00:00", "Z")
     proposals.enqueue_batch([p])
 

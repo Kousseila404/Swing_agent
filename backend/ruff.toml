@@ -36,5 +36,12 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"tests/*" = ["E402", "F401"]  # tests peuvent importer librement
+# Tests : imports libres + variables laissées pour debug/lecture
+"tests/*" = ["E402", "F401", "F841"]
 "__init__.py" = ["F401"]
+# api.py insère sys.path AVANT d'importer les routers (pattern monorepo
+# pour que `from modules ...` marche peu importe le CWD d'uvicorn).
+"api.py" = ["E402"]
+# risk.py : import tardif `from pathlib import Path as _Path` après le
+# bloc de docstring sectoriel — pattern intentionnel, ne pas remonter.
+"modules/risk.py" = ["E402"]

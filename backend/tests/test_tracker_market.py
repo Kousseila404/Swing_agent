@@ -12,7 +12,6 @@ import pytest
 
 from modules.tracker import market
 
-
 # ─────────────────────────────────────────────────────────────────
 # is_market_hours — basé sur l'heure réelle NY
 # ─────────────────────────────────────────────────────────────────

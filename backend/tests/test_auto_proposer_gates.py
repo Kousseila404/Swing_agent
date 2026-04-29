@@ -9,7 +9,7 @@ CB state, macro JSON, universe JSON, scored universe…). On vérifie que :
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -28,7 +28,7 @@ def fresh_universe_json(tmp_path, monkeypatch):
     """Crée un universe.json updated_at=now (pas stale)."""
     p = tmp_path / "universe.json"
     p.write_text(json.dumps({
-        "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "updated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "tickers": [],
     }))
     monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", p)
@@ -128,7 +128,7 @@ def test_universe_severe_stale_blocks(tmp_path, monkeypatch, isolated_proposals,
                                        trading_allowed, cb_clean, bull_macro,
                                        empty_portfolio):
     p = tmp_path / "universe.json"
-    very_old = datetime.now(timezone.utc) - timedelta(hours=72)
+    very_old = datetime.now(UTC) - timedelta(hours=72)
     p.write_text(json.dumps({
         "updated_at": very_old.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }))

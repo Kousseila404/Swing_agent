@@ -8,6 +8,7 @@ pytest-cov>=5.0.0
 # Linting/type checking
 ruff>=0.7.0
 mypy>=1.13.0
+pre-commit>=4.0.0
 
 # Notebooks (optionnel)
 ipython==8.18.1

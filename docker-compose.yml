@@ -1,0 +1,58 @@
+# SwingQuant TITAN — Compose dev (reproductibilité poste local)
+# ─────────────────────────────────────────────────────────────────
+# Usage :
+#   docker compose up backend          # API seule (port 8000)
+#   docker compose up                  # API + frontend Vite (port 5173)
+#   docker compose run --rm backend pytest tests/   # tests dans l'image
+#
+# La prod tourne en systemd (swing-api.service), pas en compose. Ce fichier
+# sert à :
+#   - reproduire l'environnement CI sur n'importe quel laptop
+#   - smoke-tester un upgrade de Python/deps avant de toucher au venv prod
+#   - faire tourner les tests dans une image équivalente à la CI
+# ─────────────────────────────────────────────────────────────────
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: swingquant-backend:dev
+    container_name: titan-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override pour bind 0.0.0.0 dans le conteneur, expose l'API au host
+      PYTHONUNBUFFERED: "1"
+      TITAN_ENV: "docker-dev"
+    volumes:
+      # Le state mutable (journal, cache, état) reste partagé avec le host.
+      # En CI ce volume est absent → l'image démarre vide (smoke build only).
+      - ./backend/data:/app/data
+      - ./logs:/app/../logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    image: node:20-alpine
+    container_name: titan-frontend
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_URL: "http://localhost:8000"
+    depends_on:
+      - backend
+    profiles:
+      # Dev uniquement — `docker compose --profile dev up` pour démarrer aussi le front
+      - dev

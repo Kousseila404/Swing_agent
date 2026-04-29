@@ -21,7 +21,6 @@ from data_providers import (
 )
 from data_providers.base import FundamentalProviderBase, MarketDataProviderBase
 
-
 # ── Helpers mock HTTP ──────────────────────────────────────────────────────
 
 def _mock_response(status: int, json_payload):

@@ -45,4 +45,6 @@ backend/.pytest_cache/
 
 # OS
 .DS_Store
-.github/workflows/
+
+# Backups locaux (générés par scripts/backup_journal.sh)
+backups/

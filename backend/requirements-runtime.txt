@@ -48,3 +48,6 @@ structlog>=24.4.0
 
 # ── Process & zombie lifecycle (.jobs/ API) ──
 psutil>=7.0.0
+
+# ── Broker (live trading via Alpaca) ──
+alpaca-py>=0.43.0

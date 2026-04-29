@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -17,7 +17,7 @@ def _write_universe(path: Path, payload: dict) -> None:
 
 
 def _fresh_iso(days_ago: float = 0) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime(
+    return (datetime.now(UTC) - timedelta(days=days_ago)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 

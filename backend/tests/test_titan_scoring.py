@@ -225,9 +225,9 @@ def test_lot3_small_sector_falls_back_to_global():
     out = _percentile_rank_by_sector(values, sectors, higher_is_better=True)
     # E1/E2/E3 fallback global → leurs valeurs (0.10/0.15/0.20) sont les
     # 3 plus basses sur 9 → percentile-rank ~5/16/27
-    assert out["E1"] < 30, f"E1 (smallest sector, lowest value) should be low globally"
+    assert out["E1"] < 30, "E1 (smallest sector, lowest value) should be low globally"
     # T6 est le max global → ~94
-    assert out["T6"] > 80, f"T6 (largest value) should be top globally"
+    assert out["T6"] > 80, "T6 (largest value) should be top globally"
 
 
 def test_lot3_per_sector_ranking_independent_per_metric():

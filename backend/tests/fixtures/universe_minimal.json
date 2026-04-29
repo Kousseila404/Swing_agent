@@ -1,0 +1,11 @@
+{
+  "_comment": "Fixture minimale pour CI — contient les tickers utilisés par tests/test_risk.py::TestSectorConcentration. Posée à backend/data/universe.json par le step CI 'Bootstrap test fixtures' avant pytest.",
+  "tickers": {
+    "NVDA": {"sector": "Technology"},
+    "AMD":  {"sector": "Technology"},
+    "MU":   {"sector": "Technology"},
+    "XOM":  {"sector": "Energy"},
+    "JPM":  {"sector": "Financial Services"},
+    "AAPL": {"sector": "Technology"}
+  }
+}

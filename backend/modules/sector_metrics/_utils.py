@@ -169,7 +169,7 @@ def _winsorize_by_sector(
     global_borders = _winsorize_values(values, lower_pct=lower_pct, upper_pct=upper_pct)
 
     out: dict[str, float | None] = {}
-    for sec, sub in by_sector.items():
+    for sub in by_sector.values():
         n_valid = sum(
             1 for v in sub.values()
             if v is not None and math.isfinite(v)

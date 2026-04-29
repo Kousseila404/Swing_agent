@@ -217,7 +217,7 @@ def _percentile_rank_by_sector(
     # 2. Compte des valeurs valides par secteur → décide rank intra ou global
     out: dict[str, float | None] = {}
     fallback_tickers: list[str] = []
-    for sec, sub in by_sector.items():
+    for sub in by_sector.values():
         n_valid = sum(
             1 for v in sub.values()
             if v is not None and math.isfinite(v)
