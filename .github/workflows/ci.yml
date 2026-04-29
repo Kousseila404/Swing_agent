@@ -30,6 +30,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Bootstrap test fixtures (universe.json minimal)
+        # backend/data/ est gitignored. Certains tests (sector_concentration)
+        # lisent data/universe.json en runtime ; on pose la fixture minimale
+        # avant pytest pour reproduire l'environnement local.
+        run: |
+          mkdir -p data
+          cp tests/fixtures/universe_minimal.json data/universe.json
+
       - name: Ruff lint
         run: ruff check modules/ tests/ api.py tracker.py
 
