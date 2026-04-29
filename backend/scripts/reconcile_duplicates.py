@@ -37,7 +37,7 @@ import pandas as pd
 from filelock import FileLock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from modules.api_core import CSV_LOCK_PATH, CSV_PATH   # noqa: E402
+from modules.api_core import CSV_LOCK_PATH, CSV_PATH  # noqa: E402
 
 
 def find_duplicates(df: pd.DataFrame) -> dict[str, pd.DataFrame]:

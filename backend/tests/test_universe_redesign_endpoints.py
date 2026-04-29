@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 import api
 from modules import api_core, proposals, titan_alerts
 
-
 # ─────────────────────────────────────────────────────────────────
 # FIXTURES
 # ─────────────────────────────────────────────────────────────────

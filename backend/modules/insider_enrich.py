@@ -28,7 +28,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _UNIVERSE_PATH = _PROJECT_ROOT / "data" / "universe.json"
 
 
-def _enrich_one(ticker: str) -> tuple[str, dict[str, "object"]]:
+def _enrich_one(ticker: str) -> tuple[str, dict[str, object]]:
     activity = fetch_insider_activity(ticker)
     pillar = compute_insider_pillar_score(activity)
     return ticker, {
@@ -47,7 +47,7 @@ def enrich_universe_with_insider(
     *,
     budget: int | None = None,
     workers: int = 5,
-) -> dict[str, "object"]:
+) -> dict[str, object]:
     """Lit universe.json, enrichit avec insider_score, persiste.
 
     Args:

@@ -139,7 +139,7 @@ def _recursive_bisection(cov: np.ndarray, sorted_idx: list[int]) -> dict[int, fl
 
 def _fetch_returns(
     tickers: list[str],
-    market_provider: "MarketDataProviderBase",
+    market_provider: MarketDataProviderBase,
     window_days: int,
 ) -> dict[str, pd.Series]:
     """Récupère les log-returns daily 60j+5buf pour chaque ticker.
@@ -169,7 +169,7 @@ def compute_hrp_weights(
     tickers: list[str],
     scored: dict[str, dict[str, Any]],
     *,
-    market_provider: "MarketDataProviderBase | None" = None,
+    market_provider: MarketDataProviderBase | None = None,
     window_days: int = DEFAULT_HRP_WINDOW_DAYS,
 ) -> tuple[dict[str, float], dict[str, dict[str, Any]], bool, dict[str, Any]]:
     """Compute HRP weights or fallback (équivalent contrat à _risk_parity.compute_weights).

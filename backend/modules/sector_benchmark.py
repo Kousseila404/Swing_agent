@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,7 @@ def _read_cache(ticker: str) -> dict[str, Any] | None:
     if time.time() - p.stat().st_mtime > _CACHE_TTL:
         return None
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None

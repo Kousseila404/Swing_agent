@@ -159,7 +159,6 @@ def compute_buy_signal(
     composite = _safe(row.get("titan_composite_score"))
     quality = _safe(row.get("quality_score"))
     value = _safe(row.get("value_score"))
-    risk = _safe(row.get("risk_score"))
     momentum = _safe(row.get("momentum_score"))
     revisions = _safe(row.get("revisions_score"))
     insider_cluster = bool(row.get("insider_cluster_buying"))
@@ -236,7 +235,7 @@ def compute_buy_signal(
     if piotroski_f is not None and piotroski_f >= _T_PIOTROSKI_BOOSTER:
         boosters.append(f"Piotroski {piotroski_f}/9")
     if support_score is not None and support_score >= _T_SUPPORT_BOOSTER:
-        boosters.append(f"Support ≥ 70 (ON_SUPPORT)")
+        boosters.append("Support ≥ 70 (ON_SUPPORT)")
     if beat_rate is not None and beat_rate >= _T_BEAT_RATE_BOOSTER:
         boosters.append(f"Beat rate {beat_rate*100:.0f}% / 8Q")
     res.boosters_active = boosters

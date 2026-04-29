@@ -24,7 +24,6 @@ Output : 90+ snapshots gzip dans .universe_history/.
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
 import sys
 import time

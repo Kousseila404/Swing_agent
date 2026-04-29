@@ -17,8 +17,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-import pandas as pd
-
 from modules import alerter, universe_history
 from modules.duckdb_journal import read_journal_df
 from modules.log import logger

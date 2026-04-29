@@ -32,7 +32,7 @@ def enrich_universe_with_finnhub(
     *,
     budget: int | None = None,
     use_cache: bool = True,
-) -> dict[str, "object"]:
+) -> dict[str, object]:
     """Lit universe.json, enrichit Revisions/Earnings via Finnhub, persiste.
 
     Args:

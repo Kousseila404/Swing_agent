@@ -25,7 +25,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib import error as urlerror, request
+from urllib import error as urlerror
+from urllib import request
 
 from modules.log import logger
 
@@ -241,7 +242,7 @@ def _read_filings_cache(ticker: str) -> dict[str, Any] | None:
     if time.time() - p.stat().st_mtime > _FILINGS_CACHE_TTL:
         return None
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None

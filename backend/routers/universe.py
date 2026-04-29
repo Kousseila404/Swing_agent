@@ -69,6 +69,7 @@ def _load_portfolio_status() -> dict[str, str]:
     # WATCH (clôtures récentes / executed — précédence la plus basse, écrit en 1er).
     try:
         from datetime import datetime as _dt
+
         from modules import proposals as _proposals
         cutoff_iso = (
             _dt.utcnow() - timedelta(days=_WATCH_LOOKBACK_DAYS)
@@ -87,6 +88,7 @@ def _load_portfolio_status() -> dict[str, str]:
     # VETOED (rejected récents).
     try:
         from datetime import datetime as _dt
+
         from modules import proposals as _proposals
         cutoff_iso = (
             _dt.utcnow() - timedelta(days=_VETOED_LOOKBACK_DAYS)

@@ -257,7 +257,7 @@ def _compute_period(
         weights = {}
 
     returns: dict[str, float] = {}
-    for t, w in weights.items():
+    for t, _w in weights.items():
         if t in px_t and t in px_t1:
             returns[t] = (px_t1[t] / px_t[t]) - 1.0
 
@@ -504,7 +504,7 @@ def run_titan_top_n(
     periods: list[PeriodResult] = []
     prev_w: dict[str, float] = {}
     n_skipped_periods = 0
-    for (d0, s0), (d1, s1) in zip(snapshots[:-1], snapshots[1:]):
+    for (d0, s0), (d1, s1) in zip(snapshots[:-1], snapshots[1:], strict=False):
         active = active_per_date.get(d0)
         # Si le registry est vide pour cette date (premier run, pas d'historique
         # de delisting) ⇒ active=set vide ⇒ on désactive le filtre pour ne pas

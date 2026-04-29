@@ -16,6 +16,7 @@ Pansement Sentiment (FMP stable) :
 from __future__ import annotations
 
 import math
+from datetime import date
 from typing import Any
 
 from modules.log import logger
@@ -285,7 +286,7 @@ _FUNDAMENTAL_PUBLICATION_LAG_DAYS = 90
 def _lookup_yoy_snapshot(
     ticker: str,
     *,
-    as_of: "date | None" = None,
+    as_of: date | None = None,
     publication_lag_days: int = _FUNDAMENTAL_PUBLICATION_LAG_DAYS,
 ) -> dict[str, Any] | None:
     """Retourne le row du ticker dans le snapshot Y-1 (~365 jours avant `as_of`).
@@ -422,7 +423,7 @@ def _piotroski_f_score_absolute(
 def _piotroski_score_pillar(
     row: dict[str, Any],
     *,
-    as_of: "date | None" = None,
+    as_of: date | None = None,
     publication_lag_days: int = _FUNDAMENTAL_PUBLICATION_LAG_DAYS,
 ) -> tuple[float, dict[str, Any]]:
     """Convertit le F-Score brut en score 0-100 normalisé par #critères évalués.
@@ -451,7 +452,8 @@ def _piotroski_score_pillar(
         # n'était pas encore publiée à `as_of` (cas backtest), on refuse
         # ce Y-1 — sinon look-ahead silencieux.
         if as_of is not None and publication_lag_days > 0:
-            from datetime import date as _date, timedelta as _td
+            from datetime import date as _date
+            from datetime import timedelta as _td
             period_end_y1 = row.get("fundamentals_period_end_y1")
             if isinstance(period_end_y1, str):
                 try:

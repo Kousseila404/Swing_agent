@@ -14,7 +14,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel, Field
 
-from modules import api_core, price_alerts as pa_mod, titan_alerts as ta_mod, watchlist as wl_mod
+from modules import api_core
+from modules import price_alerts as pa_mod
+from modules import titan_alerts as ta_mod
+from modules import watchlist as wl_mod
 from modules.log import logger
 
 router = APIRouter(prefix="/api", tags=["watchlist"])
@@ -49,7 +52,7 @@ def get_watchlist() -> dict[str, Any]:
         return {"items": items, "count": len(items)}
     except Exception as exc:
         logger.error(f"[watchlist] GET failed: {exc}")
-        raise HTTPException(status_code=503, detail="Watchlist storage error")
+        raise HTTPException(status_code=503, detail="Watchlist storage error") from exc
 
 
 @router.post("/watchlist")
@@ -66,10 +69,10 @@ def post_watchlist(
         )
         return {"ok": True, "item": item}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(f"[watchlist] POST failed: {exc}")
-        raise HTTPException(status_code=503, detail="Watchlist storage error")
+        raise HTTPException(status_code=503, detail="Watchlist storage error") from exc
 
 
 @router.delete("/watchlist/{ticker}")
@@ -82,7 +85,7 @@ def delete_watchlist(
         return {"ok": True, "removed": removed}
     except Exception as exc:
         logger.error(f"[watchlist] DELETE failed: {exc}")
-        raise HTTPException(status_code=503, detail="Watchlist storage error")
+        raise HTTPException(status_code=503, detail="Watchlist storage error") from exc
 
 
 # ─── NOTES ───────────────────────────────────────────────────────
@@ -94,7 +97,7 @@ def get_notes(ticker: str) -> dict[str, Any]:
         return {"ticker": ticker.upper().strip(), "notes": notes, "count": len(notes)}
     except Exception as exc:
         logger.error(f"[notes] GET failed: {exc}")
-        raise HTTPException(status_code=503, detail="Notes storage error")
+        raise HTTPException(status_code=503, detail="Notes storage error") from exc
 
 
 @router.post("/notes/{ticker}")
@@ -107,10 +110,10 @@ def post_note(
         note = wl_mod.add_note(ticker, req.body)
         return {"ok": True, "note": note}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(f"[notes] POST failed: {exc}")
-        raise HTTPException(status_code=503, detail="Notes storage error")
+        raise HTTPException(status_code=503, detail="Notes storage error") from exc
 
 
 @router.put("/notes/{note_id}")
@@ -125,12 +128,12 @@ def put_note(
             raise HTTPException(status_code=404, detail="Note introuvable")
         return {"ok": True, "note": note}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(f"[notes] PUT failed: {exc}")
-        raise HTTPException(status_code=503, detail="Notes storage error")
+        raise HTTPException(status_code=503, detail="Notes storage error") from exc
 
 
 @router.delete("/notes/{note_id}")
@@ -143,7 +146,7 @@ def delete_note_endpoint(
         return {"ok": True, "deleted": ok}
     except Exception as exc:
         logger.error(f"[notes] DELETE failed: {exc}")
-        raise HTTPException(status_code=503, detail="Notes storage error")
+        raise HTTPException(status_code=503, detail="Notes storage error") from exc
 
 
 # ─── TITAN ALERTS — seuils utilisateur (Tier B #3) ──────────────
@@ -175,7 +178,7 @@ def post_titan_alert(
         )
         return {"ok": True, "alert": item}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/titan_alerts/{alert_id}")
@@ -232,7 +235,7 @@ def post_price_alert(
         )
         return {"ok": True, "alert": item}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/price_alerts/{alert_id}")

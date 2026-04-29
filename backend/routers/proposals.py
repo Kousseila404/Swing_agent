@@ -20,13 +20,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, Security
-from filelock import FileLock
 from pydantic import BaseModel, Field
 
 from modules import api_core, auto_proposer, proposals
-from modules.duckdb_journal import shadow_insert
 from modules.log import logger
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
@@ -339,7 +336,7 @@ def approve_proposal(
         )
         # Revert : remet la proposition en pending pour permettre un retry.
         try:
-            proposals._read_all_unlocked  # sanity check import ok
+            _ = proposals._read_all_unlocked  # sanity check import ok
             # Simple path : on mute directement le fichier via update_status inverse
             # n'existe pas → on laisse la proposition "approved" orphaned, l'utilisateur
             # peut la rejeter manuellement et le proposer la regénérera.

@@ -133,7 +133,7 @@ def _spearman(xs: list[float], ys: list[float]) -> float | None:
     ry = _ranks(ys)
     mx = statistics.mean(rx)
     my = statistics.mean(ry)
-    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry, strict=False))
     denx = math.sqrt(sum((a - mx) ** 2 for a in rx))
     deny = math.sqrt(sum((b - my) ** 2 for b in ry))
     if denx <= 0 or deny <= 0:
@@ -200,7 +200,7 @@ def _ic_per_pillar(rows: list[dict[str, Any]]) -> dict[str, float]:
     for p in PILLARS:
         xs = [r.get(p) for r in rows]
         # On filtre paire-par-paire les None pour préserver l'alignement.
-        paired = [(x, y) for x, y in zip(xs, fwd) if x is not None]
+        paired = [(x, y) for x, y in zip(xs, fwd, strict=False) if x is not None]
         if len(paired) < 5:
             out[p] = float("nan")
             continue
@@ -348,7 +348,7 @@ def run_walk_forward(
 
     pair_rows: list[tuple[date, list[dict[str, Any]]]] = []
     n_skipped_lag = 0
-    for (d0, s0), (_d1, s1) in zip(snapshots[:-1], snapshots[1:]):
+    for (d0, s0), (_d1, s1) in zip(snapshots[:-1], snapshots[1:], strict=False):
         snap_score = _score_snap_for(d0)
         if snap_score is None:
             n_skipped_lag += 1
@@ -505,7 +505,7 @@ def _main() -> int:
         return 0
 
     diag = result.diagnostics
-    print(f"=== WFO IC calibration — TITAN piliers ===")
+    print("=== WFO IC calibration — TITAN piliers ===")
     print(f"Période : {diag['date_range']['start']} → {diag['date_range']['end']}")
     print(f"Snapshots : {diag['n_snapshots']} | paires : {diag['n_pairs']} | folds : {result.n_folds}")
     print(f"Train : {diag['train_days']}j | Test : {diag['test_days']}j | grid step : {diag['grid_step']}")
@@ -516,7 +516,7 @@ def _main() -> int:
               "universe_history grossisse.")
         return 1
 
-    print(f"=== Poids optimaux moyens (validation OOS) ===")
+    print("=== Poids optimaux moyens (validation OOS) ===")
     sorted_w = sorted(result.avg_weights.items(), key=lambda kv: -kv[1])
     for p, w in sorted_w:
         bar = "█" * int(w * 60 + 0.5)

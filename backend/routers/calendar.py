@@ -14,13 +14,13 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
-from pathlib import Path
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query
 
-from modules import api_core, watchlist as wl_mod
+from modules import api_core
+from modules import watchlist as wl_mod
 from modules.duckdb_journal import read_journal_df
 from modules.log import logger
 from modules.sector_metrics import get_scored_universe
@@ -119,7 +119,7 @@ def get_calendar(days: int = Query(30, ge=1, le=120)) -> dict[str, Any]:
     # ─── Macro events ──────────────────────────────────────────
     if _MACRO_CALENDAR_PATH.exists():
         try:
-            with open(_MACRO_CALENDAR_PATH, "r", encoding="utf-8") as f:
+            with open(_MACRO_CALENDAR_PATH, encoding="utf-8") as f:
                 macro = json.load(f)
             for e in macro.get("events", []):
                 ed = _safe_parse_date(e.get("date"))

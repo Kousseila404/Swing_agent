@@ -40,7 +40,6 @@ import math
 import sys
 import time
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -51,7 +50,6 @@ from modules.sector_metrics._momentum import (
     _MOMENTUM_HISTORY_DAYS,
     _compute_momentum_stats,
 )
-
 
 # Bundle size pour `yf.download(...)` — au-delà de 100 tickers en un appel
 # yfinance retourne souvent des Closes manquants. 100 = sweet-spot empirique.

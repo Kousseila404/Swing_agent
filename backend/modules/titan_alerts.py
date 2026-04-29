@@ -33,9 +33,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from filelock import FileLock
@@ -58,7 +57,7 @@ ALLOWED_DIRECTIONS = {"above", "below"}
 
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return datetime.now(UTC).replace(microsecond=0)
 
 
 def _iso(dt: datetime) -> str:

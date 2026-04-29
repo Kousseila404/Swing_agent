@@ -10,7 +10,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from modules import finnhub_news, watchlist as wl_mod
+from modules import finnhub_news
+from modules import watchlist as wl_mod
 from modules.duckdb_journal import read_journal_df
 from modules.log import logger
 

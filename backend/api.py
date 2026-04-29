@@ -51,9 +51,17 @@ from modules import api_core  # noqa: E402
 from modules.log import logger  # noqa: E402
 from routers import (  # noqa: E402
     attribution as attribution_router,
+)
+from routers import (
     audit as audit_router,
+)
+from routers import (
     backtest as backtest_router,
+)
+from routers import (
     calendar as calendar_router,
+)
+from routers import (
     data_health as data_health_router,
 )
 from routers import (
@@ -61,26 +69,44 @@ from routers import (
 )
 from routers import (
     macro as macro_router,
+)
+from routers import (
     monitor as monitor_router,
+)
+from routers import (
     news as news_router,
+)
+from routers import (
     peers as peers_router,
-    sec_filings as sec_filings_router,
-    sector_benchmark as sector_benchmark_router,
+)
+from routers import (
     portfolio as portfolio_router,
 )
 from routers import (
     proposals as proposals_router,
 )
 from routers import (
+    sec_filings as sec_filings_router,
+)
+from routers import (
+    sector_benchmark as sector_benchmark_router,
+)
+from routers import (
     sectors as sectors_router,
 )
 from routers import (
     system as system_router,
+)
+from routers import (
     ticker_analysis as ticker_analysis_router,
+)
+from routers import (
     trades as trades_router,
 )
 from routers import (
     universe as universe_router,
+)
+from routers import (
     watchlist as watchlist_router,
 )
 

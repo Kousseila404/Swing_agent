@@ -20,7 +20,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib import error as urlerror, parse, request
+from urllib import error as urlerror
+from urllib import parse, request
 
 from modules.log import logger
 
@@ -45,7 +46,7 @@ def _read_cache(ticker: str, days: int) -> dict[str, Any] | None:
     if time.time() - p.stat().st_mtime > _CACHE_TTL_SECONDS:
         return None
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None

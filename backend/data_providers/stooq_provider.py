@@ -24,7 +24,8 @@ import math
 import time
 from datetime import datetime, timedelta
 from typing import Any
-from urllib import error as urlerror, request
+from urllib import error as urlerror
+from urllib import request
 
 import pandas as pd
 

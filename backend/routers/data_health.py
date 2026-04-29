@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Security
@@ -83,13 +83,13 @@ def _universe_inventory() -> dict[str, Any]:
         }
 
     # Distribution age fetched_at
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ages_days: list[float] = []
     for r in tickers.values():
         fa = r.get("fetched_at")
         if fa:
             try:
-                dt = datetime.strptime(fa, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                dt = datetime.strptime(fa, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
                 ages_days.append((now - dt).total_seconds() / 86400)
             except (ValueError, TypeError):
                 continue
@@ -180,7 +180,7 @@ def get_data_health():
     Endpoint **public** — pas d'info sensible, just observability.
     """
     payload: dict[str, Any] = {
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
     # 1. YF circuit breaker

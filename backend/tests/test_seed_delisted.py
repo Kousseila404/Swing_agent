@@ -21,9 +21,8 @@ _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
-from scripts import seed_delisted as seed
 from modules import delisted
-
+from scripts import seed_delisted as seed
 
 # ─────────────────────────────────────────────────────────────────
 # _read_snapshot

@@ -16,13 +16,12 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from modules.log import logger
-
 from modules.correlation_check import (
     DEFAULT_MAX_AVG_CORR,
     compute_correlation,
     downsize_over_correlated,
 )
+from modules.log import logger
 
 from ._caches import (
     _MOMENTUM_LIVE_TTL_SECONDS as MOMENTUM_LIVE_TTL_SECONDS,  # noqa: F401 (re-export)

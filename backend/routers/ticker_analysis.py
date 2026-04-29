@@ -22,7 +22,6 @@ Structure de la réponse (minimale mais riche) :
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import Any
 
 import numpy as np

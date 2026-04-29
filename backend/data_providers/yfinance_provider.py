@@ -115,7 +115,7 @@ def _col_date(df: Any | None, idx: int) -> str | None:
         return None
 
 
-def _prev_year_ratios(tk: "yf.Ticker") -> dict[str, float | None]:
+def _prev_year_ratios(tk: yf.Ticker) -> dict[str, float | None]:
     """Extrait les ratios Piotroski Y-1 + dates de période fiscale depuis
     les annuels yfinance.
 
@@ -212,7 +212,7 @@ def _prev_year_ratios(tk: "yf.Ticker") -> dict[str, float | None]:
     return out
 
 
-def _scrape_revisions_and_earnings(tk: "yf.Ticker") -> dict[str, Any]:
+def _scrape_revisions_and_earnings(tk: yf.Ticker) -> dict[str, Any]:
     """Scrape les révisions analyste, l'earnings surprise history et le prochain
     earnings depuis yfinance. Tout fail-open — si une source pète, on retourne
     le dict avec None pour les fields concernés.
@@ -352,7 +352,7 @@ def _scrape_revisions_and_earnings(tk: "yf.Ticker") -> dict[str, Any]:
     return out
 
 
-def _scrape_dividend_safety(tk: "yf.Ticker", info: dict[str, Any]) -> dict[str, Any]:
+def _scrape_dividend_safety(tk: yf.Ticker, info: dict[str, Any]) -> dict[str, Any]:
     """Champs pour le Dividend Safety Score. yfinance.info expose payoutRatio
     et fiveYearAvgDividendYield directement ; dividendsPaid vient du cashflow
     annuel (négatif chez yfinance par convention)."""

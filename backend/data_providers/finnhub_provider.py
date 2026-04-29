@@ -31,7 +31,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib import error as urlerror, parse, request
+from urllib import error as urlerror
+from urllib import parse, request
 
 from modules.log import logger
 
