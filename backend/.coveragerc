@@ -1,13 +1,25 @@
+# SwingQuant TITAN — coverage config
+# Baseline 2026-04-29 : 60.3% sur modules/. Seuil CI = 55% pour absorber
+# les fluctuations, à durcir progressivement (objectif 70%).
 [run]
 source = modules
+branch = True
 omit =
+    */tests/*
+    */__pycache__/*
+    */venv/*
+    */scripts/*
     modules/__init__.py
+    modules/cli_*.py
     # AlpacaBroker requires live API keys — tested via integration env
     modules/alpaca_*.py
 
 [report]
-exclude_lines =
-    # Patterns standards
+fail_under = 55
+show_missing = True
+skip_covered = False
+precision = 1
+exclude_also =
     pragma: no cover
     def __repr__
     def __str__
@@ -20,6 +32,9 @@ exclude_lines =
     class .*\(Protocol\):
     # Type-checking uniquement
     if TYPE_CHECKING:
-precision = 1
-skip_covered = false
-show_missing = true
+    \.\.\.
+    if False:
+    if 0:
+
+[xml]
+output = coverage.xml

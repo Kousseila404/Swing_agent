@@ -33,11 +33,14 @@ jobs:
       - name: Ruff lint
         run: ruff check modules/ tests/ api.py tracker.py
 
-      - name: Mypy (soft fail — strict types TBD)
-        run: mypy modules/risk.py modules/utils.py --ignore-missing-imports || true
+      - name: Mypy strict (modules whitelistés dans mypy.ini)
+        # Hard fail : tout module ajouté à la section [mypy-modules.X] strict
+        # de mypy.ini doit rester sans erreur. Élargir la liste à mesure que
+        # les modules sont nettoyés.
+        run: mypy --config-file mypy.ini modules/support_score.py
 
-      - name: Pytest
-        run: pytest tests/ --cov=modules --cov-report=term --cov-report=xml
+      - name: Pytest (avec seuil coverage 55%)
+        run: pytest tests/ --cov=modules --cov-config=.coveragerc --cov-report=term --cov-report=xml
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -64,6 +67,19 @@ jobs:
 
       - name: Install
         run: npm ci
+
+      - name: ESLint (soft — durcir quand le WIP métier sera commité)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Vitest (suite frontend complète)
+        run: npm test
+
+      - name: OpenAPI → TS drift check
+        # Échoue si frontend/src/api/types.ts diverge du backend OpenAPI.
+        # Désactivable si le backend n'est pas dispo en CI.
+        run: npm run check:types
+        continue-on-error: true
 
       - name: Build
         run: npm run build
