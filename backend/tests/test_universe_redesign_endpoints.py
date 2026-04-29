@@ -61,7 +61,7 @@ def isolated_proposals(tmp_path, monkeypatch):
 
 class TestProposalsManual:
 
-    def test_requires_auth(self, client):
+    def test_requires_auth(self, client, auth_token):  # noqa: ARG002 — sets API_TOKEN
         r = client.post("/api/proposals/manual", json={"ticker": "AAPL"})
         assert r.status_code in (401, 403)
 
@@ -147,7 +147,7 @@ class TestProposalsManual:
 
 class TestBacktestQuick:
 
-    def test_requires_auth(self, client):
+    def test_requires_auth(self, client, auth_token):  # noqa: ARG002 — sets API_TOKEN
         r = client.post("/api/backtest/quick", json={"tickers": ["A", "B", "C"]})
         assert r.status_code in (401, 403)
 
@@ -222,7 +222,7 @@ class TestTitanAlerts:
         assert r.status_code == 200
         assert r.json() == {"items": [], "count": 0}
 
-    def test_post_requires_auth(self, client, isolated_alerts):
+    def test_post_requires_auth(self, client, auth_token, isolated_alerts):  # noqa: ARG002
         r = client.post(
             "/api/titan_alerts",
             json={"ticker": "AAPL", "direction": "above", "threshold": 80},
