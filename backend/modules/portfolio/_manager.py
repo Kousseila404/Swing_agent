@@ -16,6 +16,11 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from modules.correlation_check import (
+    DEFAULT_MAX_AVG_CORR,
+    compute_correlation,
+    downsize_over_correlated,
+)
 from modules.log import logger
 
 from ._caches import (
@@ -37,6 +42,27 @@ if TYPE_CHECKING:
     from data_providers.base import MarketDataProviderBase
 
 DEFAULT_MAX_HOLDINGS = 20
+
+# Audit S2.1 (2026-04-27) — cap dur par nom. Le risk-parity peut sur-pondérer
+# une position low-vol jusqu'à 15-20 % du book (cas Utilities pendant un VIX
+# spike) → concentration unique-name risque. Cap default = 1 / max_holdings × 2
+# (10 % à max=20). Permet à un best-of-breed de doubler son equal-weight sans
+# pour autant écraser la diversification du panier.
+DEFAULT_MAX_PCT_PER_NAME = 0.10
+
+# Liquidity gate — fraction max d'ADTV USD (price × avg_volume_3m) qu'une
+# position peut représenter. 0.5 % est le seuil institutionnel classique pour
+# rester sous le radar du market impact (Almgren-Chriss : impact ~ √(Q/ADV)).
+# 0.005 sur ADV $50 M = $250 K max → suffisant pour un livre $100 K.
+# None ou 0 désactive le cap.
+DEFAULT_MAX_PCT_OF_ADTV = 0.005
+
+# Weighting method — "risk_parity" (legacy 1/σ par ticker) ou "hrp"
+# (Hierarchical Risk Parity, López de Prado 2016). HRP capture la corrélation
+# entre tickers dans l'allocation au lieu de la traiter en post-hoc haircut.
+# Default reste "risk_parity" tant que le HRP est en canary ; switcher prod
+# par paramètre explicite quand validé OOS.
+DEFAULT_WEIGHTING_METHOD = "risk_parity"
 
 # ── Staleness thresholds fondamentaux ─────────────────────────────
 # Les fondamentaux (PE, ROE, margin…) tournent lentement — 14 j sans refresh
@@ -103,6 +129,11 @@ class PortfolioManager:
         momentum_provider: MarketDataProviderBase | None = None,
         sector_cap: float | None = DEFAULT_SECTOR_CAP,
         target_vol_pct: float | None = None,
+        max_pct_per_name: float | None = DEFAULT_MAX_PCT_PER_NAME,
+        max_avg_corr: float | None = DEFAULT_MAX_AVG_CORR,
+        correlation_haircut: float = 0.5,
+        max_pct_of_adtv: float | None = DEFAULT_MAX_PCT_OF_ADTV,
+        weighting_method: str = DEFAULT_WEIGHTING_METHOD,
     ) -> None:
         self._scored = scored_tickers
         self._market_provider = market_provider
@@ -115,6 +146,24 @@ class PortfolioManager:
         # Les callers prod (routers, auto_proposer) passent explicitement
         # DEFAULT_TARGET_VOL_PCT ; les tests historiques peuvent omettre.
         self._target_vol_pct = target_vol_pct
+        # max_pct_per_name=None → cap désactivé (rare, surtout tests).
+        self._max_pct_per_name = max_pct_per_name
+        # Lot 16 — correlation check post-allocation. None = désactivé.
+        # En prod (auto_proposer), on passe DEFAULT_MAX_AVG_CORR.
+        self._max_avg_corr = max_avg_corr
+        self._correlation_haircut = correlation_haircut
+        # Liquidity ADTV cap — fraction max du dollar volume journalier moyen
+        # qu'une position peut absorber. None ou 0 → désactivé (utile en tests).
+        self._max_pct_of_adtv = max_pct_of_adtv
+        # Weighting method — "risk_parity" (default, legacy 1/σ) ou "hrp".
+        # Validation : "hrp" → on délègue à compute_hrp_weights qui fallback
+        # automatiquement sur risk_parity si scipy/data manquent.
+        wm = (weighting_method or DEFAULT_WEIGHTING_METHOD).lower().strip()
+        if wm not in ("risk_parity", "hrp"):
+            raise ValueError(
+                f"weighting_method must be 'risk_parity' or 'hrp', got {weighting_method!r}"
+            )
+        self._weighting_method = wm
 
     def _build_scored_overlay(
         self, tickers_to_refresh: list[str],
@@ -249,8 +298,19 @@ class PortfolioManager:
                              **momentum_diag},
             )
 
-        # 5. Weights (risk parity + imputation sectorielle)
-        weights, vol_diag, eq_fallback = compute_weights(priced, scored=scored_view)
+        # 5. Weights — risk parity 1/σ legacy, ou HRP (corrélation-aware) si
+        # `weighting_method="hrp"`. HRP fallback automatique vers RP si scipy
+        # absent ou data insuffisante (cf. _hrp.compute_hrp_weights).
+        if self._weighting_method == "hrp":
+            from ._hrp import compute_hrp_weights
+            weights, vol_diag, eq_fallback, hrp_diag = compute_hrp_weights(
+                priced,
+                scored=scored_view,
+                market_provider=self._market_provider,
+            )
+        else:
+            weights, vol_diag, eq_fallback = compute_weights(priced, scored=scored_view)
+            hrp_diag = {"applied": False, "reason": "weighting_method=risk_parity"}
 
         # 6. Sector cap 30 % — après risk parity, avant vol-targeting.
         sector_by_ticker = {
@@ -264,7 +324,69 @@ class PortfolioManager:
         else:
             sector_cap_diag = {"cap_applied": False, "reason": "disabled"}
 
-        # 6b. Vol-targeting — scaler le livre global pour que σ_p s'approche de
+        # 6a-bis. Per-name cap — empêche qu'une position low-vol absorbe
+        # disproportionnellement le book après risk parity. Itératif : on
+        # clampe les outliers et redistribue pro-rata aux non-cappés ; en cas
+        # de blocage (tous au cap), no-op fail-open.
+        per_name_diag: dict[str, Any] = {"applied": False, "reason": "disabled"}
+        if self._max_pct_per_name is not None and self._max_pct_per_name > 0:
+            cap_n = float(self._max_pct_per_name)
+            # Faisabilité : cap × N ≥ 1.0 sinon impossible de placer 100 %.
+            if cap_n * len(weights) < 1.0 - 1e-6:
+                per_name_diag = {
+                    "applied": False, "reason": "infeasible",
+                    "cap_pct": cap_n, "n_positions": len(weights),
+                }
+            else:
+                capped: list[str] = []
+                w_local = dict(weights)
+                for _it in range(20):
+                    over = [t for t, v in w_local.items() if v > cap_n + 1e-9]
+                    if not over:
+                        break
+                    excess = sum(w_local[t] - cap_n for t in over)
+                    for t in over:
+                        if t not in capped:
+                            capped.append(t)
+                        w_local[t] = cap_n
+                    under = [t for t in w_local if w_local[t] < cap_n - 1e-9]
+                    under_total = sum(w_local[t] for t in under)
+                    if under_total <= 0 or not under:
+                        break
+                    for t in under:
+                        w_local[t] += excess * (w_local[t] / under_total)
+                # Re-normalisation finale (drift numérique).
+                total = sum(w_local.values())
+                if total > 0:
+                    w_local = {t: v / total for t, v in w_local.items()}
+                weights = w_local
+                per_name_diag = {
+                    "applied": bool(capped), "cap_pct": cap_n,
+                    "capped_tickers": capped,
+                    "n_capped": len(capped),
+                }
+
+        # 6b. Correlation check — détecte la concentration thématique (4 commodities
+        # qui partagent un facteur "matières premières + USD faible" survivent au
+        # sector cap). On haircut les over_correlated et redistribue. Fail-open.
+        if self._max_avg_corr is not None and self._max_avg_corr > 0:
+            corr_result = compute_correlation(
+                list(weights.keys()),
+                self._market_provider,
+                max_avg_corr=self._max_avg_corr,
+            )
+            corr_diag = corr_result.to_dict()
+            if corr_result.applied and corr_result.over_correlated:
+                weights, corr_apply = downsize_over_correlated(
+                    weights, corr_result, haircut=self._correlation_haircut,
+                )
+                corr_diag.update({"action": corr_apply})
+            else:
+                corr_diag.update({"action": {"applied": False}})
+        else:
+            corr_diag = {"applied": False, "reason": "disabled"}
+
+        # 6c. Vol-targeting — scaler le livre global pour que σ_p s'approche de
         # la cible. En régime HIGH-VOL, leverage < 1 → cash_residual ↑ (alloué
         # à cash_remaining_usd). Permet au drawdown de rester maîtrisé même
         # quand le circuit breaker n'a pas encore réagi.
@@ -285,6 +407,7 @@ class PortfolioManager:
         # 8. Sizing $ + shares
         allocations: dict[str, dict[str, Any]] = {}
         dropped_too_small: list[dict[str, Any]] = []
+        adtv_capped: list[dict[str, Any]] = []
         invested = 0.0
         now_ts = time.time()
         n_stale_fundamentals = 0
@@ -324,6 +447,48 @@ class PortfolioManager:
                 shares_int = int(amount // price) if price > 0 else 0
                 shares = float(shares_int)
                 notional = shares_int * price
+
+            # ── Liquidity gate (ADTV) ───────────────────────────────────────
+            # Plafonne à `max_pct_of_adtv` × (price × avg_volume_3m). Évite que
+            # la position absorbe plus que la fraction tolérée du dollar volume
+            # moyen — Almgren-Chriss : market impact ~ √(Q/ADV). Si l'avg_volume
+            # est manquant, on n'applique pas le cap (fail-open : universe a
+            # déjà filtré sur market_cap > 10B).
+            adtv_cap_diag: dict[str, Any] | None = None
+            if (
+                self._max_pct_of_adtv is not None
+                and self._max_pct_of_adtv > 0
+                and price > 0
+            ):
+                avg_vol = _safe_float(row.get("avg_volume_3m"))
+                if avg_vol is not None and avg_vol > 0:
+                    adtv_usd = avg_vol * price
+                    max_notional = adtv_usd * float(self._max_pct_of_adtv)
+                    if notional > max_notional and max_notional > 0:
+                        original_shares = shares
+                        original_notional = notional
+                        if allow_fractional_shares:
+                            shares = round(max_notional / price, 4)
+                        else:
+                            shares = float(int(max_notional // price))
+                        notional = shares * price
+                        adtv_cap_diag = {
+                            "applied": True,
+                            "avg_volume_3m": avg_vol,
+                            "adtv_usd": round(adtv_usd, 2),
+                            "max_pct_of_adtv": float(self._max_pct_of_adtv),
+                            "max_notional_usd": round(max_notional, 2),
+                            "original_shares": original_shares,
+                            "original_notional_usd": round(original_notional, 2),
+                            "capped_shares": shares,
+                            "capped_notional_usd": round(notional, 2),
+                        }
+                        adtv_capped.append({"ticker": t, **adtv_cap_diag})
+                        logger.info(
+                            f"[PortfolioManager] {t} ADTV-capped : "
+                            f"${original_notional:,.0f} → ${notional:,.0f} "
+                            f"(ADTV=${adtv_usd:,.0f}, cap={self._max_pct_of_adtv:.2%})"
+                        )
 
             # Filtre les allocations dégénérées : un ticker trop cher vs son
             # weight reçoit shares=0 notional=0. Plutôt qu'exposer une ligne
@@ -397,6 +562,9 @@ class PortfolioManager:
                 "momentum_score":  _safe_float(row.get("momentum_score")),
                 "piotroski_score": _safe_float(row.get("piotroski_score")),
                 "growth_score":    _safe_float(row.get("growth_score")),
+                # Lot 16 — Revisions pillar.
+                "revisions_score": _safe_float(row.get("revisions_score")),
+                "next_earnings_date": row.get("next_earnings_date"),
                 "f_score":         row.get("f_score"),
                 "f_score_max":     row.get("f_score_max"),
                 "titan_tilt_flags":  row.get("titan_tilt_flags") or [],
@@ -414,9 +582,14 @@ class PortfolioManager:
             )
         }
 
+        weight_method_label = (
+            "equal_weight_fallback" if eq_fallback
+            else ("hrp" if hrp_diag.get("applied") else "risk_parity")
+        )
         diagnostics = {
             "dropped_no_price":       dropped_no_price,
-            "weight_method":          "equal_weight_fallback" if eq_fallback else "risk_parity",
+            "weight_method":          weight_method_label,
+            "hrp":                    hrp_diag,
             "n_imputed_vols":         sum(1 for d in vol_diag.values() if d["imputed_vol"]),
             "n_sector_imputed":       sum(
                 1 for d in vol_diag.values()
@@ -427,7 +600,14 @@ class PortfolioManager:
                 if d.get("method") == "portfolio_median_impute"
             ),
             "sector_cap":             sector_cap_diag,
+            "per_name_cap":           per_name_diag,
+            "correlation_check":      corr_diag,
             "vol_target":             vol_target_diag,
+            "adtv_cap": {
+                "max_pct_of_adtv":  self._max_pct_of_adtv,
+                "n_capped":         len(adtv_capped),
+                "capped":           adtv_capped,
+            },
             "dropped_too_small":      dropped_too_small,
             "sector_weights_pct":     sector_weights_pct,
             "n_price_live":           n_price_live,

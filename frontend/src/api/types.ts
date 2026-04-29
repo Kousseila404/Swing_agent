@@ -518,6 +518,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/proposals/manual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Manual Proposal
+         * @description Crée une proposition manuelle pour un ticker (bypass cron auto_proposer).
+         *
+         *     Use case : la page Univers a un ticker en TITAN ≥ 70 que l'utilisateur veut
+         *     mettre dans la file d'attente d'achat sans attendre le cron quotidien (ex.
+         *     upgrade silencieuse détectée via le drift Δ7j).
+         *
+         *     Réutilise le pipeline existant :
+         *       - prix + vol depuis `sector_metrics.get_scored_universe()` (cache mtime)
+         *       - SL/TP via `suggest_trade_levels` (σ-adaptive Long-Term)
+         *       - cooldowns veto/win et dédup pending appliqués automatiquement par
+         *         `proposals.enqueue_batch` (un ticker pending → 409 silencieux)
+         *
+         *     Réponse :
+         *       - `ok=True` + `proposal` si insertion réussie
+         *       - `ok=False` + `reason` si dédup ou échec de calcul des niveaux
+         */
+        post: operations["manual_proposal_api_proposals_manual_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/proposals/approve_batch": {
         parameters: {
             query?: never;
@@ -616,6 +650,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backtest/quick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backtest Quick
+         * @description Lance un backtest TITAN sur la whitelist `tickers` (vue filtrée UI).
+         *
+         *     Exigences minimales :
+         *       - ≥ 2 snapshots dans `universe_history` (sinon on ne peut pas calculer
+         *         une période de rebalance)
+         *       - ≥ `top_n` tickers dans la whitelist (sinon ranking dégénéré)
+         *
+         *     Retourne {periods, stats, equity_curve, weights_final, n_skipped_periods}
+         *     + meta {n_tickers_input, n_snapshots, benchmark_return}.
+         */
+        post: operations["backtest_quick_api_backtest_quick_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/data_health": {
         parameters: {
             query?: never;
@@ -668,6 +730,443 @@ export interface paths {
          *     Le circuit breaker YF reste actif — si ça trip, le job s'arrête proprement.
          */
         post: operations["refresh_flagged_tickers_api_data_health_refresh_flagged_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/full": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Audit Full
+         * @description Snapshot complet pour la page Audit React.
+         *
+         *     Agrège backtest TITAN top-N + WFO + registry delisted + historique
+         *     snapshots, puis construit la checklist et le verdict global
+         *     "TITAN bat-il le marché ?".
+         */
+        get: operations["get_audit_full_api_audit_full_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/delisted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Delisted
+         * @description Registry des tickers historiquement présents dans universe.json.
+         *
+         *     Sortie :
+         *         {
+         *           "n_total":     int,        # tickers ever vu (inclut actifs)
+         *           "n_delisted":  int,        # actuellement marqués delisted
+         *           "n_active":    int,        # actuellement actifs
+         *           "delisted":    [...],      # détail des tickers retirés (trié desc)
+         *           "registry_path": str,
+         *         }
+         */
+        get: operations["get_delisted_api_delisted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wfo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Wfo Weights
+         * @description Dernier résultat de `python -m modules.wfo_calibration`.
+         *
+         *     Lit `data/wfo_weights.json` si présent. 404 si jamais exécuté.
+         *
+         *     Inclut une comparaison directe avec les poids prod hardcodés dans
+         *     `sector_metrics/_scoring.py` (utile pour repérer un drift).
+         */
+        get: operations["get_wfo_weights_api_wfo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wfo/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Wfo History
+         * @description Série temporelle des runs `wfo_monitor` — utile pour grapher
+         *     l'évolution de l'IC composite et le drift des poids dans le temps.
+         *
+         *     Source : `data/wfo_history.jsonl` (1 ligne JSON par run, append-only).
+         *
+         *     Sortie :
+         *         {
+         *           "n_total":   int,     # nb total d'entrées dans le fichier
+         *           "n_returned":int,     # nb effectivement servi (≤ limit)
+         *           "history":   [...],   # entries triées chronologiquement croissant
+         *           "latest":    dict | None,  # dernière entry (le plus récent)
+         *           "threshold_ic": float,
+         *         }
+         */
+        get: operations["get_wfo_history_api_wfo_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ticker_analysis/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ticker Analysis
+         * @description Factsheet structurée d'un ticker — 100 % données existantes, no IA.
+         */
+        get: operations["ticker_analysis_api_ticker_analysis__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/peers/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Peers */
+        get: operations["peers_api_peers__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/watchlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Watchlist */
+        get: operations["get_watchlist_api_watchlist_get"];
+        put?: never;
+        /** Post Watchlist */
+        post: operations["post_watchlist_api_watchlist_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/watchlist/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Watchlist */
+        delete: operations["delete_watchlist_api_watchlist__ticker__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notes/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Notes */
+        get: operations["get_notes_api_notes__ticker__get"];
+        put?: never;
+        /** Post Note */
+        post: operations["post_note_api_notes__ticker__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Note */
+        put: operations["put_note_api_notes__note_id__put"];
+        post?: never;
+        /** Delete Note Endpoint */
+        delete: operations["delete_note_endpoint_api_notes__note_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/titan_alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Titan Alerts */
+        get: operations["get_titan_alerts_api_titan_alerts_get"];
+        put?: never;
+        /** Post Titan Alert */
+        post: operations["post_titan_alert_api_titan_alerts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/titan_alerts/{alert_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Titan Alert */
+        delete: operations["delete_titan_alert_api_titan_alerts__alert_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Calendar
+         * @description Catalyseurs agrégés sur la fenêtre [today, today + days].
+         *
+         *     Output :
+         *       {
+         *         "today": "2026-04-28",
+         *         "horizon_days": 30,
+         *         "events": [
+         *             {date, days_delta, type, ticker?, label, source, scope},
+         *             ...
+         *         ],
+         *         "scope": {n_open: int, n_watchlist: int, n_macro: int},
+         *       }
+         */
+        get: operations["get_calendar_api_calendar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/news/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get News */
+        get: operations["get_news_api_news__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/news/portfolio/firehose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio News Firehose
+         * @description News agrégées sur positions OPEN + watchlist, triées par date desc.
+         *
+         *     Rate-limited (cache disque 1h par ticker — voir finnhub_news). Si la
+         *     fenêtre est large + beaucoup de tickers, le 1er appel peut prendre
+         *     jusqu'à N×1.5s ; les suivants sont cache hits instantanés.
+         */
+        get: operations["portfolio_news_firehose_api_news_portfolio_firehose_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sec_filings/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sec Filings */
+        get: operations["get_sec_filings_api_sec_filings__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Alerts
+         * @description Dry run : scanne positions OPEN et retourne les signaux sans envoyer.
+         */
+        get: operations["preview_alerts_api_monitor_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Alerts
+         * @description Run réel : envoie le message Telegram s'il y a des signaux.
+         */
+        post: operations["run_alerts_api_monitor_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sector_benchmark/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Portfolio Endpoint
+         * @description Pour chaque position OPEN, calcule le return depuis l'achat
+         *     + return de l'ETF sectoriel + alpha (delta).
+         */
+        get: operations["benchmark_portfolio_endpoint_api_sector_benchmark_portfolio_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sector_benchmark/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Benchmark Ticker Endpoint */
+        get: operations["benchmark_ticker_endpoint_api_sector_benchmark__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Attribution */
+        get: operations["get_attribution_api_attribution_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -933,6 +1432,36 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * ManualProposalRequest
+         * @description Push manuel d'un ticker depuis la page Univers (Tier S #3).
+         *     Bypass auto_proposer — utile pour les overrides Watch (TITAN 70-80) avec
+         *     signal externe (Support ON, F-Score ≥ 7) que le cron n'aurait pas retenus.
+         *     Les SL/TP sont calculés via suggest_trade_levels comme pour les autos.
+         */
+        ManualProposalRequest: {
+            /** Ticker */
+            ticker: string;
+            /** Target Amount Usd */
+            target_amount_usd?: number | null;
+            /** Ttl Hours */
+            ttl_hours?: number | null;
+            /**
+             * Signal
+             * @default MANUAL_PUSH
+             */
+            signal: string;
+        };
+        /** NoteCreateRequest */
+        NoteCreateRequest: {
+            /** Body */
+            body: string;
+        };
+        /** NoteUpdateRequest */
+        NoteUpdateRequest: {
+            /** Body */
+            body: string;
+        };
         /** PerformanceMetricsResponse */
         PerformanceMetricsResponse: {
             /** Capital */
@@ -1054,6 +1583,37 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * QuickBacktestRequest
+         * @description Backtest minimaliste exposé pour la page Univers (Tier B #1).
+         *
+         *     On reste *simple* :
+         *       - Whitelist de tickers (la "vue filtrée" côté UI)
+         *       - top_n borné à 30 pour éviter une vue de ranking dégénérée
+         *       - benchmark optionnel (default SPY)
+         *
+         *     Pas d'override de slippage/lag — l'utilisateur expert peut toujours
+         *     appeler `python -m modules.backtest` en CLI pour tuner finement.
+         */
+        QuickBacktestRequest: {
+            /** Tickers */
+            tickers?: string[];
+            /**
+             * Top N
+             * @default 10
+             */
+            top_n: number;
+            /**
+             * Benchmark
+             * @default SPY
+             */
+            benchmark: string | null;
+            /**
+             * Weighting
+             * @default equal
+             */
+            weighting: string;
+        };
+        /**
          * RefreshRequest
          * @description Override optionnel des defaults du proposer.
          */
@@ -1156,6 +1716,20 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** TitanAlertCreate */
+        TitanAlertCreate: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Direction
+             * @default above
+             */
+            direction: string;
+            /** Threshold */
+            threshold: number;
+            /** Note */
+            note?: string | null;
+        };
         /**
          * UniverseRebuildRequest
          * @description Payload optionnel pour POST /api/universe/rebuild.
@@ -1251,6 +1825,17 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WatchlistAddRequest */
+        WatchlistAddRequest: {
+            /** Ticker */
+            ticker: string;
+            /** Tag */
+            tag?: string | null;
+            /** Target Buy */
+            target_buy?: number | null;
+            /** Comment */
+            comment?: string | null;
         };
     };
     responses: never;
@@ -1865,6 +2450,39 @@ export interface operations {
             };
         };
     };
+    manual_proposal_api_proposals_manual_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     approve_proposals_batch_api_proposals_approve_batch_post: {
         parameters: {
             query?: never;
@@ -1988,6 +2606,39 @@ export interface operations {
             };
         };
     };
+    backtest_quick_api_backtest_quick_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuickBacktestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_data_health_api_data_health_get: {
         parameters: {
             query?: never;
@@ -2024,6 +2675,768 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_audit_full_api_audit_full_get: {
+        parameters: {
+            query?: {
+                /** @description Si true, force le re-run du backtest (sinon cache 24h). */
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_delisted_api_delisted_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_wfo_weights_api_wfo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_wfo_history_api_wfo_history_get: {
+        parameters: {
+            query?: {
+                /** @description Nombre d'entrées historiques à retourner (les plus récentes). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ticker_analysis_api_ticker_analysis__ticker__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    peers_api_peers__ticker__get: {
+        parameters: {
+            query?: {
+                n?: number;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_watchlist_api_watchlist_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    post_watchlist_api_watchlist_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchlistAddRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_watchlist_api_watchlist__ticker__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notes_api_notes__ticker__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_note_api_notes__ticker__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_note_api_notes__note_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_note_endpoint_api_notes__note_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_titan_alerts_api_titan_alerts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    post_titan_alert_api_titan_alerts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TitanAlertCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_titan_alert_api_titan_alerts__alert_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alert_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_calendar_api_calendar_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_news_api_news__ticker__get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_news_firehose_api_news_portfolio_firehose_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                max_per_ticker?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sec_filings_api_sec_filings__ticker__get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_alerts_api_monitor_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    run_alerts_api_monitor_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    benchmark_portfolio_endpoint_api_sector_benchmark_portfolio_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    benchmark_ticker_endpoint_api_sector_benchmark__ticker__get: {
+        parameters: {
+            query: {
+                /** @description YYYY-MM-DD */
+                entry_date: string;
+                sector?: string | null;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attribution_api_attribution_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

@@ -22,13 +22,21 @@ from modules.tracker import killswitch, state
 
 @pytest.fixture(autouse=True)
 def _isolate_paths(monkeypatch, tmp_path: Path):
-    """Redirige toutes les paths persistantes vers tmp_path."""
+    """Redirige toutes les paths persistantes vers tmp_path.
+
+    Force BROKER_MODE=paper : la branche broker.get_account_equity (Audit S2.4)
+    n'est exercée que par tests dédiés ; les tests d'arithmétique CSV pure
+    doivent rester déterministes même quand le runner pointe sur un compte
+    Alpaca paper réel.
+    """
+    import config as _config
     equity = tmp_path / "equity_state.json"
     trading = tmp_path / "trading_state.json"
     monkeypatch.setattr(state, "EQUITY_STATE_PATH", equity)
     monkeypatch.setattr(state, "TRADING_STATE_PATH", trading)
     monkeypatch.setattr(killswitch, "EQUITY_STATE_PATH", equity)
     monkeypatch.setattr(killswitch, "TRADING_STATE_PATH", trading)
+    monkeypatch.setattr(_config, "BROKER_MODE", "paper", raising=False)
     return tmp_path
 
 

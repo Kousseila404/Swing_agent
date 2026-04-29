@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Request, Response, Security
 from pydantic import BaseModel
@@ -18,6 +19,203 @@ from modules.api_schemas import (
     UniverseResponse,
 )
 from modules.log import logger
+
+# Champs de scoring TITAN exposés sur chaque ticker via /api/universe (Option A
+# scanner). On garde un sous-ensemble léger : les composantes utiles à l'UI
+# (badge TITAN, F-Score, tris). Le scoring complet (breakdowns, diagnostics)
+# reste accessible via /api/ticker_analysis et /api/sectors.
+_SCORE_FIELDS_EXPOSED: tuple[str, ...] = (
+    "titan_composite_score",
+    "quality_score",
+    "value_score",
+    "risk_score",
+    "sentiment_score",
+    "momentum_score",
+    "piotroski_score",
+    "growth_score",
+    "f_score",
+    "f_score_max",
+    "dq_coef",
+)
+
+# Fenêtre du drift TITAN. 7 jours = standard "weekly momentum" — assez court
+# pour capter une upgrade silencieuse, assez long pour ignorer le bruit.
+_DRIFT_WINDOW_DAYS = 7
+
+# Sparkline TITAN — 30 jours = ~22 trading days, mais on cap à 12 points
+# pour le rendu visuel (le frontend trace une mini-line). On lit les snapshots
+# disponibles dans la fenêtre, sans interpoler — moins de points = trait plus
+# court, ce qui reflète honnêtement la profondeur d'historique.
+_SPARKLINE_WINDOW_DAYS = 30
+_SPARKLINE_MAX_POINTS = 12
+
+
+# Statut portefeuille — précédence : HELD > PROPOSED > VETOED > WATCH > None.
+# HELD = position OPEN (broker/journal). PROPOSED = pending dans la file.
+# VETOED = rejected dans la fenêtre cooldown. WATCH = approved/executed récents
+# (déjà déclenché mais utile pour signaler "tu viens de l'acheter").
+_VETOED_LOOKBACK_DAYS = 7   # aligné avec VETO_COOLDOWN_DAYS
+_WATCH_LOOKBACK_DAYS = 14   # aligné avec WIN_COOLDOWN_DAYS
+
+
+def _load_portfolio_status() -> dict[str, str]:
+    """Renvoie {ticker: status} agrégé : HELD / PROPOSED / VETOED / WATCH.
+
+    Best-effort sur chaque source — un échec lecture proposals ne casse pas la
+    page (HELD reste lisible et inversement).
+    """
+    out: dict[str, str] = {}
+
+    # WATCH (clôtures récentes / executed — précédence la plus basse, écrit en 1er).
+    try:
+        from datetime import datetime as _dt
+
+        from modules import proposals as _proposals
+        cutoff_iso = (
+            _dt.utcnow() - timedelta(days=_WATCH_LOOKBACK_DAYS)
+        ).isoformat(timespec="seconds") + "Z"
+        for p in _proposals.list_all() or []:
+            t = (p.get("ticker") or "").upper().strip()
+            if not t:
+                continue
+            status = p.get("status")
+            decided = p.get("decided_at") or ""
+            if status in {"executed", "approved"} and decided >= cutoff_iso:
+                out[t] = "WATCH"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] WATCH status load failed: {exc}")
+
+    # VETOED (rejected récents).
+    try:
+        from datetime import datetime as _dt
+
+        from modules import proposals as _proposals
+        cutoff_iso = (
+            _dt.utcnow() - timedelta(days=_VETOED_LOOKBACK_DAYS)
+        ).isoformat(timespec="seconds") + "Z"
+        for p in _proposals.list_all() or []:
+            t = (p.get("ticker") or "").upper().strip()
+            if not t:
+                continue
+            if p.get("status") == "rejected" and (p.get("decided_at") or "") >= cutoff_iso:
+                out[t] = "VETOED"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] VETOED status load failed: {exc}")
+
+    # PROPOSED (pending — précédence > VETOED car action immédiate possible).
+    try:
+        from modules import proposals as _proposals
+        for p in _proposals.list_all(status="pending") or []:
+            t = (p.get("ticker") or "").upper().strip()
+            if t:
+                out[t] = "PROPOSED"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] PROPOSED status load failed: {exc}")
+
+    # HELD (positions OPEN — précédence absolue : si on l'a, peu importe le reste).
+    try:
+        from modules.utils import get_open_tickers
+        for t in get_open_tickers() or set():
+            out[(t or "").upper().strip()] = "HELD"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] HELD status load failed: {exc}")
+
+    return out
+
+
+def _load_sparkline_series(window_days: int = _SPARKLINE_WINDOW_DAYS) -> dict[str, list[float]]:
+    """Renvoie {ticker: [titan_scores chronologiques sur la fenêtre]}.
+
+    Best-effort : si universe_history KO, dict vide. On lit chaque snapshot
+    disponible une seule fois, donc le coût est O(snapshots × tickers) — trivial
+    sur 7-30 snapshots × 500 tickers (qq ms).
+    """
+    try:
+        from modules import universe_history as uh
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] universe_history unavailable: {exc}")
+        return {}
+
+    try:
+        snaps = uh.list_snapshots()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] list_snapshots failed: {exc}")
+        return {}
+
+    if not snaps:
+        return {}
+
+    cutoff = date.today() - timedelta(days=window_days)
+    eligible = [d for d in snaps if d >= cutoff]
+    if len(eligible) > _SPARKLINE_MAX_POINTS:
+        # Échantillonnage uniforme — garde le 1er et le dernier, points
+        # intermédiaires régulièrement espacés.
+        step = (len(eligible) - 1) / (_SPARKLINE_MAX_POINTS - 1)
+        eligible = [eligible[round(i * step)] for i in range(_SPARKLINE_MAX_POINTS)]
+
+    series: dict[str, list[float]] = {}
+    for d in eligible:
+        try:
+            snap = uh.read_snapshot(d)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[API /universe] sparkline read {d} failed: {exc}")
+            continue
+        if not snap:
+            continue
+        for tk, row in (snap.get("tickers") or {}).items():
+            v = row.get("titan_composite_score")
+            if isinstance(v, (int, float)):
+                series.setdefault(tk, []).append(round(float(v), 2))
+    return series
+
+
+def _load_drift_baseline(window_days: int = _DRIFT_WINDOW_DAYS) -> dict[str, float]:
+    """Renvoie {ticker: titan_composite_score} le plus proche de J-window_days
+    *avant* (jamais après pour éviter le lookahead). Dict vide si aucun
+    snapshot exploitable. Best-effort : tout exception → dict vide + warning.
+    """
+    try:
+        from modules import universe_history as uh
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] universe_history unavailable: {exc}")
+        return {}
+
+    try:
+        snaps = uh.list_snapshots()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] list_snapshots failed: {exc}")
+        return {}
+
+    if not snaps:
+        return {}
+
+    target = date.today() - timedelta(days=window_days)
+    # On veut le snapshot le plus récent ≤ target ; sinon, le plus ancien
+    # disponible (cas warm-up où l'historique est < window_days).
+    candidate: date | None = None
+    for d in snaps:
+        if d <= target:
+            candidate = d
+        else:
+            break
+    if candidate is None:
+        candidate = snaps[0]
+
+    try:
+        snap = uh.read_snapshot(candidate)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[API /universe] read_snapshot {candidate} failed: {exc}")
+        return {}
+
+    if not snap:
+        return {}
+
+    out: dict[str, float] = {}
+    for tk, row in (snap.get("tickers") or {}).items():
+        v = row.get("titan_composite_score")
+        if isinstance(v, (int, float)):
+            out[tk] = float(v)
+    return out
 
 router = APIRouter(prefix="/api", tags=["universe"])
 
@@ -185,11 +383,12 @@ def get_quantamental_universe(
     """
     path = api_core.UNIVERSE_QUANTAMENTAL_PATH
 
-    # ETag = W/"<mtime>:<sector>". Un refresh/rebuild universe.json bump mtime ;
-    # changer ?sector invalide aussi (réponse différente).
+    # ETag = W/"<mtime>:<sector>:scored-v2". Un refresh/rebuild universe.json
+    # bump mtime ; changer ?sector invalide aussi. Le suffixe `scored-v2` force
+    # l'invalidation d'anciens caches client (v1 = scores, v2 = +drift).
     base_etag = api_core.etag_from_mtime(path)
     if base_etag:
-        etag = f'{base_etag[:-1]}:{sector or "all"}"' if sector else base_etag
+        etag = f'{base_etag[:-1]}:{sector or "all"}:scored-v4"'
         if api_core.etag_matches(request.headers.get("if-none-match"), etag):
             return Response(status_code=304, headers={"ETag": etag})
         response.headers["ETag"] = etag
@@ -215,7 +414,29 @@ def get_quantamental_universe(
             if (f.get("sector") or "Unknown") == sec
         }
 
-    # ── Annotation is_incomplete par ticker (W8) ──
+    # ── Merge des scores TITAN (Option A — scanner quantamental) ──
+    # `get_scored_universe()` est cache mtime-keyed sur universe.json :
+    # premier appel = scoring complet, requêtes suivantes = lookup mémoire.
+    # On échoue silencieusement si le scoring lève (univers minimaliste,
+    # provider cassé) — la page reste utilisable même sans scores.
+    scored: dict[str, dict] = {}
+    try:
+        from modules.sector_metrics import get_scored_universe
+        scored = get_scored_universe() or {}
+    except Exception as exc:  # noqa: BLE001 — best-effort enrichment
+        logger.warning(f"[API /universe] scoring unavailable: {exc}")
+
+    # ── Drift TITAN J-7 (Tier S #1) — détecte les upgrades silencieuses ──
+    # Best-effort : si historique vide / read fail, drift=None partout.
+    drift_baseline = _load_drift_baseline()
+
+    # ── Sparkline TITAN 30j (Tier S #4) — micro-historique inline ──
+    sparklines = _load_sparkline_series()
+
+    # ── Status portefeuille (Tier A #3) — HELD/PROPOSED/VETOED/WATCH ──
+    portfolio_status = _load_portfolio_status()
+
+    # ── Annotation is_incomplete par ticker (W8) + injection scores + drift ──
     # On enrichit une copie superficielle pour ne pas muter le cache en mémoire.
     annotated: dict[str, dict] = {}
     incomplete_count = 0
@@ -223,7 +444,32 @@ def get_quantamental_universe(
         incomplete = _ticker_is_incomplete(f)
         if incomplete:
             incomplete_count += 1
-        annotated[t] = {**f, "is_incomplete": incomplete}
+        scored_row = scored.get(t) or {}
+        score_extras = {
+            field: scored_row.get(field)
+            for field in _SCORE_FIELDS_EXPOSED
+            if field in scored_row
+        }
+        # Drift : current - baseline. None si pas de baseline pour ce ticker
+        # OU si le titan courant est manquant.
+        drift_val: float | None = None
+        cur_titan = score_extras.get("titan_composite_score")
+        baseline_titan = drift_baseline.get(t)
+        if (
+            isinstance(cur_titan, (int, float))
+            and isinstance(baseline_titan, (int, float))
+        ):
+            drift_val = round(float(cur_titan) - float(baseline_titan), 2)
+        spark = sparklines.get(t) or []
+        annotated[t] = {
+            **f,
+            **score_extras,
+            "titan_drift_7d": drift_val,
+            "titan_baseline_7d": baseline_titan,
+            "titan_sparkline": spark,
+            "portfolio_status": portfolio_status.get(t),
+            "is_incomplete": incomplete,
+        }
 
     total = len(annotated)
     incomplete_ratio = round(incomplete_count / total, 4) if total else 0.0

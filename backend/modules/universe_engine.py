@@ -96,6 +96,9 @@ class TickerFundamentals:
     exchange: str | None = None
     market_cap: float | None = None
     current_price: float | None = None
+    # Audit S3.x — ADTV 3M (yfinance averageVolume). Utilisé par le modèle
+    # d'impact backtest et `apply_adtv_cap()` pour le sizing live.
+    avg_volume_3m: float | None = None
     forward_pe: float | None = None
     trailing_pe: float | None = None
     peg_ratio: float | None = None
@@ -138,6 +141,23 @@ class TickerFundamentals:
     current_ratio_prev_year:       float | None = None
     shares_outstanding_prev_year:  float | None = None
     gross_margin_prev_year:        float | None = None
+    # Audit S3.x rigoureux — dates fiscales (cf. base.FinancialRatios).
+    fundamentals_period_end:       str | None = None
+    fundamentals_period_end_y1:    str | None = None
+    # ── REVISIONS / EARNINGS SURPRISE (Lot 16 — pilier Revisions) ────────────
+    upgrades_30d:                 int   | None = None
+    downgrades_30d:               int   | None = None
+    upgrades_90d:                 int   | None = None
+    downgrades_90d:               int   | None = None
+    revisions_net_score:          float | None = None  # ∈ [-1, 1]
+    earnings_surprise_pct_last:   float | None = None
+    earnings_surprise_avg_4q:     float | None = None
+    earnings_beat_rate_8q:        float | None = None
+    next_earnings_date:           str   | None = None
+    # ── DIVIDEND SAFETY (Lot 16) ─────────────────────────────────────────────
+    payout_ratio:                 float | None = None
+    dividends_paid:               float | None = None
+    five_year_avg_dividend_yield: float | None = None
     # ── MOMENTUM 12M-1M (Jegadeesh-Titman, injecté après enrich fundamentaux) ─
     # Malgré le nom legacy "6M", le pipeline calcule le 12M-1M (skip last 21j)
     # via _MOMENTUM_HISTORY_DAYS=272 dans _momentum.py. C'est l'anomalie momentum
@@ -286,6 +306,7 @@ def _ratios_to_fundamentals(
         exchange=ratios.exchange,
         market_cap=ratios.market_cap,
         current_price=ratios.current_price,
+        avg_volume_3m=ratios.avg_volume_3m,
         forward_pe=ratios.forward_pe,
         trailing_pe=ratios.trailing_pe,
         peg_ratio=ratios.peg_ratio,
@@ -320,6 +341,20 @@ def _ratios_to_fundamentals(
         current_ratio_prev_year=ratios.current_ratio_prev_year,
         shares_outstanding_prev_year=ratios.shares_outstanding_prev_year,
         gross_margin_prev_year=ratios.gross_margin_prev_year,
+        fundamentals_period_end=ratios.fundamentals_period_end,
+        fundamentals_period_end_y1=ratios.fundamentals_period_end_y1,
+        upgrades_30d=ratios.upgrades_30d,
+        downgrades_30d=ratios.downgrades_30d,
+        upgrades_90d=ratios.upgrades_90d,
+        downgrades_90d=ratios.downgrades_90d,
+        revisions_net_score=ratios.revisions_net_score,
+        earnings_surprise_pct_last=ratios.earnings_surprise_pct_last,
+        earnings_surprise_avg_4q=ratios.earnings_surprise_avg_4q,
+        earnings_beat_rate_8q=ratios.earnings_beat_rate_8q,
+        next_earnings_date=ratios.next_earnings_date,
+        payout_ratio=ratios.payout_ratio,
+        dividends_paid=ratios.dividends_paid,
+        five_year_avg_dividend_yield=ratios.five_year_avg_dividend_yield,
         source_indices=source_indices,
         fetched_at=ratios.fetched_at,
         error=ratios.error,
@@ -625,8 +660,17 @@ def save_universe(payload: dict[str, Any], reason: str = "rebuild") -> Path:
         ) from e
 
     try:
-        # Backup préalable
+        # Audit S1.1 (2026-04-27) — point-in-time / survivorship.
+        # On lit l'ancien payload AVANT de le backup-er pour pouvoir diff
+        # contre le nouveau. Best-effort : si le load échoue on ne bloque pas.
+        prev_tickers: dict[str, Any] | None = None
         if _UNIVERSE_PATH.exists():
+            try:
+                prev_payload = json.loads(_UNIVERSE_PATH.read_text(encoding="utf-8"))
+                prev_tickers = prev_payload.get("tickers") if isinstance(prev_payload, dict) else None
+            except (OSError, ValueError) as e:
+                logger.warning(f"[UniverseEngine] prev payload unreadable for diff: {e}")
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = _BACKUP_DIR / f"universe_{ts}.json"
             try:
@@ -641,7 +685,10 @@ def save_universe(payload: dict[str, Any], reason: str = "rebuild") -> Path:
             except Exception:
                 pass
 
-        payload = {**payload, "last_change": reason}
+        # `as_of_date` explicite — facilite le filtrage point-in-time côté
+        # backtest (la date du build, pas la date courante de lecture).
+        as_of = datetime.now().strftime("%Y-%m-%d")
+        payload = {**payload, "last_change": reason, "as_of_date": as_of}
 
         tmp = _UNIVERSE_PATH.with_suffix(".json.tmp")
         tmp.write_text(
@@ -649,6 +696,15 @@ def save_universe(payload: dict[str, Any], reason: str = "rebuild") -> Path:
             encoding="utf-8",
         )
         tmp.replace(_UNIVERSE_PATH)
+
+        # Diff prev → new vers le registry delisted (best-effort, fail-open).
+        try:
+            from modules import delisted as _delisted
+            new_tickers = payload.get("tickers") if isinstance(payload, dict) else None
+            if isinstance(new_tickers, dict):
+                _delisted.record_diff(prev_tickers, new_tickers, today=as_of)
+        except Exception as e:
+            logger.warning(f"[UniverseEngine] delisted diff failed: {e}")
     finally:
         filelock.release()
 

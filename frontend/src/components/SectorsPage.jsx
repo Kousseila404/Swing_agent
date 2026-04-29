@@ -5,6 +5,7 @@ import SectorCard from './SectorCard';
 import { factorColor } from '../utils/colors';
 import { fmtNum, fmtSignedPct as fmtPct, fmtMarketCap } from '../utils/format';
 import Pagination from './Pagination';
+import PresetBar from './common/PresetBar';
 
 // SectorsPage — Rotation sectorielle : grille SectorCard + drill-down tickers.
 // Consomme /api/sectors (agrégats GICS + momentum 6M) + /api/sectors/{name}.
@@ -170,6 +171,16 @@ export default function SectorsPage() {
           · Sous-scores 0-100 (percentile-rank cross-universe) · Agrégat sectoriel pondéré market-cap · Momentum 6M <b>Risk-Adjusted</b> (≈ rendement / σ annualisée) affiché séparément.
         </span>
       </div>
+
+      <PresetBar
+        scope="sectors"
+        label="Vues secteurs"
+        current={{ sortBy, selected }}
+        onApply={(p) => {
+          if (p?.sortBy   !== undefined) setSortBy(p.sortBy);
+          if (p?.selected !== undefined) setSelected(p.selected);
+        }}
+      />
 
       {/* ── Layout 2 cols ── */}
       <div className="family-layout">
@@ -455,7 +466,7 @@ function SectorDetail({ sectorName, detail, loading, onClose }) {
               {paginated.map(t => {
                 const lbl = RECO_LABELS[t.reco_bucket];
                 return (
-                  <tr key={t.ticker} className="scan-row">
+                  <tr key={t.ticker} className="scan-row" data-ticker={t.ticker}>
                     <td>
                       <div className="scan-ticker-cell">
                         <span className="scan-ticker-logo">📈</span>

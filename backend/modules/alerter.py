@@ -70,6 +70,85 @@ def send_close_alert(
         return False
 
 
+def send_price_alert_fired(
+    ticker: str,
+    direction: str,
+    target_price: float,
+    current_price: float,
+    note: str = "",
+) -> bool:
+    """Alerte Telegram quand un niveau de prix est touché (entry_plan tier).
+
+    Format minimal — un emoji 🎯, le delta, le note utilisateur.
+    """
+    arrow = "≤" if direction == "below" else "≥"
+    delta_pct = (current_price - target_price) / target_price * 100.0 if target_price else 0.0
+    note_line = f"\n📝 <i>{note}</i>" if note else ""
+    msg = (
+        f"🎯 <b>NIVEAU PRIX TOUCHÉ — {ticker}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Cible : <b>${target_price:.2f}</b>  ({arrow})\n"
+        f"📍 Actuel : <b>${current_price:.2f}</b>  ({delta_pct:+.2f}%)"
+        f"{note_line}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ {datetime.now().strftime('%H:%M:%S')}  |  SwingQuant TITAN"
+    )
+    try:
+        _send_telegram_message(msg)
+        logger.info(f"[{ticker}] Price alert fired @ {current_price:.2f} ✅")
+        return True
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Échec alerte prix : {exc}")
+        return False
+
+
+def send_thesis_break_alert(
+    ticker: str,
+    direction: str,
+    entry_price: float,
+    current_price: float,
+    reasons: list[str],
+    drift: dict[str, float | int | None] | None = None,
+) -> bool:
+    """Alerte Telegram quand thesis_stop signale BROKEN sur une position OPEN.
+
+    Informatif (le module ne ferme pas la position — décision LT manuelle).
+    Le cooldown anti-spam est géré par l'appelant (cf. tracker/evaluation.py).
+    """
+    pct = ((current_price - entry_price) / entry_price * 100
+           if direction == "LONG" else (entry_price - current_price) / entry_price * 100)
+    titan_drift = (drift or {}).get("titan")
+    f_drift = (drift or {}).get("f_score")
+    drift_line = ""
+    if titan_drift is not None:
+        drift_line = f"📉 TITAN drift : <b>{titan_drift:+.0f} pts</b>"
+        if f_drift is not None:
+            drift_line += f"  |  F-Score : <b>{f_drift:+d}/9</b>"
+        drift_line += "\n"
+
+    bullets = "\n".join(f"  • {r}" for r in reasons[:5])
+    msg = (
+        f"🧠 <b>THÈSE CASSÉE — {ticker}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{'📈' if direction == 'LONG' else '📉'} {direction}  |  "
+        f"Entrée : <b>${entry_price:.2f}</b> → ${current_price:.2f}  "
+        f"({'✅' if pct >= 0 else '❌'} {pct:+.1f}%)\n"
+        f"{drift_line}"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Raisons :</b>\n{bullets}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ Décision LT manuelle — le tracker ne ferme pas.\n"
+        f"⏰ {datetime.now().strftime('%H:%M:%S')}  |  SwingQuant TITAN"
+    )
+    try:
+        _send_telegram_message(msg)
+        logger.info(f"[{ticker}] Alerte thesis_break envoyée ✅")
+        return True
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Échec alerte thesis_break : {exc}")
+        return False
+
+
 def send_health_check() -> bool:
     """
     Envoie un message Telegram de santé du bot chaque matin.

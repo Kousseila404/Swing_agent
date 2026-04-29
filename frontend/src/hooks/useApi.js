@@ -5,13 +5,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  addNote,
+  addToWatchlist,
+  fetchCatalystCalendar,
+  fetchNews,
+  fetchNewsFirehose,
+  fetchSecFilings,
+  fetchAttribution,
+  fetchSectorBenchmarkPortfolio,
   approveProposal,
   approveProposalsBatch,
+  deleteNote,
+  fetchAuditFull,
   fetchDataHealth,
+  fetchDelisted,
   fetchEquityCurve,
   fetchJob,
   fetchMacro,
   fetchMacroCalendar,
+  fetchNotes,
   fetchPerformanceMetrics,
   fetchPortfolio,
   fetchProposals,
@@ -22,11 +34,16 @@ import {
   fetchMarketStatus,
   fetchStatus,
   fetchUniverse,
+  fetchWatchlist,
+  fetchWfoHistory,
+  fetchWfoWeights,
   killJob,
   refreshProposals,
   regenerateProposals,
   rejectProposal,
   rejectProposalsBatch,
+  removeFromWatchlist,
+  updateNote,
 } from '../api/client.js'
 
 export const useStatus = (opts = {}) =>
@@ -211,3 +228,168 @@ export const useTickerHistory = (ticker, opts = {}) =>
     staleTime: 60_000,
     ...opts,
   })
+
+// ─────────────────────────────────────────────────────────────────
+// AUDIT — Audit S1.1 + S1.3
+// ─────────────────────────────────────────────────────────────────
+export const useDelisted = (opts = {}) =>
+  useQuery({
+    queryKey: ['delisted'],
+    queryFn: fetchDelisted,
+    staleTime: 5 * 60_000,
+    ...opts,
+  })
+
+export const useWfoWeights = (opts = {}) =>
+  useQuery({
+    queryKey: ['wfo_weights'],
+    queryFn: fetchWfoWeights,
+    staleTime: 60 * 60_000, // poids changent au plus mensuellement (cron)
+    retry: false,            // 404 si jamais lancé → pas de retry
+    ...opts,
+  })
+
+export const useWfoHistory = (limit = 50, opts = {}) =>
+  useQuery({
+    queryKey: ['wfo_history', limit],
+    queryFn: () => fetchWfoHistory({ limit }),
+    staleTime: 60 * 60_000,
+    ...opts,
+  })
+
+export const useAuditFull = (opts = {}) =>
+  useQuery({
+    queryKey: ['audit_full'],
+    queryFn: () => fetchAuditFull(),
+    staleTime: 30 * 60_000, // backend cache 24h ; on rafraîchit rarement
+    ...opts,
+  })
+
+export const useRefreshAuditFull = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => fetchAuditFull({ refresh: true }),
+    onSuccess: (data) => {
+      qc.setQueryData(['audit_full'], data)
+    },
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WATCHLIST + NOTES
+// ─────────────────────────────────────────────────────────────────
+export const useNews = (ticker, days = 14, opts = {}) =>
+  useQuery({
+    queryKey: ['news', ticker, days],
+    queryFn: () => fetchNews(ticker, days),
+    enabled: !!ticker,
+    staleTime: 30 * 60_000,   // news cache backend = 1h ; UI stale = 30min
+    ...opts,
+  })
+
+export const useNewsFirehose = (days = 7, maxPerTicker = 5, opts = {}) =>
+  useQuery({
+    queryKey: ['news_firehose', days, maxPerTicker],
+    queryFn: () => fetchNewsFirehose(days, maxPerTicker),
+    staleTime: 10 * 60_000,
+    ...opts,
+  })
+
+export const useAttribution = (opts = {}) =>
+  useQuery({
+    queryKey: ['attribution'],
+    queryFn: fetchAttribution,
+    staleTime: 5 * 60_000,
+    ...opts,
+  })
+
+export const useSectorBenchmarkPortfolio = (opts = {}) =>
+  useQuery({
+    queryKey: ['sector_benchmark_portfolio'],
+    queryFn: fetchSectorBenchmarkPortfolio,
+    staleTime: 30 * 60_000,  // backend cache 1h, UI 30min
+    ...opts,
+  })
+
+export const useSecFilings = (ticker, limit = 30, opts = {}) =>
+  useQuery({
+    queryKey: ['sec_filings', ticker, limit],
+    queryFn: () => fetchSecFilings(ticker, limit),
+    enabled: !!ticker,
+    staleTime: 60 * 60_000,  // backend cache 6h, UI 1h
+    ...opts,
+  })
+
+export const useCatalystCalendar = (days = 30, opts = {}) =>
+  useQuery({
+    queryKey: ['calendar', days],
+    queryFn: () => fetchCatalystCalendar(days),
+    staleTime: 5 * 60_000,
+    ...opts,
+  })
+
+export const useWatchlist = (opts = {}) =>
+  useQuery({
+    queryKey: ['watchlist'],
+    queryFn: fetchWatchlist,
+    staleTime: 30_000,
+    ...opts,
+  })
+
+export const useAddToWatchlist = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: addToWatchlist,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['watchlist'] }),
+  })
+}
+
+export const useRemoveFromWatchlist = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: removeFromWatchlist,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['watchlist'] }),
+  })
+}
+
+export const useNotes = (ticker, opts = {}) =>
+  useQuery({
+    queryKey: ['notes', ticker],
+    queryFn: () => fetchNotes(ticker),
+    enabled: !!ticker,
+    staleTime: 30_000,
+    ...opts,
+  })
+
+export const useAddNote = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ticker, body }) => addNote(ticker, body),
+    onSuccess: (_res, vars) => {
+      qc.invalidateQueries({ queryKey: ['notes', vars.ticker] })
+      qc.invalidateQueries({ queryKey: ['watchlist'] })
+    },
+  })
+}
+
+export const useUpdateNote = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }) => updateNote(id, body),
+    onSuccess: (res) => {
+      const t = res?.note?.ticker
+      if (t) qc.invalidateQueries({ queryKey: ['notes', t] })
+    },
+  })
+}
+
+export const useDeleteNote = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }) => deleteNote(id),
+    onSuccess: (_res, vars) => {
+      if (vars?.ticker) qc.invalidateQueries({ queryKey: ['notes', vars.ticker] })
+      qc.invalidateQueries({ queryKey: ['watchlist'] })
+    },
+  })
+}

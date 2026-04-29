@@ -73,6 +73,11 @@ class FinancialRatios:
     # ── Taille & prix courant ────────────────────────────────────────────
     market_cap: float | None = None
     current_price: float | None = None
+    # Audit S3.x (2026-04-27) — ADTV (Average Daily Trading Volume) en nb
+    # d'actions sur 3M (yfinance `info.averageVolume`). Utilisé par
+    # `apply_adtv_cap()` (sizing live) et le modèle d'impact backtest.
+    # None si provider ne l'expose pas — backtest fallback sur market_cap.
+    avg_volume_3m: float | None = None
 
     # ── Valuation ────────────────────────────────────────────────────────
     forward_pe: float | None = None
@@ -110,6 +115,31 @@ class FinancialRatios:
     earnings_growth: float | None = None         # earnings TTM YoY
     earnings_quarterly_growth: float | None = None  # earnings Q/Q YoY (plus volatile)
 
+    # ── Revisions / Earnings Surprise (Lot 16 — pilier Revisions) ─────────
+    # Capture la dynamique des révisions analyste et la qualité des earnings.
+    # Source yfinance : `tk.recommendations` (rating history), `tk.earnings_history`
+    # (surprise %), `tk.analyst_price_targets` (snapshot mean/high/low actuel).
+    # Tous None si scraping KO ou pas d'analyse couverte.
+    upgrades_30d:                 int   | None = None  # nombre d'upgrades 30j
+    downgrades_30d:               int   | None = None
+    upgrades_90d:                 int   | None = None
+    downgrades_90d:               int   | None = None
+    revisions_net_score:          float | None = None  # (up-down)/(up+down) sur 90j ∈ [-1, 1]
+    earnings_surprise_pct_last:   float | None = None  # surprise dernier Q en %
+    earnings_surprise_avg_4q:     float | None = None  # moyenne surprise sur 4 trimestres
+    earnings_beat_rate_8q:        float | None = None  # taux de beat sur 8Q (0-1)
+    next_earnings_date:           str   | None = None  # ISO YYYY-MM-DD du prochain earnings
+
+    # ── Dividend Safety (Lot 16 — scorecard dividende) ────────────────────
+    # Permet de calculer un Dividend Safety Score 0-100 à la SeekingAlpha :
+    #   axis 1 : payout_ratio ≤ 60 % = sain
+    #   axis 2 : FCF cover (FCF / dividends_paid) ≥ 1.5
+    #   axis 3 : dividend_growth_5y ≥ 0
+    #   axis 4 : years_of_consecutive_dividends ≥ 5
+    payout_ratio:                 float | None = None  # décimal (0.45 = 45 %)
+    dividends_paid:               float | None = None  # USD absolute (TTM, négatif yfinance)
+    five_year_avg_dividend_yield: float | None = None  # décimal moyen 5Y
+
     # ── Value ────────────────────────────────────────────────────────────
     ev_to_ebitda: float | None = None
     ev_to_revenue: float | None = None
@@ -132,6 +162,12 @@ class FinancialRatios:
     current_ratio_prev_year:       float | None = None
     shares_outstanding_prev_year:  float | None = None
     gross_margin_prev_year:        float | None = None
+    # Audit S3.x rigoureux (2026-04-27) — dates de fin de période fiscale
+    # extraites de tk.balance_sheet.columns / tk.financials.columns. ISO
+    # YYYY-MM-DD. Permet à _lookup_yoy_snapshot d'appliquer un lag de
+    # publication par-ticker (period_end + 90j) au lieu du lag global.
+    fundamentals_period_end:       str | None = None  # Y0
+    fundamentals_period_end_y1:    str | None = None  # Y-1
 
     # ── Métadonnées provider (traçabilité) ───────────────────────────────
     source_provider: str | None = None

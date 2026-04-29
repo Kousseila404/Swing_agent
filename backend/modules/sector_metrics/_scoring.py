@@ -16,9 +16,11 @@ Pansement Sentiment (FMP stable) :
 from __future__ import annotations
 
 import math
+from datetime import date
 from typing import Any
 
 from modules.log import logger
+from modules.revisions_score import compute_revisions_pillar
 
 from ._utils import _safe_float, _upside_pct, _winsorize, _winsorize_by_sector
 
@@ -48,38 +50,59 @@ _NEUTRAL_SCORE = 50.0
 #                            activé 9/9 grâce au scrape yfinance annuels)
 # Total inchangé (0.07 transféré S→P). Pour du pur LT fondamental, Piotroski
 # porte plus d'information que le consensus analyste 3M.
-_W_TITAN_QUALITY    = 0.22
-_W_TITAN_VALUE      = 0.16
-_W_TITAN_RISK       = 0.11
-_W_TITAN_SENTIMENT  = 0.08
-_W_TITAN_MOMENTUM   = 0.18
-_W_TITAN_PIOTROSKI  = 0.11
-_W_TITAN_GROWTH     = 0.14
+#
+# Lot 16 (2026-04-28) — ajout pilier Revisions (8e pilier).
+# Lot 17 (2026-04-28) — ajout pilier Insider (9e pilier, gratuit via SEC EDGAR).
+# IC empirique des C-level/director purchases : ~0.05 sur 6M (Lakonishok &
+# Lee 2001, Cohen-Malloy-Pomorski 2012). Signal smart-money classique avec
+# fond gratuit illimité.
+# Re-balance final 9 piliers (Σ = 1.00) :
+#   Quality   0.20 → 0.18
+#   Value     0.14 → 0.13
+#   Risk      0.10 → 0.10
+#   Sentiment 0.04 → 0.03
+#   Momentum  0.16 → 0.15
+#   Piotroski 0.10 → 0.09
+#   Growth    0.14 → 0.13
+#   Revisions 0.12 → 0.11
+#   Insider   ----  → 0.08 (NEW)
+_W_TITAN_QUALITY    = 0.18
+_W_TITAN_VALUE      = 0.13
+_W_TITAN_RISK       = 0.10
+_W_TITAN_SENTIMENT  = 0.03
+_W_TITAN_MOMENTUM   = 0.15
+_W_TITAN_PIOTROSKI  = 0.09
+_W_TITAN_GROWTH     = 0.13
+_W_TITAN_REVISIONS  = 0.11
+_W_TITAN_INSIDER    = 0.08
 
 # Pansement Sentiment — si reco+upside tous deux absents (FMP stable), on
-# renormalise Q/V/R/M/P/G en préservant leur ratio relatif.
+# renormalise Q/V/R/M/P/G/Revisions/Insider en préservant leur ratio relatif.
 _SENTIMENT_FALLBACK_SUM = (
     _W_TITAN_QUALITY + _W_TITAN_VALUE + _W_TITAN_RISK
     + _W_TITAN_MOMENTUM + _W_TITAN_PIOTROSKI + _W_TITAN_GROWTH
+    + _W_TITAN_REVISIONS + _W_TITAN_INSIDER
 )
-_W_TITAN_Q_NO_SENTIMENT = _W_TITAN_QUALITY   / _SENTIMENT_FALLBACK_SUM
-_W_TITAN_V_NO_SENTIMENT = _W_TITAN_VALUE     / _SENTIMENT_FALLBACK_SUM
-_W_TITAN_R_NO_SENTIMENT = _W_TITAN_RISK      / _SENTIMENT_FALLBACK_SUM
-_W_TITAN_M_NO_SENTIMENT = _W_TITAN_MOMENTUM  / _SENTIMENT_FALLBACK_SUM
-_W_TITAN_P_NO_SENTIMENT = _W_TITAN_PIOTROSKI / _SENTIMENT_FALLBACK_SUM
-_W_TITAN_G_NO_SENTIMENT = _W_TITAN_GROWTH    / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_Q_NO_SENTIMENT  = _W_TITAN_QUALITY   / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_V_NO_SENTIMENT  = _W_TITAN_VALUE     / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_R_NO_SENTIMENT  = _W_TITAN_RISK      / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_M_NO_SENTIMENT  = _W_TITAN_MOMENTUM  / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_P_NO_SENTIMENT  = _W_TITAN_PIOTROSKI / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_G_NO_SENTIMENT  = _W_TITAN_GROWTH    / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_RV_NO_SENTIMENT = _W_TITAN_REVISIONS / _SENTIMENT_FALLBACK_SUM
+_W_TITAN_IN_NO_SENTIMENT = _W_TITAN_INSIDER   / _SENTIMENT_FALLBACK_SUM
 
 # Pondération du composite par la data_quality.
 # Formule : coef = _DQ_MIN_COEF + (1 - _DQ_MIN_COEF) × DQ
-# Avec _DQ_MIN_COEF=0.5 (audit 2026-04-23) :
-#   DQ=1.0 → coef=1.00 (aucune pénalité)
-#   DQ=0.8 → coef=0.90 (10 % de pénalité)
-#   DQ=0.7 → coef=0.85 (15 % de pénalité, juste au-dessus du gate)
-# L'ancien _DQ_MIN_COEF=0.7 écrasait la plage utile (0.91-1.0) au-dessus du
-# gate dur — l'audit a confirmé que le coef avait un effet marginal. Baisser
-# à 0.5 donne un vrai levier de différenciation entre DQ=0.70 (85 %) et
-# DQ=1.0 (100 %) → 15 pts de composite de pénalité.
-_DQ_MIN_COEF = 0.5
+#
+# Audit S3.1 (2026-04-27) — _DQ_MIN_COEF=0.5 produisait une double pénalité :
+# tickers DQ<0.70 sont DÉJÀ filtrés par le gate hard `_MIN_DATA_QUALITY`. Au-
+# dessus du gate, pénaliser linéairement -15 pts entre DQ=0.70 et DQ=1.0
+# avantageait systématiquement les mega-caps US (couverture yfinance/FMP
+# parfaite) au détriment de mid-caps légitimes — biais structurel vers le
+# top du SP500. Le coef est désormais quasi-neutre : 0.95 à 0.70 → 1.00 à
+# 1.00 (5 pts d'écart max), juste assez pour départager des ex-aequo.
+_DQ_MIN_COEF = 0.95
 
 # Champs fondamentaux utilisés dans le scoring TITAN (métriques réparties
 # sur les 6 piliers). data_quality = fraction non-None sur ces champs.
@@ -185,7 +208,13 @@ def _percentile_rank(
 # Seuil de bascule sector-relative → global. Sous ce nombre de tickers dans le
 # secteur, le rank intra-secteur n'a pas de sens statistique (ties dominants,
 # variance trop faible) → on retombe sur le rank global pour ce secteur.
-_MIN_SECTOR_SIZE_FOR_RELATIVE = 5
+#
+# Audit S3.2 (2026-04-27) — relevé de 5 à 8. Avec n=5 le percentile rank ne
+# produit que 5 buckets distincts (10/30/50/70/90), à peine plus expressif
+# qu'un rank global avec ties. n=8 donne au minimum 8 buckets (12.5 % de
+# résolution) — pas idéal mais signal moins bruité sur les petits secteurs
+# (Real Estate, Utilities tournent autour de 10-15 tickers dans l'univers).
+_MIN_SECTOR_SIZE_FOR_RELATIVE = 8
 
 
 def _percentile_rank_by_sector(
@@ -241,14 +270,41 @@ def _percentile_rank_by_sector(
     return out
 
 
-def _lookup_yoy_snapshot(ticker: str) -> dict[str, Any] | None:
-    """Retourne le row du ticker dans le snapshot Y-1 (~365 jours avant).
+# Audit S3.x (2026-04-27) — Lag de publication des fondamentaux.
+# Les comptes annuels (10-K) sont déposés 60-90 jours après la clôture
+# fiscale ; les trimestriels (10-Q) ~45 jours. Toute lecture YoY directe
+# depuis yfinance peut donc inclure des chiffres pas encore publiés à la
+# date du snapshot, créant un look-ahead silencieux dans Piotroski Y/Y.
+#
+# Mitigation : on n'autorise comme `yoy_row` qu'un snapshot suffisamment
+# ancien pour que la période fiscale Y-1 ait été *publiquement disponible*
+# au moment du snapshot recherché. 90 jours est l'intervalle typique
+# 10-K pour les large-caps US (limite SEC à 60-90 j selon catégorie).
+_FUNDAMENTAL_PUBLICATION_LAG_DAYS = 90
+
+
+def _lookup_yoy_snapshot(
+    ticker: str,
+    *,
+    as_of: date | None = None,
+    publication_lag_days: int = _FUNDAMENTAL_PUBLICATION_LAG_DAYS,
+) -> dict[str, Any] | None:
+    """Retourne le row du ticker dans le snapshot Y-1 (~365 jours avant `as_of`).
+
+    Anti-lookahead : on n'accepte qu'un snapshot dont la date est antérieure
+    de `publication_lag_days` à `as_of` (les fondamentaux Y-1 doivent avoir
+    été *publiés* au moment du snapshot considéré, pas seulement *clos*).
 
     Tolérance : on accepte un snapshot entre 300 et 430 jours d'ancienneté
-    (buffer pour les jours fériés / gaps). None si absent.
+    (buffer jours fériés / gaps), ET au moins `publication_lag_days` plus
+    vieux que `as_of`. None si aucun snapshot satisfait les deux gates.
 
-    Lookup lazy : l'import universe_history est tardif pour éviter le cycle
-    (universe_history → sector_metrics via hook).
+    Args:
+        ticker : ticker recherché.
+        as_of : date du contexte (défaut today). En backtest, c'est la
+                signal_date courante — pas la date d'aujourd'hui.
+        publication_lag_days : marge minimum entre `as_of` et le snapshot
+                               retourné (défaut 90 j = 10-K horizon).
     """
     from datetime import date, timedelta
     try:
@@ -256,12 +312,17 @@ def _lookup_yoy_snapshot(ticker: str) -> dict[str, Any] | None:
     except ImportError:
         return None
 
-    today = date.today()
-    target_min = today - timedelta(days=430)
-    target_max = today - timedelta(days=300)
+    if as_of is None:
+        as_of = date.today()
+    target_min = as_of - timedelta(days=430)
+    target_max_yoy = as_of - timedelta(days=300)
+    # Anti-lookahead : pas plus récent que (as_of - lag).
+    target_max_lag = as_of - timedelta(days=max(0, publication_lag_days))
+    target_max = min(target_max_yoy, target_max_lag)
+    if target_max < target_min:
+        # Lag plus large que la fenêtre → aucun snapshot éligible.
+        return None
 
-    # Parcours : on cherche un snapshot dans la fenêtre [target_min, target_max].
-    # list_snapshots est ordonné chronologiquement — on itère à l'envers.
     try:
         all_dates = universe_history.list_snapshots()
     except Exception:
@@ -359,7 +420,12 @@ def _piotroski_f_score_absolute(
     return sum(1 for v in evaluated if v), len(evaluated), breakdown
 
 
-def _piotroski_score_pillar(row: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+def _piotroski_score_pillar(
+    row: dict[str, Any],
+    *,
+    as_of: date | None = None,
+    publication_lag_days: int = _FUNDAMENTAL_PUBLICATION_LAG_DAYS,
+) -> tuple[float, dict[str, Any]]:
     """Convertit le F-Score brut en score 0-100 normalisé par #critères évalués.
 
     Si 0 critère évaluable → neutral 50 (pas de pénalité, signal absent).
@@ -381,16 +447,71 @@ def _piotroski_score_pillar(row: dict[str, Any]) -> tuple[float, dict[str, Any]]
         "gross_margin_prev_year",
     )
     if any(row.get(f) is not None for f in prev_fields):
-        yoy_row = {
-            "return_on_assets":   row.get("return_on_assets_prev_year"),
-            "debt_to_equity":     row.get("debt_to_equity_prev_year"),
-            "current_ratio":      row.get("current_ratio_prev_year"),
-            "shares_outstanding": row.get("shares_outstanding_prev_year"),
-            "gross_margin":       row.get("gross_margin_prev_year"),
-        }
+        # Audit S3.x rigoureux (2026-04-27) — gate par-ticker via
+        # `fundamentals_period_end_y1`. Si la période fiscale Y-1 + LAG
+        # n'était pas encore publiée à `as_of` (cas backtest), on refuse
+        # ce Y-1 — sinon look-ahead silencieux.
+        if as_of is not None and publication_lag_days > 0:
+            from datetime import date as _date
+            from datetime import timedelta as _td
+            period_end_y1 = row.get("fundamentals_period_end_y1")
+            if isinstance(period_end_y1, str):
+                try:
+                    pe = _date.fromisoformat(period_end_y1[:10])
+                    publish_date = pe + _td(days=publication_lag_days)
+                    if publish_date > as_of:
+                        # Y-1 pas encore publiable → fallback sur lookup snapshot
+                        # (qui peut lui-même retourner None si la fenêtre est
+                        # fermée).
+                        yoy_row = (
+                            _lookup_yoy_snapshot(
+                                ticker, as_of=as_of,
+                                publication_lag_days=publication_lag_days,
+                            ) if ticker else None
+                        )
+                    else:
+                        yoy_row = {
+                            "return_on_assets":   row.get("return_on_assets_prev_year"),
+                            "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                            "current_ratio":      row.get("current_ratio_prev_year"),
+                            "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                            "gross_margin":       row.get("gross_margin_prev_year"),
+                        }
+                except ValueError:
+                    yoy_row = {
+                        "return_on_assets":   row.get("return_on_assets_prev_year"),
+                        "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                        "current_ratio":      row.get("current_ratio_prev_year"),
+                        "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                        "gross_margin":       row.get("gross_margin_prev_year"),
+                    }
+            else:
+                # Pas de date fiscale → comportement legacy (accept).
+                yoy_row = {
+                    "return_on_assets":   row.get("return_on_assets_prev_year"),
+                    "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                    "current_ratio":      row.get("current_ratio_prev_year"),
+                    "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                    "gross_margin":       row.get("gross_margin_prev_year"),
+                }
+        else:
+            yoy_row = {
+                "return_on_assets":   row.get("return_on_assets_prev_year"),
+                "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                "current_ratio":      row.get("current_ratio_prev_year"),
+                "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                "gross_margin":       row.get("gross_margin_prev_year"),
+            }
     else:
-        # Fallback legacy : snapshot universe_history Y-1.
-        yoy_row = _lookup_yoy_snapshot(ticker) if ticker else None
+        # Fallback legacy : snapshot universe_history Y-1 (anti-lookahead).
+        yoy_row = (
+            _lookup_yoy_snapshot(
+                ticker,
+                as_of=as_of,
+                publication_lag_days=publication_lag_days,
+            )
+            if ticker else None
+        )
 
     n_passed, n_evaluated, breakdown = _piotroski_f_score_absolute(row, yoy_row)
     if n_evaluated == 0:
@@ -650,6 +771,13 @@ def _score_universe(tickers_map: dict[str, dict[str, Any]]) -> dict[str, dict[st
     rev_r = _percentile_rank_by_sector(rev_growth, sectors_map, higher_is_better=True)
     eps_r = _percentile_rank_by_sector(eps_growth, sectors_map, higher_is_better=True)
 
+    # Lot 16 — Revisions : pilier dédié (analyste upgrades/downgrades 90j +
+    # earnings beat rate + surprise avg). Sources scrappées par yfinance_provider
+    # via _scrape_revisions_and_earnings. Calcul dans modules/revisions_score.
+    revisions_pillar = compute_revisions_pillar(
+        {k: tickers_map[k] for k in keys}
+    )
+
     # ── Étape 3 — Assemblage sous-scores + composite TITAN ──────────────
     scored: dict[str, dict[str, Any]] = {}
     for k in keys:
@@ -688,6 +816,17 @@ def _score_universe(tickers_map: dict[str, dict[str, Any]]) -> dict[str, dict[st
         # GROWTH — Revenue CAGR + Earnings CAGR (Lot 12, Novy-Marx/AQR).
         g = _pillar_score([rev_r[k], eps_r[k]])
 
+        # REVISIONS — Lot 16. Pilier dédié (poids 12 %). Capture upgrades/
+        # downgrades 90j + beat rate 8Q + surprise avg 4Q.
+        rev_pack = revisions_pillar.get(k) or {}
+        rv = float(rev_pack.get("revisions_score") or _NEUTRAL_SCORE)
+
+        # INSIDER — Lot 17. Pilier C-level/director smart money (poids 8 %).
+        # Lit `insider_score` directement depuis le row si déjà enrichi par
+        # `enrich_universe_with_insider()`. Sinon neutre 50.
+        ins_raw = _safe_float(t_base.get("insider_score"))
+        ins = ins_raw if ins_raw is not None else _NEUTRAL_SCORE
+
         if sentiment_available:
             s = _pillar_score([reco_r[k], upside_r[k]])
             composite = (
@@ -698,18 +837,22 @@ def _score_universe(tickers_map: dict[str, dict[str, Any]]) -> dict[str, dict[st
                 + _W_TITAN_MOMENTUM  * m
                 + _W_TITAN_PIOTROSKI * p
                 + _W_TITAN_GROWTH    * g
+                + _W_TITAN_REVISIONS * rv
+                + _W_TITAN_INSIDER   * ins
             )
             weight_mode = "full"
         else:
-            # Pansement : Sentiment indisponible → renormalisation Q/V/R/M/P/G.
+            # Pansement : Sentiment indisponible → renormalisation 8 piliers.
             s = _NEUTRAL_SCORE  # reporté pour traçabilité, non utilisé dans composite
             composite = (
-                _W_TITAN_Q_NO_SENTIMENT * q
-                + _W_TITAN_V_NO_SENTIMENT * v
-                + _W_TITAN_R_NO_SENTIMENT * r
-                + _W_TITAN_M_NO_SENTIMENT * m
-                + _W_TITAN_P_NO_SENTIMENT * p
-                + _W_TITAN_G_NO_SENTIMENT * g
+                _W_TITAN_Q_NO_SENTIMENT  * q
+                + _W_TITAN_V_NO_SENTIMENT  * v
+                + _W_TITAN_R_NO_SENTIMENT  * r
+                + _W_TITAN_M_NO_SENTIMENT  * m
+                + _W_TITAN_P_NO_SENTIMENT  * p
+                + _W_TITAN_G_NO_SENTIMENT  * g
+                + _W_TITAN_RV_NO_SENTIMENT * rv
+                + _W_TITAN_IN_NO_SENTIMENT * ins
             )
             weight_mode = "no_sentiment"
 
@@ -779,6 +922,12 @@ def _score_universe(tickers_map: dict[str, dict[str, Any]]) -> dict[str, dict[st
             "momentum_score":           round(m, 2),
             "piotroski_score":          round(p, 2),
             "growth_score":             round(g, 2),
+            # Lot 16 — Revisions pillar.
+            "revisions_score":          round(rv, 2),
+            "revisions_components":     rev_pack.get("revisions_components"),
+            "revisions_data_quality":   rev_pack.get("revisions_data_quality"),
+            # Lot 17 — Insider pillar (smart money).
+            "insider_score":            round(ins, 2),
             "f_score":                  p_diag.get("f_score"),
             "f_score_max":              p_diag.get("f_score_max"),
             "f_score_breakdown":        p_diag.get("f_score_breakdown"),

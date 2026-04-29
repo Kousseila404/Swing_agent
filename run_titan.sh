@@ -66,6 +66,43 @@ if [[ $rc_sched -ne 0 ]]; then
     echo "WARN: universe_scheduler exit=$rc_sched (on continue le warm)"
 fi
 
+# ── 1b. Insider enrichment (SEC EDGAR Form 4 — gratuit illimité) ─
+#     Lot 17 — pilier Insider (8% poids). Scrape SEC EDGAR pour compter
+#     les filings Form 4 (transactions C-level/director) sur 30/90j et
+#     détecter les clusters (3+ insiders distincts en 7j = signal smart-money).
+#     Très rapide (~40s pour 491 tickers, 5 workers, throttle 0.2s/req).
+#     Idempotent : cache disque 24h dans data/sec_cache/.
+#     Timeout 15 min : énorme marge vs run normal 40s, absorbe un
+#     ralentissement SEC EDGAR exceptionnel. Si interrompu malgré tout,
+#     le pilier Insider restera sur le dernier état persisté hier.
+echo "── Step 1b/4 : insider_enrich (SEC EDGAR, timeout 15min)"
+timeout 900 "$PYTHON" -m modules.insider_enrich --workers 5
+rc_insider=$?
+if [[ $rc_insider -eq 124 ]]; then
+    echo "WARN: insider_enrich TIMEOUT (>15min) — pilier Insider restera sur état précédent"
+elif [[ $rc_insider -ne 0 ]]; then
+    echo "WARN: insider_enrich exit=$rc_insider (continue — pilier Insider sera neutre)"
+fi
+
+# ── 1c. Finnhub enrichment (Revisions + Earnings — free 60/min) ──
+#     Lot 17 — remplace les recommendations yfinance pauvres par les
+#     vraies données Finnhub (recommendation trends mensuels, earnings
+#     calendar avec EPS estimate, surprise history). Skipped silencieux
+#     si FINNHUB_API_KEY absent. Cache 24h, ~30 min pour 491 tickers en
+#     1er run cold, ~30s ensuite (cache hit).
+#     Timeout 45 min : couvre largement le run cold (30 min observé) avec
+#     15 min de buffer si Finnhub ralentit. Si interrompu, le cache 24h
+#     des tickers déjà fait est persisté → demain reprend là où ça s'est
+#     arrêté. Idempotent.
+echo "── Step 1c/4 : finnhub_enrich (Revisions + Earnings, timeout 45min)"
+timeout 2700 "$PYTHON" -m modules.finnhub_enrich
+rc_finnhub=$?
+if [[ $rc_finnhub -eq 124 ]]; then
+    echo "WARN: finnhub_enrich TIMEOUT (>45min) — cache partiel persisté, demain reprendra"
+elif [[ $rc_finnhub -ne 0 ]]; then
+    echo "WARN: finnhub_enrich exit=$rc_finnhub (pas critique — yfinance reste fallback)"
+fi
+
 # ── 2. Warm du cache recommendations ─────────────────────────────
 #     L'API est un process long-running ; son cache est mtime-keyed sur
 #     universe.json → le refresh ci-dessus l'a invalidé. Un hit sur
@@ -92,6 +129,27 @@ echo "── Step 3/4 : universe_history snapshot"
 rc_hist=$?
 if [[ $rc_hist -ne 0 ]]; then
     echo "WARN: universe_history snapshot exit=$rc_hist"
+fi
+
+# ── 3b. WFO monitor mensuel (1er du mois uniquement) ─────────────
+#     Audit S1.3 — calibration walk-forward des poids piliers TITAN sur
+#     l'historique universe_history. Compare l'IC test (out-of-sample)
+#     entre runs et alerte Telegram si dégradation 2x consécutive sous
+#     seuil 0.02. Append `data/wfo_history.jsonl` + persiste
+#     `data/wfo_weights.json` (consommé par /api/wfo).
+#
+#     Gate `date +%d == 01` : exécution mensuelle (bruyant en daily,
+#     trop lâche en yearly). 60j train + 20j test = signal stable.
+rc_wfo=0
+if [[ "$(date +%d)" == "01" ]]; then
+    echo "── Step 3b/4 : wfo_monitor (mensuel)"
+    "$PYTHON" -m modules.wfo_monitor --train-days 60 --test-days 20 --publication-lag-days 90
+    rc_wfo=$?
+    if [[ $rc_wfo -ne 0 ]]; then
+        echo "WARN: wfo_monitor exit=$rc_wfo (historique probablement insuffisant — non bloquant)"
+    fi
+else
+    echo "── Step 3b/4 : wfo_monitor SKIP (jour $(date +%d), exécuté seulement le 01)"
 fi
 
 # ── 4. Refresh propositions (auto_proposer + Telegram) ───────────

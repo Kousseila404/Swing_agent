@@ -3,20 +3,25 @@
 ║  ROUTER — HISTORY (snapshots + série temporelle par ticker)      ║
 ║  GET  /api/history/snapshots                                     ║
 ║  GET  /api/history/ticker/{ticker}                               ║
+║  POST /api/backtest/quick   — backtest sur une vue filtrée       ║
 ║                                                                  ║
-║  Les endpoints POST /api/backtest* ont été retirés avec la purge ║
-║  des pages Backtest / QuantBacktest (2026-04-24). Le module       ║
-║  `modules.backtest` reste utilisable en CLI.                     ║
+║  Les anciens endpoints POST /api/backtest* (large-scale compare) ║
+║  restent retirés. /quick est minimaliste et pensé pour la page   ║
+║  Univers (Tier B #1).                                            ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 from __future__ import annotations
 
 import math
+from dataclasses import asdict
 from datetime import date
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Security
+from pydantic import BaseModel, Field
 
-from modules import universe_history
+from modules import api_core, backtest, universe_history
+from modules.log import logger
 
 router = APIRouter(prefix="/api", tags=["history"])
 
@@ -95,3 +100,85 @@ def ticker_history_endpoint(
         "fields":    field_list,
         "history":   rows,
     }
+
+
+# ─────────────────────────────────────────────────────────────────
+# POST /api/backtest/quick — backtest sur une whitelist de tickers
+# ─────────────────────────────────────────────────────────────────
+
+class QuickBacktestRequest(BaseModel):
+    """Backtest minimaliste exposé pour la page Univers (Tier B #1).
+
+    On reste *simple* :
+      - Whitelist de tickers (la "vue filtrée" côté UI)
+      - top_n borné à 30 pour éviter une vue de ranking dégénérée
+      - benchmark optionnel (default SPY)
+
+    Pas d'override de slippage/lag — l'utilisateur expert peut toujours
+    appeler `python -m modules.backtest` en CLI pour tuner finement.
+    """
+    tickers:   list[str] = Field(default_factory=list, max_length=500)
+    top_n:     int = Field(default=10, ge=1, le=30)
+    benchmark: str | None = Field(default="SPY")
+    weighting: str = Field(default="equal", pattern="^(equal|score|risk_parity)$")
+
+
+@router.post("/backtest/quick")
+def backtest_quick(
+    req: QuickBacktestRequest,
+    _auth: None = Security(api_core.require_auth),
+):
+    """Lance un backtest TITAN sur la whitelist `tickers` (vue filtrée UI).
+
+    Exigences minimales :
+      - ≥ 2 snapshots dans `universe_history` (sinon on ne peut pas calculer
+        une période de rebalance)
+      - ≥ `top_n` tickers dans la whitelist (sinon ranking dégénéré)
+
+    Retourne {periods, stats, equity_curve, weights_final, n_skipped_periods}
+    + meta {n_tickers_input, n_snapshots, benchmark_return}.
+    """
+    tickers = [t.upper().strip() for t in (req.tickers or []) if t and t.strip()]
+    if len(tickers) < req.top_n:
+        raise HTTPException(
+            422,
+            f"Whitelist trop petite ({len(tickers)} tickers) pour top_n={req.top_n}",
+        )
+
+    try:
+        result = backtest.run_titan_top_n(
+            top_n=req.top_n,
+            benchmark=req.benchmark,
+            weighting=req.weighting,
+            restrict_to=tickers,
+        )
+    except ValueError as e:
+        # Cas typique : < 2 snapshots disponibles.
+        raise HTTPException(422, str(e)) from e
+    except Exception as e:
+        logger.error(f"[Backtest /quick] failed: {e}", exc_info=True)
+        raise HTTPException(500, f"Backtest a échoué: {e}") from e
+
+    raw: dict[str, Any] = asdict(result)
+    # Wrap dans une enveloppe "stats" pour un contrat clean côté UI :
+    # {periods, equity_curve, stats, meta}. Évite de polluer le top-level avec
+    # 10 champs scalaires éparpillés.
+    stats_keys = (
+        "total_return", "avg_daily_return", "sharpe_daily", "sharpe_annual",
+        "max_drawdown", "hit_rate", "benchmark_return", "alpha",
+    )
+    payload: dict[str, Any] = {
+        "strategy":     raw.get("strategy"),
+        "top_n":        raw.get("top_n"),
+        "periods":      raw.get("periods", []),
+        "equity_curve": raw.get("equity_curve", []),
+        "diagnostics":  raw.get("diagnostics", {}),
+        "stats": {k: raw.get(k) for k in stats_keys},
+        "meta": {
+            "n_tickers_input": len(tickers),
+            "top_n":           req.top_n,
+            "weighting":       req.weighting,
+            "benchmark":       req.benchmark,
+        },
+    }
+    return payload

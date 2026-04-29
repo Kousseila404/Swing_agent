@@ -24,7 +24,59 @@ from dataclasses import dataclass
 from typing import Any
 
 from modules import api_core, proposals
+from modules.buy_signal import compute_buy_signal
 from modules.log import logger
+from modules.support_score import compute_support_score
+
+
+def _days_until_earnings(next_earnings_date: Any) -> int | None:
+    """Retourne le nombre de jours d'ici le prochain earnings (peut être négatif
+    si la date est passée et pas encore mise à jour). None si parsing échoue.
+    """
+    if not next_earnings_date:
+        return None
+    s = str(next_earnings_date)[:10]
+    from datetime import date as _date
+    try:
+        d = _date.fromisoformat(s)
+    except ValueError:
+        return None
+    return (d - _date.today()).days
+
+
+def _compute_support_for_ticker(ticker: str, price: float | None) -> dict[str, Any]:
+    """Wrapper safe pour le calcul du support score à la volée.
+
+    Ne JAMAIS lever d'exception : un échec de lecture OHLCV ne doit pas bloquer
+    la génération de proposition. Retourne un dict vide-équivalent dans ce cas.
+    """
+    try:
+        from modules.market_db import read_ohlcv
+        history = read_ohlcv(ticker, days=300)
+        # Fallback yfinance si DuckDB vide (mêmes 300j que le module Lot 7).
+        if history is None or history.empty:
+            try:
+                import yfinance as yf
+                df = yf.download(ticker, period="14mo", interval="1d",
+                                 progress=False, auto_adjust=True, threads=False)
+                if df is not None and not df.empty:
+                    if isinstance(df.columns, type(df.columns)) and hasattr(df.columns, "get_level_values"):
+                        try:
+                            df.columns = df.columns.get_level_values(0)
+                        except Exception:
+                            pass
+                    history = df
+            except Exception:
+                history = None
+        result = compute_support_score(
+            ticker=ticker,
+            current_price=price,
+            history=history,
+        )
+        return result.to_dict()
+    except Exception as e:
+        logger.debug(f"[support_score] {ticker} échec : {e}")
+        return {"score": 0.0, "level": "INSUFFICIENT_DATA", "method": "insufficient_data"}
 
 # ─────────────────────────────────────────────────────────────────
 # CONSTANTES — defaults conservateurs
@@ -40,6 +92,18 @@ UNIVERSE_SEVERE_HOURS = 48.0
 #   "free_slots"   → min(max_holdings - n_open, n_bullish) — cron quotidien (défaut).
 #   "max_holdings" → jusqu'à max_holdings candidats (rebalance complet UI).
 DEFAULT_TOP_N_MODE = "free_slots"
+
+# Earnings calendar gate (Lot 16) — skip un ticker dont les earnings tombent
+# dans < EARNINGS_BLACKOUT_DAYS jours. Un earnings = catalyst binaire (gap
+# ±10-20 % fréquent), incompatible avec une thèse Quantamental LT à conviction.
+# 0 ou None = gate désactivée (test/legacy).
+EARNINGS_BLACKOUT_DAYS = 7
+
+# Weighting method par défaut pour les propositions cron : "hrp" intègre la
+# corrélation inter-tickers dans l'allocation (López de Prado 2016) au lieu de
+# la traiter en post-hoc haircut comme le faisait le 1/σ legacy. Fallback
+# automatique vers risk_parity si scipy/data manquent (cf. _hrp.py).
+DEFAULT_WEIGHTING_METHOD = "hrp"
 
 
 @dataclass
@@ -262,6 +326,7 @@ def _build_proposal_from_alloc(
         "levels_method":      alloc.get("levels_method"),
         "suggested_sl_pct":   alloc.get("suggested_sl_pct"),
         "suggested_tp_pct":   alloc.get("suggested_tp_pct"),
+        "support":            alloc.get("support") or {},
         "sector_exposure":    alloc.get("sector_exposure"),
         "already_held":       bool(alloc.get("already_held")),
         "current_shares":     int(alloc.get("current_shares") or 0),
@@ -281,6 +346,12 @@ def _build_proposal_from_alloc(
         "f_score_max":        alloc.get("f_score_max"),
         "titan_tilt_flags":   alloc.get("titan_tilt_flags") or [],
         "titan_tilt_adjust":  alloc.get("titan_tilt_adjust"),
+        # Lot 16 — Revisions + Earnings calendar pour audit / UI.
+        "revisions_score":    alloc.get("revisions_score"),
+        "next_earnings_date": alloc.get("next_earnings_date"),
+        "days_until_earnings": alloc.get("days_until_earnings"),
+        # Lot 18 — Buy Signal verdict pour badge UI prominent.
+        "buy_signal":         alloc.get("buy_signal"),
     }
 
     return proposals.make_proposal(
@@ -312,6 +383,8 @@ def plan_proposals(
     allow_fractional_shares: bool = False,
     include_held: bool = False,
     top_n_mode: str = DEFAULT_TOP_N_MODE,
+    earnings_blackout_days: int | None = EARNINGS_BLACKOUT_DAYS,
+    weighting_method: str = DEFAULT_WEIGHTING_METHOD,
 ) -> ProposerResult:
     """Évalue les gates et, si toutes OK, génère les propositions à enqueuer.
 
@@ -348,6 +421,8 @@ def plan_proposals(
             "allow_fractional_shares": allow_fractional_shares,
             "include_held":      include_held,
             "top_n_mode":        top_n_mode,
+            "earnings_blackout_days": earnings_blackout_days,
+            "weighting_method":  weighting_method,
         },
     }
 
@@ -458,6 +533,7 @@ def plan_proposals(
         market_provider=market_provider,
         momentum_provider=momentum_provider,
         target_vol_pct=DEFAULT_TARGET_VOL_PCT,
+        weighting_method=weighting_method,
     )
     # Effective multiplier = régime macro × circuit breaker progressif.
     # Un VIX>25 (macro 0.75) + un drawdown -3 % (cb 0.5) = 0.375 de déploiement.
@@ -550,6 +626,11 @@ def plan_proposals(
             alloc.get("volatility_pct"),
             direction="LONG",
         )
+
+        # Support score composite — informatif pour l'utilisateur (règle manuelle
+        # "TITAN > 80 + support"). Lecture OHLCV depuis DuckDB ; fallback yfinance
+        # via try/except interne pour ne PAS bloquer la génération de proposition.
+        support = _compute_support_for_ticker(ticker, alloc.get("price"))
         current_shares = 0
         if already_held:
             try:
@@ -563,6 +644,17 @@ def plan_proposals(
             except (TypeError, ValueError):
                 current_shares = 0
 
+        # Lot 18 — Buy Signal calc (verdict prominent UI).
+        # On enrichit avec scored[ticker] pour récupérer earnings/insider_score
+        # qui peuvent ne pas être présents dans alloc tel quel.
+        scored_row = scored.get(ticker) or {}
+        buy_input = {
+            **scored_row,
+            "support": support,
+            "next_earnings_date": scored_row.get("next_earnings_date"),
+        }
+        buy_signal_data = compute_buy_signal(buy_input).to_dict()
+
         alloc = {
             **alloc,
             "suggested_sl":     levels["sl"],
@@ -570,6 +662,8 @@ def plan_proposals(
             "suggested_sl_pct": levels["sl_pct"],
             "suggested_tp_pct": levels["tp_pct"],
             "levels_method":    levels["method"],
+            "support":          support,
+            "buy_signal":       buy_signal_data,
             "already_held":     already_held,
             "current_shares":   current_shares,
             "sector_exposure":  {
@@ -589,6 +683,25 @@ def plan_proposals(
             skipped.append({
                 "ticker": ticker, "reason": "below_min_proposal_usd",
                 "amount_usd": alloc.get("amount_usd"),
+            })
+            continue
+
+        # Filtre 3 (Lot 16) : earnings blackout. Si le prochain earnings tombe
+        # dans < earnings_blackout_days, on skip — un earnings est un catalyst
+        # binaire (gap ±15 % fréquent) incompatible avec une thèse LT.
+        next_earn = (scored.get(ticker) or {}).get("next_earnings_date")
+        days_to_e = _days_until_earnings(next_earn)
+        alloc["next_earnings_date"] = next_earn
+        alloc["days_until_earnings"] = days_to_e
+        if (
+            earnings_blackout_days is not None
+            and earnings_blackout_days > 0
+            and days_to_e is not None
+            and 0 <= days_to_e < earnings_blackout_days
+        ):
+            skipped.append({
+                "ticker": ticker, "reason": "earnings_blackout",
+                "days_until_earnings": days_to_e,
             })
             continue
 

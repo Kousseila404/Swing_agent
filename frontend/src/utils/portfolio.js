@@ -5,6 +5,26 @@ export function parseNum(x) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// LTCG seuil US : 365 jours de détention pour passer en long-term
+// capital gains tax rate (15% vs short-term taxé au revenu).
+export const LTCG_THRESHOLD_DAYS = 365;
+
+// Retourne {days_held, days_to_ltcg, ltcg_eligible} pour une position.
+// asOf = "now" par défaut, surchargé pour les tests.
+export function holdingPeriod(entryDate, asOf = new Date()) {
+  if (!entryDate) return null;
+  try {
+    const d0 = new Date(String(entryDate).slice(0, 10));
+    if (Number.isNaN(d0.getTime())) return null;
+    const days = Math.floor((asOf.getTime() - d0.getTime()) / 86_400_000);
+    return {
+      days_held:     Math.max(0, days),
+      days_to_ltcg:  Math.max(0, LTCG_THRESHOLD_DAYS - days),
+      ltcg_eligible: days >= LTCG_THRESHOLD_DAYS,
+    };
+  } catch { return null; }
+}
+
 export function tradePnL(t) {
   const entry  = parseNum(t.Entry);
   const exit_p = parseNum(t.Exit_Price);

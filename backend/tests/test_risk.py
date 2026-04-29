@@ -126,10 +126,17 @@ class TestRegimeAdjustedRisk:
         assert regime_adjusted_risk(0.0025, "BULL_MARKET", vix=15.0) == 0.0025
 
     def test_bull_high_vix_scales_down(self):
-        assert regime_adjusted_risk(0.01, "BULL_MARKET", vix=27.0) == 0.0075
+        # Audit S2.5 — thresholds adossés à VIX_BULL_MAX (=30) :
+        #   high = 0.83 × 30 ≈ 24.9 → vix=27 > high → 0.60×.
+        assert regime_adjusted_risk(0.01, "BULL_MARKET", vix=27.0) == pytest.approx(0.006)
 
     def test_bull_moderate_vix(self):
-        assert regime_adjusted_risk(0.01, "BULL_MARKET", vix=22.0) == pytest.approx(0.009)
+        # Audit S2.5 — vix=22 → mid (20.1) < vix ≤ high (24.9) → 0.75×.
+        assert regime_adjusted_risk(0.01, "BULL_MARKET", vix=22.0) == pytest.approx(0.0075)
+
+    def test_bull_low_calm_lightly_scaled(self):
+        # Audit S2.5 — vix=18 → low_calm (15) < vix ≤ mid (20.1) → 0.90×.
+        assert regime_adjusted_risk(0.01, "BULL_MARKET", vix=18.0) == pytest.approx(0.009)
 
 
 class TestAdtvCap:

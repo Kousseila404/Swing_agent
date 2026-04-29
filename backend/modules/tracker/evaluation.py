@@ -25,11 +25,24 @@ import pandas as pd
 from filelock import FileLock
 
 import config
-from modules.alerter import send_close_alert
+from modules.alerter import (
+    send_close_alert,
+    send_price_alert_fired,
+    send_thesis_break_alert,
+)
+from modules.thesis_stop import compute_sector_drift_baseline, compute_thesis_status
 from modules.utils import CSV_LOCK_PATH, CSV_PATH, ensure_csv_schema
 
 from .market import get_current_price
-from .state import ALERT_COOLDOWN_PATH, DATE_FMT, SL_ALERT_COOLDOWN_HOURS, logger
+from .state import (
+    ALERT_COOLDOWN_PATH,
+    DATE_FMT,
+    PRICE_ALERTS_CHECK_INTERVAL_MIN,
+    SL_ALERT_COOLDOWN_HOURS,
+    THESIS_ALERT_COOLDOWN_HOURS,
+    THESIS_CHECK_INTERVAL_MIN,
+    logger,
+)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -49,6 +62,104 @@ def can_send_sl_alert(ticker: str) -> bool:
     except Exception:
         pass
     return True
+
+
+def should_run_price_alerts_check() -> bool:
+    """Throttle : True si > PRICE_ALERTS_CHECK_INTERVAL_MIN (default 5) depuis dernier run."""
+    try:
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+            last_str = state.get("price_alerts_last_run", "")
+            if last_str:
+                last_dt = datetime.strptime(last_str, "%Y-%m-%d %H:%M:%S")
+                elapsed_min = (datetime.now() - last_dt).total_seconds() / 60
+                return elapsed_min >= PRICE_ALERTS_CHECK_INTERVAL_MIN
+    except Exception:
+        pass
+    return True
+
+
+def mark_price_alerts_check_run() -> None:
+    """Enregistre l'instant du dernier passage price_alerts."""
+    try:
+        state: dict = {}
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+        state["price_alerts_last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ALERT_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(ALERT_COOLDOWN_PATH, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2)
+    except Exception:
+        pass
+
+
+def should_run_thesis_check() -> bool:
+    """Throttle global : True si > THESIS_CHECK_INTERVAL_MIN depuis dernier run.
+
+    Le tracker tourne `*/2 * * * 1-5` (30 cycles/h en heures de marché). On ne
+    veut pas charger get_scored_universe() à chaque cycle (coût ~5 MB JSON parse +
+    sector drift baseline) : 1 check/heure suffit pour un signal LT.
+    """
+    try:
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+            last_str = state.get("thesis_check_last_run", "")
+            if last_str:
+                last_dt = datetime.strptime(last_str, "%Y-%m-%d %H:%M:%S")
+                elapsed_min = (datetime.now() - last_dt).total_seconds() / 60
+                return elapsed_min >= THESIS_CHECK_INTERVAL_MIN
+    except Exception:
+        pass
+    return True
+
+
+def mark_thesis_check_run() -> None:
+    """Enregistre l'instant du dernier passage thesis_stop (clé globale, pas par ticker)."""
+    try:
+        state: dict = {}
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+        state["thesis_check_last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ALERT_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(ALERT_COOLDOWN_PATH, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2)
+    except Exception:
+        pass
+
+
+def can_send_thesis_alert(ticker: str) -> bool:
+    """True si le cooldown thesis_break (24h) pour ce ticker est écoulé."""
+    try:
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+            last_str = state.get("thesis_break", {}).get(ticker, "")
+            if last_str:
+                last_dt = datetime.strptime(last_str, "%Y-%m-%d %H:%M:%S")
+                elapsed_h = (datetime.now() - last_dt).total_seconds() / 3600
+                return elapsed_h >= THESIS_ALERT_COOLDOWN_HOURS
+    except Exception:
+        pass
+    return True
+
+
+def mark_thesis_alert_sent(ticker: str) -> None:
+    """Enregistre l'heure d'envoi de l'alerte thesis_break."""
+    try:
+        state: dict = {}
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+        state.setdefault("thesis_break", {})[ticker] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ALERT_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(ALERT_COOLDOWN_PATH, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2)
+    except Exception:
+        pass
 
 
 def mark_sl_alert_sent(ticker: str) -> None:
@@ -213,6 +324,34 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             for t, price, hist in pool.map(_fetch, unique_tickers):
                 market_data[t] = (price, hist)
 
+    # ── Phase 1.5 — Préfetch scored_universe pour thesis_stop Phase 2 ──
+    # Charge UNE fois le dict scoré complet (lecture fichier ~5 MB), puis évalue
+    # la cassure de thèse fondamentale par position. Non-bloquant : si le fetch
+    # échoue, le cycle continue sans ce signal.
+    # Throttle : 1 check/heure suffit (le tracker fait 30 cycles/h en marché).
+    scored_universe: dict[str, dict] = {}
+    sector_drifts: dict[str, float] = {}
+    if should_run_thesis_check():
+        try:
+            from modules.sector_metrics import get_scored_universe
+            scored_universe = get_scored_universe() or {}
+            if scored_universe:
+                positions_for_drift = []
+                for _, _r in open_trades.iterrows():
+                    _t = str(_r["Ticker"]).strip().upper()
+                    _s = scored_universe.get(_t, {})
+                    if not _s:
+                        continue
+                    positions_for_drift.append({
+                        "sector":        _s.get("sector"),
+                        "entry_titan":   _r.get("Titan_Score_Entry"),
+                        "current_titan": _s.get("titan_composite_score"),
+                    })
+                sector_drifts = compute_sector_drift_baseline(positions_for_drift)
+                mark_thesis_check_run()
+        except Exception as exc:
+            logger.debug(f"[thesis_stop] Préfetch scored_universe échoué : {exc}")
+
     for idx, row in open_trades.iterrows():
         ticker    = str(row["Ticker"]).strip().upper()
         entry     = float(row["Entry"])
@@ -241,6 +380,45 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             f"[{ticker}] {direction} | Prix={current_price:.4f} | "
             f"SL={sl:.4f} | TP={tp:.4f} | P&L={pct_gain:+.2f}%"
         )
+
+        # ── 0. Thesis stop Phase 2 — signal informatif (non bloquant) ──
+        # Si on a un scored_universe + des entry scores, on évalue la cassure
+        # de thèse. BROKEN + cooldown OK → push Telegram. Le tracker NE FERME
+        # PAS la position (philosophie LT — décision manuelle après lecture).
+        if scored_universe:
+            try:
+                _current = scored_universe.get(ticker, {})
+                if _current:
+                    _sector = _current.get("sector")
+                    _baseline = sector_drifts.get(str(_sector)) if _sector else None
+                    _thesis = compute_thesis_status(
+                        entry={
+                            "Titan_Score_Entry": row.get("Titan_Score_Entry"),
+                            "Quality_Entry":     row.get("Quality_Entry"),
+                            "Value_Entry":       row.get("Value_Entry"),
+                            "Risk_Entry":        row.get("Risk_Entry"),
+                            "Momentum_Entry":    row.get("Momentum_Entry"),
+                            "Piotroski_Entry":   row.get("Piotroski_Entry"),
+                            "Growth_Entry":      row.get("Growth_Entry"),
+                            "F_Score_Entry":     row.get("F_Score_Entry"),
+                            "Tilt_Flags_Entry":  row.get("Tilt_Flags_Entry") or "",
+                        },
+                        current=_current,
+                        sector_drift_baseline=_baseline,
+                    )
+                    if _thesis.get("status") == "BROKEN" and can_send_thesis_alert(ticker):
+                        send_thesis_break_alert(
+                            ticker, direction, entry, current_price,
+                            _thesis.get("reasons_break") or [],
+                            _thesis.get("drift"),
+                        )
+                        mark_thesis_alert_sent(ticker)
+                        logger.warning(
+                            f"🧠 [{ticker}] THÈSE CASSÉE → "
+                            f"{', '.join((_thesis.get('reasons_break') or [])[:2])}"
+                        )
+            except Exception as exc:
+                logger.debug(f"[{ticker}] thesis_stop check échoué : {exc}")
 
         # ── 1. Time exit (priorité maximale) ───────────────────────
         entry_date_str = str(row.get("Date", ""))
@@ -292,13 +470,35 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
         is_trailing_active = False
         new_sl = sl
 
+        ts_mode = ""  # Audit S2.3 — trace du mode (ATR | PCT) pour le CSV.
         if atr is not None and ema9 is not None and atr > 0 and not _ts_already_updated:
             # Mode Adaptatif : active si profit $ ≥ atr_activation_mult × ATR.
             # Trail à atr_trail_mult ATR du plus-haut (ancrage EMA9-0.2ATR conservé
             # comme filet anti-cassure de tendance court terme).
+            #
+            # Audit S2.3 (2026-04-27) — l'activation ATR conservait son seuil
+            # propre (3.5×ATR ≈ 6-7 % sur σ-30 %) tandis que le mode % activait
+            # à 7.5 % min — comportement non déterministe selon la disponibilité
+            # OHLCV. On harmonise : l'activation ATR est aussi capée par
+            # trailing_activation_floor (15 %) et le ratio TP. Le ticker ne se
+            # voit jamais activer le TS *plus tôt* que ce que le mode % aurait
+            # fait, ce qui garantit cohérence entre branches.
             profit_dollars = current_price - entry if direction == "LONG" else entry - current_price
-            if profit_dollars >= atr_activation_mult * atr:
+            atr_activation_dollars = atr_activation_mult * atr
+
+            if direction == "LONG" and not math.isnan(tp) and tp > entry:
+                tp_distance_pct = (tp - entry) / entry * 100.0
+                pct_floor = min(trailing_activation_floor, tp_distance_pct * trailing_activation_ratio)
+            elif direction == "SHORT" and not math.isnan(tp) and tp < entry:
+                tp_distance_pct = (entry - tp) / entry * 100.0
+                pct_floor = min(trailing_activation_floor, tp_distance_pct * trailing_activation_ratio)
+            else:
+                pct_floor = trailing_activation_floor
+            pct_gate = pct_gain >= pct_floor
+
+            if profit_dollars >= atr_activation_dollars and pct_gate:
                 is_trailing_active = True
+                ts_mode = "ATR"
                 if direction == "LONG":
                     new_sl = max(entry, min(ema9 - atr * 0.2, current_price - atr * atr_trail_mult))
                 else:
@@ -321,6 +521,7 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
 
             if pct_gain >= effective_activation:
                 is_trailing_active = True
+                ts_mode = "PCT"
                 if direction == "LONG":
                     new_sl = entry + (current_price - entry) * trailing_lock_pct
                 else:
@@ -336,7 +537,10 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 sl = new_sl
                 df.at[idx, "Stop_Loss"]      = round(new_sl, 4)
                 df.at[idx, "Last_TS_Update"] = _today_str
-                mode_str = " (ATR)" if atr is not None else ""
+                # Audit S2.3 — persiste le mode appliqué pour audit du SL courant.
+                if "Last_TS_Mode" in df.columns:
+                    df.at[idx, "Last_TS_Mode"] = ts_mode
+                mode_str = f" ({ts_mode})" if ts_mode else ""
                 logger.info(f"🔒 [{ticker}] TRAILING STOP{mode_str} : SL → {new_sl:.4f} (+{pct_gain:.1f}%)")
                 modified_count += 1
 
@@ -417,5 +621,35 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 f"[{ticker}] {direction} En cours | Prix={current_price:.4f} | "
                 f"P&L={pct_gain:+.2f}% | {pct_to_tp:.2f}%→TP | {pct_to_sl:.2f}%→SL"
             )
+
+    # ── Phase 4 — Price alerts intraday (entry_plan tiers) ──────
+    # On réutilise les prix déjà fetchés pour les positions OPEN. Les tickers
+    # d'alertes hors-portefeuille restent couverts par le cron daily 16:30 NY
+    # (run_monitor_alerts). Throttle 5 min, ne touche pas le DataFrame.
+    if should_run_price_alerts_check():
+        try:
+            from modules import price_alerts as _pa
+            prices_for_alerts = {
+                t: float(p) for t, (p, _) in market_data.items()
+                if isinstance(p, (int, float))
+            }
+            if prices_for_alerts:
+                fired = _pa.evaluate_alerts(prices_for_alerts) or []
+                for a in fired:
+                    try:
+                        send_price_alert_fired(
+                            ticker=str(a.get("ticker") or ""),
+                            direction=str(a.get("direction") or "below"),
+                            target_price=float(a.get("target_price") or 0),
+                            current_price=float(a.get("current_price") or 0),
+                            note=str(a.get("note") or ""),
+                        )
+                    except Exception as exc:
+                        logger.warning(f"[price_alerts] Échec envoi : {exc}")
+                if fired:
+                    logger.info(f"🎯 [price_alerts] {len(fired)} niveau(x) touché(s) intraday")
+            mark_price_alerts_check_run()
+        except Exception as exc:
+            logger.debug(f"[price_alerts] check intraday échoué : {exc}")
 
     return df, closed_count, modified_count

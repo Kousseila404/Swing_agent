@@ -48,6 +48,7 @@ _COLUMN_TYPES: dict[str, str] = {
     "Exit_Date":      "VARCHAR",
     "Last_Alert_Pct": "DOUBLE",
     "Last_TS_Update": "VARCHAR",
+    "Last_TS_Mode":   "VARCHAR",
     "Order_ID":       "VARCHAR",
     "Signal":         "VARCHAR",
     "Sector":         "VARCHAR",
