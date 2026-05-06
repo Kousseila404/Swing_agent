@@ -265,6 +265,14 @@ def compute_hrp_weights(
         # ici on suit le principe simple : équipondéré sur excluded, à hauteur
         # de leur part proportionnelle au panier (excluded count / total count).
         residual_share = len(excluded) / n
+        # Phase 5 audit (2026-05-06) — log explicite des exclusions HRP. Avant :
+        # un ticker silencieusement dilué de 8% → 2% sans trace dans les logs.
+        logger.warning(
+            f"[HRP] {len(excluded)}/{n} tickers exclus du HRP (manque data "
+            f"covariance) → fallback risk-parity à hauteur de "
+            f"{residual_share*100:.1f}%. Tickers : {','.join(excluded[:10])}"
+            + ("…" if len(excluded) > 10 else "")
+        )
         # Rebalance : HRP weights × (1 - residual_share) + excluded × residual
         weights = {t: w * (1.0 - residual_share) for t, w in weights.items()}
         for t in excluded:

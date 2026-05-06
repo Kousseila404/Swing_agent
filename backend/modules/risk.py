@@ -16,6 +16,8 @@ Philosophie Prop Firm :
 """
 from __future__ import annotations
 
+from modules.log import logger
+
 # ─────────────────────────────────────────────────────────────────
 # POSITION SIZING DYNAMIQUE
 # ─────────────────────────────────────────────────────────────────
@@ -310,6 +312,7 @@ def kelly_rolling(
     n_last: int = 30,
     fraction: float = 0.25,
     min_trades: int = 10,
+    losing_streak_threshold: int = 4,
 ) -> float:
     """
     Calcule la fraction Kelly sur les N derniers trades clôturés.
@@ -317,11 +320,18 @@ def kelly_rolling(
     Kelly = (WR * RR - (1 - WR)) / RR   (version simplifiée)
     Fraction Kelly = Kelly × fraction  (quarter-Kelly par défaut = conservateur)
 
+    Phase 5 audit (2026-05-06) — losing-streak guard : si les `losing_streak_threshold`
+    derniers trades sont TOUS des LOSS, on divise par 2 supplémentaire (anti-ruin
+    sur run adverse). Avant : un edge récent dégradé sortait quand-même un
+    kelly_frac max 1 % → exposition explosive.
+
     Args:
         trades_df:  DataFrame du journal (colonnes Status, Entry, Exit_Price, Direction).
         n_last:     Nombre de derniers trades à considérer (défaut 30).
         fraction:   Facteur de fractionnement Kelly (défaut 0.25 = quart-Kelly).
-        min_trades: Nombre minimum de trades pour un calcul fiable (retourne 0.25% si insuffisant).
+        min_trades: Nombre minimum de trades pour un calcul fiable (retourne RISK_PER_TRADE si insuffisant).
+        losing_streak_threshold: nombre de losses consécutives qui déclenche
+            la réduction supplémentaire ×0.5. Défaut 4.
 
     Returns:
         Fraction du capital à risquer par trade (entre 0.001 et 0.01).
@@ -337,6 +347,15 @@ def kelly_rolling(
 
         wins   = closed[closed["Status"] == "WIN"]
         losses = closed[closed["Status"] == "LOSS"]
+
+        # Phase 5 audit — détection losing-streak avant tout calcul.
+        # On regarde les `threshold` derniers trades par ordre chronologique.
+        recent = closed.tail(losing_streak_threshold)
+        on_losing_streak = (
+            len(recent) >= losing_streak_threshold
+            and (recent["Status"] == "LOSS").all()
+        )
+
         if len(losses) == 0:
             return min(default * 2, 0.005)   # Tout WIN — légèrement plus agressif
 
@@ -362,6 +381,12 @@ def kelly_rolling(
             return max(default * 0.5, 0.001)   # Edge négatif → réduire
 
         kelly_frac = kelly_full * fraction
+        if on_losing_streak:
+            kelly_frac *= 0.5
+            logger.warning(
+                f"[Kelly] Losing-streak {losing_streak_threshold}× LOSS détectée "
+                f"→ kelly_frac réduit ×0.5 ({kelly_frac:.4f})"
+            )
         # Bornes de sécurité : min 0.1% / max 1%
         return float(max(0.001, min(kelly_frac, 0.01)))
 

@@ -144,19 +144,16 @@ def apply_buffett_tilt(
         p = row.get("f_score")
         raw_factor, label = _tilt_factor(q, p)
 
-        # Atténuation par confidence — un tilt 1.5 sur un junior à confidence
-        # 45 = 1.5 × 0.7 = 1.05 (presque baseline). Inversement, un tilt 0.7
-        # sur un junior bien sourcé reste 0.7 (on déconcentre quand même).
-        # Règle : on n'atténue QUE l'amplification (factor > 1), pas la
-        # déconcentration (factor < 1) — un junk reste junk même si data
-        # propre.
+        # Atténuation par confidence (Phase 5 audit : symétrique).
+        # Avant : on n'atténuait QUE l'amplification (factor > 1.0), un junk
+        # 0.5 restait 0.5 même avec confidence faible → asymétrie qui faisait
+        # silently bleed-out les compounders à confidence basse mais préservait
+        # toutes les pénalités.
+        # Maintenant : on rapproche TOUJOURS de 1.0 quand confidence basse —
+        # cohérent : low confidence = moins de conviction dans les deux sens.
         conf = compute_confidence(row)
         conf_mod = confidence_modifier(conf["score"])
-        if raw_factor > 1.0:
-            # Compounder/high_quality avec data douteuse : on rapproche de 1.0
-            adjusted_factor = 1.0 + (raw_factor - 1.0) * conf_mod
-        else:
-            adjusted_factor = raw_factor
+        adjusted_factor = 1.0 + (raw_factor - 1.0) * conf_mod
         if conf["score"] < 60:
             n_low_confidence += 1
 
@@ -176,7 +173,10 @@ def apply_buffett_tilt(
                 insider_kicker = +0.10
             elif ins <= 25:
                 insider_kicker = -0.15
-        adjusted_factor = max(0.4, adjusted_factor + insider_kicker)
+        # Phase 5 audit — clamp symétrique [0.4, 1.5] (avant : seulement
+        # max 0.4 en bas, pas de cap en haut → un compounder 1.5 + insider
+        # +0.10 atteignait 1.6).
+        adjusted_factor = max(0.4, min(1.5, adjusted_factor + insider_kicker))
 
         tilted[t] = w * adjusted_factor
         counts[label] = counts.get(label, 0) + 1
