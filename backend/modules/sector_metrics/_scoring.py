@@ -133,6 +133,13 @@ _TILT_GARP_BONUS           = +3.0
 _CONSISTENCY_STD_MAX            = 15.0
 _CONSISTENCY_MIN_PILLARS_USED   = 6
 _CONSISTENCY_BONUS              = +2.0
+# Phase 6 audit (2026-05-06) — garde-fou anti "consistent neutral".
+# L'ancien check fire si σ < 15 sans contrainte sur la moyenne. Or un ticker
+# avec [50,50,50,50,50,50] (univers dégénéré, tous fundamentaux identiques,
+# ranks tous neutres) a σ = 0 → bonus déclenché à tort. Le bonus consistency
+# vise à récompenser "balanced excellence" (tous piliers >> 50), pas
+# "balanced absence of signal". On exige une moyenne ≥ 55 pour fire.
+_CONSISTENCY_MIN_MEAN           = 55.0
 
 # Sanity floor pour PEG — un PEG très bas signale un earnings-growth quasi-nul
 # au dénominateur (artefact mathématique), pas un bargain. Symétrique aux
@@ -150,6 +157,12 @@ _LOW_SIGNAL_NEUTRAL_PILLAR_THRESHOLD = 4
 # pennystock à trous API s'infiltre dans le top-20 via des scores neutres.
 _TITAN_SCORING_FIELDS: tuple[str, ...] = (
     "return_on_equity",
+    # Phase 6 audit (2026-05-06) — return_on_assets ajouté à DQ + Quality.
+    # ROE est inflé par le levier (D/E haut → ROE haut artificiellement) ;
+    # ROA = NI / Total Assets est leverage-neutre, le proxy académique
+    # standard de Quality (Asness "Quality Minus Junk" 2014, Fama-French RMW).
+    # Champ déjà collecté par yfinance/Piotroski (F1 absolute) — coût zéro.
+    "return_on_assets",
     "operating_margin",
     "ev_to_ebitda",
     "forward_pe",
@@ -707,6 +720,11 @@ def _score_universe(
 
     # ── Étape 1 — Extraction des séries brutes cross-universe ───────────
     roe       = {k: _safe_float(tickers_map[k].get("return_on_equity")) for k in keys}
+    # Phase 6 audit — ROA ajouté en composante Quality, complémentaire à ROE.
+    # ROE peut être inflé par le levier ; ROA est leverage-neutre. Un ticker
+    # avec ROE 30 % et ROA 5 % signale un leverage élevé (= ROE artificiel),
+    # le rank sectoriel sur les deux mesures simultanément démasque ce biais.
+    roa       = {k: _safe_float(tickers_map[k].get("return_on_assets")) for k in keys}
     op_margin = {k: _safe_float(tickers_map[k].get("operating_margin")) for k in keys}
     # Lot 14.1 — gross_margin absolu (moat indicator, Buffett/Munger).
     # Un gross margin élevé = pricing power = barrière à l'entrée. Warren
@@ -804,6 +822,7 @@ def _score_universe(
     # cross-sectionnel légitime à NE PAS écraser.
     sectors_raw = {k: (tickers_map[k].get("sector") or "Unknown") for k in keys}
     roe            = _winsorize_by_sector(roe,            sectors_raw)
+    roa            = _winsorize_by_sector(roa,            sectors_raw)
     op_margin      = _winsorize_by_sector(op_margin,      sectors_raw)
     gross_margin   = _winsorize_by_sector(gross_margin,   sectors_raw)
     ev_ebitda      = _winsorize_by_sector(ev_ebitda,      sectors_raw)
@@ -831,6 +850,7 @@ def _score_universe(
     sectors_map = sectors_raw  # même mapping que pour le winsorize sectoriel
 
     roe_r      = _percentile_rank_by_sector(roe,       sectors_map, higher_is_better=True)
+    roa_r      = _percentile_rank_by_sector(roa,       sectors_map, higher_is_better=True)
     opm_r      = _percentile_rank_by_sector(op_margin, sectors_map, higher_is_better=True)
     gm_r       = _percentile_rank_by_sector(gross_margin, sectors_map, higher_is_better=True)
     ev_r       = _percentile_rank_by_sector(ev_ebitda, sectors_map, higher_is_better=False)
@@ -865,9 +885,13 @@ def _score_universe(
     for k in keys:
         t_base = tickers_map[k]
 
-        # QUALITY — profitabilité & efficience capital + moat (gross margin).
-        # Lot 14.1 : +gross_margin (pricing power / barrière d'entrée, Buffett).
-        q, q_count = _pillar_score_with_count([roe_r[k], opm_r[k], gm_r[k]])
+        # QUALITY — profitabilité (ROE, ROA) + efficience opérationnelle (op_margin)
+        # + moat (gross margin). Phase 6 audit : ajout ROA pour deconfounder le
+        # levier dans ROE — un ticker à ROE 30 % / ROA 5 % a un Quality moindre
+        # qu'un ROE 25 % / ROA 15 % (même rentabilité comptable, moins de levier).
+        q, q_count = _pillar_score_with_count(
+            [roe_r[k], roa_r[k], opm_r[k], gm_r[k]]
+        )
 
         # VALUE — EV/EBITDA prioritaire ; fallback Forward P/E ; + FCF yield +
         # PEG (growth-adjusted) + Earnings yield (Graham-style robust).
@@ -1019,7 +1043,14 @@ def _score_universe(
         if ins_count > 0: pillars_with_data.append(ins)
         if len(pillars_with_data) >= _CONSISTENCY_MIN_PILLARS_USED:
             pillars_std = statistics.pstdev(pillars_with_data)
-            if pillars_std < _CONSISTENCY_STD_MAX:
+            pillars_mean = statistics.fmean(pillars_with_data)
+            # Phase 6 audit — exige μ ≥ 55 pour distinguer "balanced excellence"
+            # (objectif du bonus) de "balanced absence of signal" (univers ou
+            # ticker dégénéré avec tous ranks à neutre 50).
+            if (
+                pillars_std < _CONSISTENCY_STD_MAX
+                and pillars_mean >= _CONSISTENCY_MIN_MEAN
+            ):
                 tilt_adjust += _CONSISTENCY_BONUS
                 flags.append("consistent")
 
@@ -1082,4 +1113,29 @@ def _score_universe(
             "n_pillars_neutral":        n_pillars_neutral,
             "low_signal":               low_signal,
         }
+
+    # ── Phase 6 audit — Composite z-score (universe-relative) ───────────
+    # Standardise le composite par rapport à la moyenne et l'écart-type de
+    # l'univers scoré. Permet un ranking robuste ("top 1σ", "stocks > 1.5σ
+    # au-dessus de la moyenne") au lieu de seuils absolus 70/80 qui dérivent
+    # avec la calibration. Calculé sur `titan_composite_score` (post-tilt,
+    # post-dq_coef) pour refléter le ranking effectif.
+    #   • σ = 0 (universe dégénéré, < 2 tickers) → z = 0 pour tout le monde.
+    #   • Round à 3 décimales — un z=0.000 vs 0.001 n'a pas de signification.
+    composites = [r["titan_composite_score"] for r in scored.values()]
+    if len(composites) >= 2:
+        mu = statistics.fmean(composites)
+        sigma = statistics.pstdev(composites)
+        if sigma > 0:
+            for r in scored.values():
+                r["titan_composite_z"] = round(
+                    (r["titan_composite_score"] - mu) / sigma, 3
+                )
+        else:
+            for r in scored.values():
+                r["titan_composite_z"] = 0.0
+    else:
+        for r in scored.values():
+            r["titan_composite_z"] = 0.0
+
     return scored

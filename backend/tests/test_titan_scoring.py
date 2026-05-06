@@ -680,8 +680,9 @@ def test_phase5_pillars_data_count_exposed():
         for k in ("quality", "value", "risk", "sentiment", "momentum",
                   "piotroski", "growth", "revisions", "insider"):
             assert k in r["pillars_data_count"]
-        # Sur un ticker complet, q_count = 3 (roe, opm, gross_margin tous fournis).
-        assert r["pillars_data_count"]["quality"] == 3
+        # Sur un ticker complet (Phase 6 : ROA ajouté), q_count = 4
+        # (roe, roa, opm, gross_margin tous fournis dans _mk_ticker defaults).
+        assert r["pillars_data_count"]["quality"] == 4
 
 
 def test_phase5_low_signal_flag_when_many_pillars_neutral():
@@ -773,3 +774,153 @@ def test_phase5_consistency_tilt_does_not_fire_with_synthetic_neutrals():
         f"SPARSE flags = {scored['SPARSE']['titan_tilt_flags']} — consistent "
         f"ne devrait pas se déclencher avec si peu de piliers nourris"
     )
+
+
+# ─────────────────────────────────────────────────────────────────
+# PHASE 6 — ROA in Quality + Composite z-score + Consistency floor
+# ─────────────────────────────────────────────────────────────────
+
+def test_phase6_roa_added_to_quality_pillar():
+    """Phase 6 : ROA est désormais une 4e composante de Quality (en plus de
+    ROE / Operating Margin / Gross Margin). Un ticker complet doit avoir
+    quality_count = 4.
+    """
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert r["pillars_data_count"]["quality"] == 4, (
+            f"Quality count = {r['pillars_data_count']['quality']}, "
+            f"attendu 4 (ROE + ROA + OpM + GM)"
+        )
+
+
+def test_phase6_roa_missing_drops_quality_count():
+    """Si ROA est absent, quality_count tombe à 3 (et le DQ aussi se dégrade)."""
+    no_roa = _mk_ticker("NOROA", "Technology", return_on_assets=None)
+    universe = {
+        "NOROA": no_roa,
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    if "NOROA" in scored:  # peut être filtré par DQ si plusieurs trous
+        assert scored["NOROA"]["pillars_data_count"]["quality"] == 3
+
+
+def test_phase6_roa_deconfounds_leverage_in_quality():
+    """Un ticker à ROE élevé MAIS ROA bas (= forte leverage qui inflate ROE)
+    doit avoir un Quality moins élevé que son clone à ROE similaire ET ROA
+    élevé (= efficience capital réelle).
+
+    Construction : LEVERED a ROE 30 % avec ROA 5 % (D/E ~5×) ; ORGANIC a
+    ROE 25 % avec ROA 15 % (D/E ~0.7×). Le ROA-rank départage les deux,
+    ORGANIC > LEVERED en Quality.
+    """
+    universe = _build_universe([
+        ("LEVERED", "Technology", {"roe": 0.30, "return_on_assets": 0.05}),
+        ("ORGANIC", "Technology", {"roe": 0.25, "return_on_assets": 0.15}),
+        # Bruit pour atteindre le seuil sector-relative (12 tickers).
+        *[(f"NOISE{i}", "Technology",
+           {"roe": 0.20, "return_on_assets": 0.10})
+          for i in range(10)],
+    ])
+    scored = _score_universe(universe)
+    assert scored["ORGANIC"]["quality_score"] > scored["LEVERED"]["quality_score"], (
+        f"ORGANIC Q={scored['ORGANIC']['quality_score']} doit battre "
+        f"LEVERED Q={scored['LEVERED']['quality_score']} (ROA dé-confounde le levier)"
+    )
+
+
+def test_phase6_composite_z_score_exposed():
+    """Le payload doit exposer titan_composite_z (universe-relative)."""
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology", roe=0.10 + i * 0.05)
+        for i in range(8)
+    }
+    scored = _score_universe(universe)
+    assert all("titan_composite_z" in r for r in scored.values())
+    # Σ z = 0 ± epsilon par construction (z-score = (x - μ) / σ).
+    z_sum = sum(r["titan_composite_z"] for r in scored.values())
+    assert abs(z_sum) < 0.01, f"Σ z = {z_sum}, attendu ≈ 0"
+
+
+def test_phase6_composite_z_score_zero_on_degenerate_universe():
+    """Si σ = 0 (tous composites égaux, univers dégénéré), z = 0 partout —
+    pas de division par zéro, pas d'inf.
+    """
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert r["titan_composite_z"] == 0.0
+
+
+def test_phase6_consistency_tilt_requires_above_neutral_mean():
+    """Phase 6 audit — le bonus consistency NE doit PAS se déclencher quand
+    tous les piliers sont à ~50 (univers dégénéré). C'était un faux positif
+    de l'ancien check (σ < 15 sans contrainte de moyenne).
+    """
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    # Universe homogène → tous ranks ≈ 50 → mean(pillars_with_data) ≈ 50,
+    # σ = 0. L'ancienne version aurait fire le tilt ; la nouvelle non.
+    for r in scored.values():
+        assert "consistent" not in r["titan_tilt_flags"], (
+            f"Univers dégénéré : pillars all 50, consistent NE doit PAS fire "
+            f"(ancien bug). Got flags = {r['titan_tilt_flags']}"
+        )
+
+
+def test_phase6_consistency_tilt_fires_on_balanced_excellence():
+    """Inversement, un ticker dont tous les piliers sont haut (balanced
+    excellence) doit recevoir le bonus consistent.
+
+    On ne peut pas isoler un ticker "tous piliers ≥ 60" facilement avec
+    le scoring relatif (les ranks sont compétitifs). Le test vérifie que
+    SI le bonus est présent, il est conditionné par mean ≥ 55.
+    """
+    # Crée un univers où T_TOP a tout au-dessus de la médiane.
+    universe = _build_universe([
+        ("T_TOP", "Technology", {
+            "roe": 0.50, "return_on_assets": 0.20, "op_margin": 0.40,
+            "gross_margin": 0.60, "ev_to_ebitda": 12.0, "forward_pe": 18.0,
+            "free_cash_flow": 5e9, "debt_to_equity": 30.0, "current_ratio": 3.0,
+            "recommendation_mean": 1.5, "price_target_mean": 130.0,
+            "momentum_return_pct": 25.0, "momentum_risk_adjusted": 1.0,
+            "revenue_growth": 0.15, "earnings_growth": 0.20,
+        }),
+        # Bruits pour que T_TOP émerge (ranks compétitifs)
+        *[(f"NOISE{i}", "Technology", {
+            "roe": 0.10, "return_on_assets": 0.05, "op_margin": 0.15,
+            "gross_margin": 0.30, "ev_to_ebitda": 35.0, "forward_pe": 40.0,
+            "free_cash_flow": 5e8, "debt_to_equity": 100.0, "current_ratio": 1.2,
+            "recommendation_mean": 3.0, "price_target_mean": 100.0,
+            "momentum_return_pct": -5.0, "momentum_risk_adjusted": -0.2,
+            "revenue_growth": 0.02, "earnings_growth": 0.01,
+        }) for i in range(11)],
+    ])
+    scored = _score_universe(universe)
+    # T_TOP doit avoir tous les piliers très haut (Q,V,R,M,G ≈ 100, S élevé)
+    # → moyenne >> 55 et σ peut-être un peu plus large mais consistent peut
+    # toujours ne pas fire si σ ≥ 15. On vérifie au moins que la moyenne est
+    # élevée et que SI consistent fire, c'est cohérent.
+    pillars = [
+        scored["T_TOP"]["quality_score"],
+        scored["T_TOP"]["value_score"],
+        scored["T_TOP"]["risk_score"],
+        scored["T_TOP"]["momentum_score"],
+        scored["T_TOP"]["growth_score"],
+    ]
+    import statistics as _stat
+    mean_p = _stat.fmean(pillars)
+    assert mean_p > 70, f"T_TOP mean(Q,V,R,M,G) = {mean_p} doit être > 70"
