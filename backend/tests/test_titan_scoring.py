@@ -179,10 +179,11 @@ def test_lot3_sector_relative_levels_playing_field():
     """Un secteur 'low ROE par nature' (Utilities ROE ~10%) doit pouvoir
     placer son meilleur élément au top, même si en absolu ses ROE sont bas
     vs Tech."""
-    # Audit S3.2 — _MIN_SECTOR_SIZE_FOR_RELATIVE relevé de 5 à 8 ; il faut
-    # au moins 8 tickers par secteur pour que le rank intra-secteur s'applique.
+    # Audit S3.2 (2026-04-27) — _MIN_SECTOR_SIZE_FOR_RELATIVE = 8.
+    # Phase 4 audit (2026-05-06) — relevé à 12 (résolution 8.3% au lieu de
+    # 12.5%, alignement académique AQR/Fama-French ≥10).
     universe = _build_universe([
-        # Tech : ROE haut par nature (8 tickers)
+        # Tech : ROE haut par nature (12 tickers)
         ("T1", "Technology", {"roe": 0.30}),
         ("T2", "Technology", {"roe": 0.40}),
         ("T3", "Technology", {"roe": 0.50}),
@@ -191,15 +192,23 @@ def test_lot3_sector_relative_levels_playing_field():
         ("T6", "Technology", {"roe": 0.65}),
         ("T7", "Technology", {"roe": 0.55}),
         ("T8", "Technology", {"roe": 0.45}),
-        # Utilities : ROE bas par nature (8 tickers)
-        ("U1", "Utilities",  {"roe": 0.05}),
-        ("U2", "Utilities",  {"roe": 0.07}),
-        ("U3", "Utilities",  {"roe": 0.09}),
-        ("U4", "Utilities",  {"roe": 0.11}),
-        ("U5", "Utilities",  {"roe": 0.15}),  # top de son secteur
-        ("U6", "Utilities",  {"roe": 0.06}),
-        ("U7", "Utilities",  {"roe": 0.08}),
-        ("U8", "Utilities",  {"roe": 0.10}),
+        ("T9", "Technology", {"roe": 0.42}),
+        ("T10", "Technology", {"roe": 0.48}),
+        ("T11", "Technology", {"roe": 0.52}),
+        ("T12", "Technology", {"roe": 0.58}),
+        # Utilities : ROE bas par nature (12 tickers)
+        ("U1",  "Utilities",  {"roe": 0.05}),
+        ("U2",  "Utilities",  {"roe": 0.07}),
+        ("U3",  "Utilities",  {"roe": 0.09}),
+        ("U4",  "Utilities",  {"roe": 0.11}),
+        ("U5",  "Utilities",  {"roe": 0.15}),  # top de son secteur
+        ("U6",  "Utilities",  {"roe": 0.06}),
+        ("U7",  "Utilities",  {"roe": 0.08}),
+        ("U8",  "Utilities",  {"roe": 0.10}),
+        ("U9",  "Utilities",  {"roe": 0.05}),
+        ("U10", "Utilities",  {"roe": 0.06}),
+        ("U11", "Utilities",  {"roe": 0.07}),
+        ("U12", "Utilities",  {"roe": 0.08}),
     ])
     scored = _score_universe(universe)
     # En sector-relative, U5 (top des Utilities) doit avoir un Quality_score
@@ -444,7 +453,8 @@ def test_lot5_payload_exposes_momentum_score():
 # ─────────────────────────────────────────────────────────────────
 
 def test_lot8_f_score_perfect_4_4():
-    """Tous critères passent → F-Score 4/4 = pillar 100."""
+    """Tous les 4 critères absolus passent → F-Score 4/9 = pillar 44.4
+    (Phase 4 audit : dénominateur fixe 9 ; sans Y/Y le max effectif = 4 abs)."""
     from modules.sector_metrics._scoring import _piotroski_score_pillar
     row = {
         "return_on_assets":     0.15,    # F1: > 0 ✓
@@ -453,13 +463,16 @@ def test_lot8_f_score_perfect_4_4():
         "current_ratio":        2.5,     # F7: > 1 ✓
     }
     score, diag = _piotroski_score_pillar(row)
-    assert score == 100.0
+    # 4 passed / 9 max = 44.44 — IPO data-pauvre est rationnellement plus bas
+    # qu'un mature 7/9 (77.8) car on ne peut pas valider Y/Y.
+    assert 44.0 < score < 45.0
     assert diag["f_score"] == 4
-    assert diag["f_score_max"] == 4
+    assert diag["f_score_max"] == 9
+    assert diag["f_score_evaluated"] == 4
 
 
 def test_lot8_f_score_zero_4():
-    """Aucun critère ne passe → F-Score 0/4 = pillar 0."""
+    """Aucun critère ne passe → F-Score 0/9 = pillar 0."""
     from modules.sector_metrics._scoring import _piotroski_score_pillar
     row = {
         "return_on_assets":     -0.05,   # F1: ≤ 0 ✗
@@ -473,7 +486,9 @@ def test_lot8_f_score_zero_4():
 
 
 def test_lot8_f_score_partial_data():
-    """3 critères dispo (data manquante sur ROA), 2 réussis → 2/3 = 66.7."""
+    """3 critères dispo (ROA absent), 2 réussis → 2/9 = 22.2.
+    Phase 4 audit : avec n_evaluated=3 < 4, on retombe sur le neutral 50
+    (pas assez de signal pour scorer)."""
     from modules.sector_metrics._scoring import _piotroski_score_pillar
     row = {
         "return_on_assets":     None,    # F1: pas évalué
@@ -482,19 +497,19 @@ def test_lot8_f_score_partial_data():
         "current_ratio":        0.5,     # F7: ✗
     }
     score, diag = _piotroski_score_pillar(row)
-    # 2/3 = 66.67
-    assert 65 < score < 68
-    assert diag["f_score"] == 2
-    assert diag["f_score_max"] == 3
+    # n_evaluated=3 < 4 → garde-fou neutral 50 (signal insuffisant).
+    assert score == 50.0
+    assert diag.get("f_score_neutral") is True
 
 
 def test_lot8_f_score_no_data_neutral():
-    """0 critère évaluable → neutre 50 (pas de pénalité)."""
+    """0 critère évaluable → neutre 50 (pas de pénalité). f_score_max=9 fixe."""
     from modules.sector_metrics._scoring import _piotroski_score_pillar
     score, diag = _piotroski_score_pillar({})
     assert score == 50.0
     assert diag["f_score"] is None
-    assert diag["f_score_max"] == 0
+    assert diag["f_score_max"] == 9
+    assert diag["f_score_evaluated"] == 0
 
 
 def test_lot8_pillar_weights_sum_to_one_with_piotroski():
@@ -560,7 +575,9 @@ def test_lot8_high_f_score_boosts_composite():
         "T3": _mk_ticker("T3", "Technology"),
     }
     scored = _score_universe(universe)
-    assert scored["GOOD"]["piotroski_score"] == 100.0
+    # Phase 4 audit — F-Score dénominateur fixe 9 ; GOOD passe les 4 absolus
+    # → 4/9 = 44.44, BAD échoue tous → 0/9 = 0.
+    assert 44.0 < scored["GOOD"]["piotroski_score"] < 45.0
     assert scored["BAD"]["piotroski_score"] == 0.0
     assert (
         scored["GOOD"]["titan_composite_score"]

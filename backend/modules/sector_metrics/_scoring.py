@@ -214,7 +214,14 @@ def _percentile_rank(
 # qu'un rank global avec ties. n=8 donne au minimum 8 buckets (12.5 % de
 # résolution) — pas idéal mais signal moins bruité sur les petits secteurs
 # (Real Estate, Utilities tournent autour de 10-15 tickers dans l'univers).
-_MIN_SECTOR_SIZE_FOR_RELATIVE = 8
+#
+# Phase 4 audit (2026-05-06) — relevé à 12. À n=8 la résolution était encore
+# 12.5% avec ties écrasants sur Utilities (≈12 tickers SP500), Materials,
+# REITs. n=12 donne ~8.3% (~12 buckets), proche du seuil académique standard
+# (AQR/Fama-French utilisent ≥ 10 unique values). Pour les secteurs
+# au-dessous (rares, ex: Communication Services minoritaire), le fallback
+# global reste actif.
+_MIN_SECTOR_SIZE_FOR_RELATIVE = 12
 
 
 def _percentile_rank_by_sector(
@@ -508,17 +515,24 @@ def _piotroski_score_pillar(
         )
 
     n_passed, n_evaluated, breakdown = _piotroski_f_score_absolute(row, yoy_row)
-    if n_evaluated == 0:
+    # Phase 4 audit (2026-05-06) — F-Score dénominateur fixe 9 (Piotroski 2000
+    # original) : avant, 1/4 et 5/9 retournaient ~25% et ~55% sans qu'on
+    # puisse distinguer le ticker IPO data-pauvre du mature data-riche. Avec
+    # dénominateur fixe, 1/9 = 11% (vrai pessimisme) vs 5/9 = 55%.
+    # Garde-fou : si moins de 4 critères évaluables (IPO < 1 an, scraping KO),
+    # on retourne le neutral 50 plutôt que de pénaliser à tort.
+    if n_evaluated == 0 or n_evaluated < 4:
         return _NEUTRAL_SCORE, {
-            "f_score":         None,
-            "f_score_max":     0,
-            "f_score_evaluated": 0,
+            "f_score":           None,
+            "f_score_max":       9,
+            "f_score_evaluated": n_evaluated,
             "f_score_breakdown": breakdown,
+            "f_score_neutral":   True,  # diagnostic : signal absent, pas mauvais
         }
-    score = (n_passed / n_evaluated) * 100.0
+    score = (n_passed / 9.0) * 100.0
     return score, {
         "f_score":           n_passed,
-        "f_score_max":       n_evaluated,
+        "f_score_max":       9,
         "f_score_evaluated": n_evaluated,
         "f_score_breakdown": breakdown,
     }
@@ -829,8 +843,19 @@ def _score_universe(
         # INSIDER — Lot 17. Pilier C-level/director smart money (poids 8 %).
         # Lit `insider_score` directement depuis le row si déjà enrichi par
         # `enrich_universe_with_insider()`. Sinon neutre 50.
+        # Phase 4 audit (2026-05-06) — clamp [0, 100] + log explicite si
+        # out-of-range (proxy: enrich corrompu, mauvais format upstream).
         ins_raw = _safe_float(t_base.get("insider_score"))
-        ins = ins_raw if ins_raw is not None else _NEUTRAL_SCORE
+        if ins_raw is None:
+            ins = _NEUTRAL_SCORE
+        elif 0 <= ins_raw <= 100:
+            ins = ins_raw
+        else:
+            logger.warning(
+                f"[Scoring] {k} insider_score={ins_raw} hors [0,100] — "
+                f"clamp à neutre 50 (vérifier enrich_universe_with_insider)."
+            )
+            ins = _NEUTRAL_SCORE
 
         if sentiment_available:
             s = _pillar_score([reco_r[k], upside_r[k]])

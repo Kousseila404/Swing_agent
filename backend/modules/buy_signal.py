@@ -225,21 +225,37 @@ def compute_buy_signal(
         return res
 
     # ── Calcul boosters ────────────────────────────────────────────
+    # Phase 4 audit (2026-05-06) — discount par redondance : Revisions et Beat
+    # rate sont fortement corrélés (les analystes upgradent après les beats),
+    # Insider cluster et Insider score sont des proxies de la même chose. On
+    # affiche toujours les 5 boosters individuels dans `boosters_active` pour
+    # la transparence UI, mais le gate `n_boosters_dims` ≤ 4 dimensions
+    # distinctes (analyst / insider / fundamental / technical) — ça empêche
+    # un NVDA-like en bulle de cumuler 5 boosters et déclencher STRONG_BUY +
+    # sizing 20% alors qu'il s'agit du même signal momentum amplifié.
     boosters: list[str] = []
+    booster_dims: set[str] = set()
     if revisions is not None and revisions >= _T_REVISIONS_BOOSTER:
         boosters.append("Revisions ≥ 65")
+        booster_dims.add("analyst")
     if insider_cluster:
         boosters.append("Insider cluster (3+ insiders/7j)")
+        booster_dims.add("insider")
     elif insider_score is not None and insider_score >= 75:
         boosters.append(f"Insider score {insider_score:.0f}")
+        booster_dims.add("insider")
     if piotroski_f is not None and piotroski_f >= _T_PIOTROSKI_BOOSTER:
         boosters.append(f"Piotroski {piotroski_f}/9")
+        booster_dims.add("fundamental")
     if support_score is not None and support_score >= _T_SUPPORT_BOOSTER:
         boosters.append("Support ≥ 70 (ON_SUPPORT)")
+        booster_dims.add("technical")
     if beat_rate is not None and beat_rate >= _T_BEAT_RATE_BOOSTER:
         boosters.append(f"Beat rate {beat_rate*100:.0f}% / 8Q")
+        booster_dims.add("analyst")  # même dimension que Revisions
     res.boosters_active = boosters
-    n_boosters = len(boosters)
+    # Le gate utilise n_boosters_dims (max 4) au lieu de la liste brute.
+    n_boosters = len(booster_dims)
 
     # ── Filtres conditions de base (Quality + Momentum) ───────────
     quality_ok = quality is None or quality >= _T_QUALITY_MIN
