@@ -186,27 +186,30 @@ def get_data_health():
     # 1. YF circuit breaker
     try:
         payload["yf_breaker"] = yf_breaker.snapshot()
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError) as e:
         logger.warning(f"[data_health] yf_breaker.snapshot failed: {e}")
         payload["yf_breaker"] = {"error": str(e)}
 
     # 2. Fundamentals cache stats
     try:
         payload["fundamentals_cache"] = cache_stats()
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:
+        logger.warning(f"[data_health] cache_stats failed: {e}")
         payload["fundamentals_cache"] = {"error": str(e)}
 
     # 2b. Sanitize flags (Niveau 1 qualité data) — compte des valeurs
     # out-of-bounds rejetées et cross-check market_cap en amont du cache.
     try:
         payload["sanitize"] = cache_sanitize_stats()
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:
+        logger.warning(f"[data_health] cache_sanitize_stats failed: {e}")
         payload["sanitize"] = {"error": str(e)}
 
     # 3. Universe inventory (data quality par champ)
     try:
         payload["universe"] = _universe_inventory()
-    except Exception as e:
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
+        logger.warning(f"[data_health] universe_inventory failed: {e}")
         payload["universe"] = {"loaded": False, "reason": str(e)}
 
     # 4. FMP quota — best effort, l'instance n'est pas exposée globalement.
@@ -306,6 +309,6 @@ def _fmp_status() -> dict[str, Any]:
         # par design (FMPProvider créé fresh dans get_providers). Donc on
         # ne peut pas lire le compteur live ici. Champ exposé pour future
         # extension (singleton FMP partagé).
-    except Exception:
-        pass
+    except (ImportError, AttributeError) as e:
+        logger.debug(f"[data_health] _fmp_status introspection failed: {e}")
     return out

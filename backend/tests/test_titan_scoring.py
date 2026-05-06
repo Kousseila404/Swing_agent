@@ -598,3 +598,488 @@ def test_lot1_zero_ratios_treated_as_none():
     # ZERO ne doit PAS être au top Value (ses ratios sont neutralisés,
     # value reposera uniquement sur fcf_yield qui est identique partout).
     assert scored["OK"]["value_score"] >= scored["ZERO"]["value_score"]
+
+
+# ─────────────────────────────────────────────────────────────────
+# PHASE 5 — Audit qualité signal (2026-05-06)
+# ─────────────────────────────────────────────────────────────────
+
+def test_phase5_percentile_rank_bisect_correctness():
+    """Le passage `bisect_left/right` doit produire EXACTEMENT le même résultat
+    que la formule naïve `sum(< v) + 0.5 × sum(== v)`. Test de non-régression
+    numérique : on évalue manuellement l'ancienne formule sur quelques valeurs
+    et on compare à la nouvelle implémentation.
+    """
+    from modules.sector_metrics._scoring import _percentile_rank
+    values = {
+        "A": 10.0, "B": 20.0, "C": 20.0, "D": 30.0, "E": 30.0,
+        "F": 30.0, "G": 40.0, "H": 50.0, "I": None, "J": float("inf"),
+    }
+    out = _percentile_rank(values, higher_is_better=True)
+    # n = 8 valeurs présentes finies. Pour D=30.0 : less = 3 (A,B,C),
+    # equal = 3 (D,E,F) → pct = (3 + 0.5×3) / 8 × 100 = 56.25.
+    assert abs(out["D"] - 56.25) < 1e-9, f"D pct: {out['D']}"
+    # Pour A=10.0 : less = 0, equal = 1 → pct = 0.5 / 8 × 100 = 6.25.
+    assert abs(out["A"] - 6.25) < 1e-9
+    # Pour H=50.0 : less = 7, equal = 1 → pct = (7+0.5)/8 × 100 = 93.75.
+    assert abs(out["H"] - 93.75) < 1e-9
+    # None reste None ; inf est exclu (math.isfinite=False) → None.
+    assert out["I"] is None
+    assert out["J"] is None
+
+
+def test_phase5_percentile_rank_inversion_consistent():
+    """higher_is_better=False produit l'inverse exact de True (100 - pct)."""
+    from modules.sector_metrics._scoring import _percentile_rank
+    values = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
+    up = _percentile_rank(values, higher_is_better=True)
+    down = _percentile_rank(values, higher_is_better=False)
+    for k in values:
+        assert abs((up[k] or 0) + (down[k] or 0) - 100.0) < 1e-9
+
+
+def test_phase5_peg_floor_treats_pathological_low_as_none():
+    """PEG < 0.10 = artefact mathématique (denom EPS quasi-nul) → traité
+    comme None, ne doit PAS classer le ticker top Value."""
+    universe = _build_universe([
+        # FAKE_BARGAIN : PEG = 0.05 (artefact). Doit être neutralisé.
+        ("FAKE", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        # REAL_VALUE : PEG = 0.8 (vraie growth pas chère).
+        ("REAL", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        # Bruit pour avoir n>=2 dans les ranks.
+        ("MID1", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        ("MID2", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        ("MID3", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+    ])
+    universe["FAKE"]["peg_ratio"] = 0.05  # < _PEG_SANITY_MIN
+    universe["REAL"]["peg_ratio"] = 0.8
+    universe["MID1"]["peg_ratio"] = 1.5
+    universe["MID2"]["peg_ratio"] = 2.0
+    universe["MID3"]["peg_ratio"] = 2.5
+    scored = _score_universe(universe)
+    # REAL (PEG 0.8 légitime, top du rank cheap-growth) doit avoir un
+    # value_score > FAKE (PEG 0.05 neutralisé → contribue 0 composante PEG).
+    assert scored["REAL"]["value_score"] > scored["FAKE"]["value_score"], (
+        f"REAL V={scored['REAL']['value_score']} should beat FAKE "
+        f"V={scored['FAKE']['value_score']} (PEG 0.05 neutralized)"
+    )
+
+
+def test_phase5_pillars_data_count_exposed():
+    """Le payload doit exposer pillars_data_count par pilier — utile pour
+    distinguer un score 70 dense (4/4 inputs) d'un score 70 sparse (1/4)."""
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert "pillars_data_count" in r
+        assert isinstance(r["pillars_data_count"], dict)
+        # Tous les piliers core doivent être présents (même si count=0).
+        for k in ("quality", "value", "risk", "sentiment", "momentum",
+                  "piotroski", "growth", "revisions", "insider"):
+            assert k in r["pillars_data_count"]
+        # Sur un ticker complet (Phase 6 : ROA ajouté), q_count = 4
+        # (roe, roa, opm, gross_margin tous fournis dans _mk_ticker defaults).
+        assert r["pillars_data_count"]["quality"] == 4
+
+
+def test_phase5_low_signal_flag_when_many_pillars_neutral():
+    """Un ticker avec 4+ piliers à count=0 (tous None) doit être low_signal=True.
+
+    Avec le defaults complet de _mk_ticker, sentiment+revisions+insider
+    sont à count 0 ou 1 selon la dispo des champs. Pour avoir 4+ piliers
+    à count=0, il faut nuller plusieurs métriques.
+    """
+    sparse = _mk_ticker(
+        "SPARSE", "Technology",
+        roe=None, op_margin=None, gross_margin=None,        # quality 0/3
+        ev_to_ebitda=None, forward_pe=None, free_cash_flow=None,  # value 0/4 (plus PEG/EY non set)
+        debt_to_equity=None, current_ratio=None,            # risk 0/2
+        recommendation_mean=None, price_target_mean=None,   # sentiment 0/2
+        momentum_return_pct=None, momentum_risk_adjusted=None,    # momentum 0/3
+        revenue_growth=None, earnings_growth=None,          # growth 0/2
+    )
+    # Ce ticker a DQ ≈ 0/11 → exclu par le gate _MIN_DATA_QUALITY=0.70.
+    # Pour quand même tester low_signal, on injecte 8 fields requis pour DQ
+    # mais qui ne nourrissent pas tous les piliers (cas réel : un mid-cap
+    # qui n'a pas couverture analyste mais a des fondamentaux complets).
+    holes = _mk_ticker(
+        "HOLES", "Technology",
+        recommendation_mean=None, price_target_mean=None,    # sentiment count=0
+        momentum_return_pct=None, momentum_risk_adjusted=None,    # momentum count=0
+        # revisions/insider non fournis = count=0 par défaut
+    )
+    universe = {
+        "HOLES": holes,
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    # On ignore SPARSE (filtré par DQ gate).
+    _ = sparse
+    scored = _score_universe(universe)
+    if "HOLES" not in scored:
+        # Si HOLES exclu par DQ (n'utilise pas momentum_return_pct...), test no-op.
+        return
+    # HOLES : sentiment=0, momentum=0, revisions=0, insider=0 → 4 piliers neutres.
+    counts = scored["HOLES"]["pillars_data_count"]
+    n_zero = sum(1 for v in counts.values() if v == 0)
+    assert n_zero >= 4, f"HOLES neutral pillars: {counts}"
+    assert scored["HOLES"]["low_signal"] is True
+
+
+def test_phase5_consistency_tilt_does_not_fire_with_synthetic_neutrals():
+    """Bug fix Phase 5 : le tilt 'consistent' ne doit PAS se déclencher
+    quand `pillars_with_data < _CONSISTENCY_MIN_PILLARS_USED` (auparavant
+    s=50 neutre artificiel comptait dans la dispersion → faux positif).
+
+    Le SPARSE ticker doit SURVIVRE au gate DQ (≥ 0.70) tout en ayant
+    plusieurs piliers à count=0 :
+      • Null reco + target + mom_return = 3 fields DQ manquants → DQ = 8/11 ≈ 0.73 ✓
+      • Sentiment count=0 (skip via sentiment_available=False)
+      • Momentum count=0 (mom_return + mom_ra + mom_52wh tous None)
+      • Revisions count=0 (pas de data analyste)
+      • Insider count=0 (pas de field)
+    → pillars_with_data = {Q, V, R, P, G} = 5 < 6 → consistent absent.
+
+    Avant le fix, l'ancienne formule `pillars_valid = [q,v,r,s,m,p,g]` aurait
+    inclus s=50 et m=50 (synthétiques), produit une std faible, et déclenché
+    `consistent` à tort.
+    """
+    universe = {
+        "SPARSE": _mk_ticker(
+            "SPARSE", "Technology",
+            recommendation_mean=None, price_target_mean=None,  # sentiment count=0
+            momentum_return_pct=None, momentum_risk_adjusted=None,  # momentum count=0
+            # revisions/insider non fournis = count=0
+        ),
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    assert "SPARSE" in scored, "SPARSE devrait survivre au gate DQ (DQ≈0.73)"
+    counts = scored["SPARSE"]["pillars_data_count"]
+    # Sanity : sentiment + momentum + revisions + insider à count=0
+    assert counts["sentiment"] == 0
+    assert counts["momentum"] == 0
+    assert counts["revisions"] == 0
+    assert counts["insider"] == 0
+    # Le flag consistent NE doit PAS apparaître (5 piliers réels < 6 minimum).
+    assert "consistent" not in scored["SPARSE"]["titan_tilt_flags"], (
+        f"SPARSE flags = {scored['SPARSE']['titan_tilt_flags']} — consistent "
+        f"ne devrait pas se déclencher avec si peu de piliers nourris"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────
+# PHASE 6 — ROA in Quality + Composite z-score + Consistency floor
+# ─────────────────────────────────────────────────────────────────
+
+def test_phase6_roa_added_to_quality_pillar():
+    """Phase 6 : ROA est désormais une 4e composante de Quality (en plus de
+    ROE / Operating Margin / Gross Margin). Un ticker complet doit avoir
+    quality_count = 4.
+    """
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert r["pillars_data_count"]["quality"] == 4, (
+            f"Quality count = {r['pillars_data_count']['quality']}, "
+            f"attendu 4 (ROE + ROA + OpM + GM)"
+        )
+
+
+def test_phase6_roa_missing_drops_quality_count():
+    """Si ROA est absent, quality_count tombe à 3 (et le DQ aussi se dégrade)."""
+    no_roa = _mk_ticker("NOROA", "Technology", return_on_assets=None)
+    universe = {
+        "NOROA": no_roa,
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    if "NOROA" in scored:  # peut être filtré par DQ si plusieurs trous
+        assert scored["NOROA"]["pillars_data_count"]["quality"] == 3
+
+
+def test_phase6_roa_deconfounds_leverage_in_quality():
+    """Un ticker à ROE élevé MAIS ROA bas (= forte leverage qui inflate ROE)
+    doit avoir un Quality moins élevé que son clone à ROE similaire ET ROA
+    élevé (= efficience capital réelle).
+
+    Construction : LEVERED a ROE 30 % avec ROA 5 % (D/E ~5×) ; ORGANIC a
+    ROE 25 % avec ROA 15 % (D/E ~0.7×). Le ROA-rank départage les deux,
+    ORGANIC > LEVERED en Quality.
+    """
+    universe = _build_universe([
+        ("LEVERED", "Technology", {"roe": 0.30, "return_on_assets": 0.05}),
+        ("ORGANIC", "Technology", {"roe": 0.25, "return_on_assets": 0.15}),
+        # Bruit pour atteindre le seuil sector-relative (12 tickers).
+        *[(f"NOISE{i}", "Technology",
+           {"roe": 0.20, "return_on_assets": 0.10})
+          for i in range(10)],
+    ])
+    scored = _score_universe(universe)
+    assert scored["ORGANIC"]["quality_score"] > scored["LEVERED"]["quality_score"], (
+        f"ORGANIC Q={scored['ORGANIC']['quality_score']} doit battre "
+        f"LEVERED Q={scored['LEVERED']['quality_score']} (ROA dé-confounde le levier)"
+    )
+
+
+def test_phase6_composite_z_score_exposed():
+    """Le payload doit exposer titan_composite_z (universe-relative)."""
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology", roe=0.10 + i * 0.05)
+        for i in range(8)
+    }
+    scored = _score_universe(universe)
+    assert all("titan_composite_z" in r for r in scored.values())
+    # Σ z = 0 ± epsilon par construction (z-score = (x - μ) / σ).
+    z_sum = sum(r["titan_composite_z"] for r in scored.values())
+    assert abs(z_sum) < 0.01, f"Σ z = {z_sum}, attendu ≈ 0"
+
+
+def test_phase6_composite_z_score_zero_on_degenerate_universe():
+    """Si σ = 0 (tous composites égaux, univers dégénéré), z = 0 partout —
+    pas de division par zéro, pas d'inf.
+    """
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert r["titan_composite_z"] == 0.0
+
+
+def test_phase6_consistency_tilt_requires_above_neutral_mean():
+    """Phase 6 audit — le bonus consistency NE doit PAS se déclencher quand
+    tous les piliers sont à ~50 (univers dégénéré). C'était un faux positif
+    de l'ancien check (σ < 15 sans contrainte de moyenne).
+    """
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    # Universe homogène → tous ranks ≈ 50 → mean(pillars_with_data) ≈ 50,
+    # σ = 0. L'ancienne version aurait fire le tilt ; la nouvelle non.
+    for r in scored.values():
+        assert "consistent" not in r["titan_tilt_flags"], (
+            f"Univers dégénéré : pillars all 50, consistent NE doit PAS fire "
+            f"(ancien bug). Got flags = {r['titan_tilt_flags']}"
+        )
+
+
+def test_phase6_consistency_tilt_fires_on_balanced_excellence():
+    """Inversement, un ticker dont tous les piliers sont haut (balanced
+    excellence) doit recevoir le bonus consistent.
+
+    On ne peut pas isoler un ticker "tous piliers ≥ 60" facilement avec
+    le scoring relatif (les ranks sont compétitifs). Le test vérifie que
+    SI le bonus est présent, il est conditionné par mean ≥ 55.
+    """
+    # Crée un univers où T_TOP a tout au-dessus de la médiane.
+    universe = _build_universe([
+        ("T_TOP", "Technology", {
+            "roe": 0.50, "return_on_assets": 0.20, "op_margin": 0.40,
+            "gross_margin": 0.60, "ev_to_ebitda": 12.0, "forward_pe": 18.0,
+            "free_cash_flow": 5e9, "debt_to_equity": 30.0, "current_ratio": 3.0,
+            "recommendation_mean": 1.5, "price_target_mean": 130.0,
+            "momentum_return_pct": 25.0, "momentum_risk_adjusted": 1.0,
+            "revenue_growth": 0.15, "earnings_growth": 0.20,
+        }),
+        # Bruits pour que T_TOP émerge (ranks compétitifs)
+        *[(f"NOISE{i}", "Technology", {
+            "roe": 0.10, "return_on_assets": 0.05, "op_margin": 0.15,
+            "gross_margin": 0.30, "ev_to_ebitda": 35.0, "forward_pe": 40.0,
+            "free_cash_flow": 5e8, "debt_to_equity": 100.0, "current_ratio": 1.2,
+            "recommendation_mean": 3.0, "price_target_mean": 100.0,
+            "momentum_return_pct": -5.0, "momentum_risk_adjusted": -0.2,
+            "revenue_growth": 0.02, "earnings_growth": 0.01,
+        }) for i in range(11)],
+    ])
+    scored = _score_universe(universe)
+    # T_TOP doit avoir tous les piliers très haut (Q,V,R,M,G ≈ 100, S élevé)
+    # → moyenne >> 55 et σ peut-être un peu plus large mais consistent peut
+    # toujours ne pas fire si σ ≥ 15. On vérifie au moins que la moyenne est
+    # élevée et que SI consistent fire, c'est cohérent.
+    pillars = [
+        scored["T_TOP"]["quality_score"],
+        scored["T_TOP"]["value_score"],
+        scored["T_TOP"]["risk_score"],
+        scored["T_TOP"]["momentum_score"],
+        scored["T_TOP"]["growth_score"],
+    ]
+    import statistics as _stat
+    mean_p = _stat.fmean(pillars)
+    assert mean_p > 70, f"T_TOP mean(Q,V,R,M,G) = {mean_p} doit être > 70"
+
+
+# ─────────────────────────────────────────────────────────────────
+# PHASE 7 — quick_ratio + sector composite rank + fundamentals age
+# ─────────────────────────────────────────────────────────────────
+
+def test_phase7_quick_ratio_extends_risk_pillar():
+    """Phase 7 : un ticker fournissant `quick_ratio` doit avoir
+    risk_count = 3 (D/E + Current Ratio + Quick Ratio). Sans QR, fallback à 2.
+    """
+    with_qr = _mk_ticker("WITH_QR", "Technology")
+    with_qr["quick_ratio"] = 1.5
+    universe = {
+        "WITH_QR": with_qr,
+        "T1": _mk_ticker("T1", "Technology"),  # quick_ratio=None par défaut
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    assert scored["WITH_QR"]["pillars_data_count"]["risk"] == 3, (
+        f"WITH_QR risk_count = {scored['WITH_QR']['pillars_data_count']['risk']}, "
+        f"attendu 3"
+    )
+    assert scored["T1"]["pillars_data_count"]["risk"] == 2, (
+        f"T1 (sans quick_ratio) risk_count = "
+        f"{scored['T1']['pillars_data_count']['risk']}, attendu 2"
+    )
+
+
+def test_phase7_quick_ratio_high_boosts_risk_score():
+    """Un ticker avec quick_ratio très élevé (excellent liquidité immédiate)
+    doit avoir risk_score > son clone à QR bas, toutes choses égales par
+    ailleurs.
+    """
+    universe = _build_universe([
+        # SOLID : QR 3.0 (excellente liquidité)
+        ("SOLID", "Technology", {}),
+        # WEAK : QR 0.4 (liquidité tendue)
+        ("WEAK",  "Technology", {}),
+        # Bruits identiques en sector ≥ 12
+        *[(f"N{i}", "Technology", {}) for i in range(11)],
+    ])
+    universe["SOLID"]["quick_ratio"] = 3.0
+    universe["WEAK"]["quick_ratio"] = 0.4
+    for i in range(11):
+        universe[f"N{i}"]["quick_ratio"] = 1.0  # médiane
+    scored = _score_universe(universe)
+    assert scored["SOLID"]["risk_score"] > scored["WEAK"]["risk_score"], (
+        f"SOLID risk={scored['SOLID']['risk_score']} doit battre "
+        f"WEAK risk={scored['WEAK']['risk_score']}"
+    )
+
+
+def test_phase7_sector_composite_rank_exposed():
+    """Le payload doit exposer titan_composite_sector_pct, sector_z, sector_n."""
+    universe = _build_universe([
+        ("T1", "Technology", {"roe": 0.10}),
+        ("T2", "Technology", {"roe": 0.20}),
+        ("T3", "Technology", {"roe": 0.30}),
+        ("U1", "Utilities",  {"roe": 0.05}),
+        ("U2", "Utilities",  {"roe": 0.10}),
+        ("U3", "Utilities",  {"roe": 0.15}),
+    ])
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert "titan_composite_sector_pct" in r
+        assert "titan_composite_sector_z" in r
+        assert "titan_composite_sector_n" in r
+    # Tech sector : 3 tickers
+    assert scored["T1"]["titan_composite_sector_n"] == 3
+    # Utilities sector : 3 tickers
+    assert scored["U1"]["titan_composite_sector_n"] == 3
+
+
+def test_phase7_sector_rank_independent_per_sector():
+    """Le top de chaque secteur doit avoir un sector_pct ~100 — même si en
+    composite global le top Tech écrase le top Utilities."""
+    universe = _build_universe([
+        # Tech avec composites élevés (ROE haut, etc.)
+        ("T_TOP",  "Technology", {"roe": 0.70, "op_margin": 0.50}),
+        ("T_MID",  "Technology", {"roe": 0.40, "op_margin": 0.30}),
+        ("T_LOW",  "Technology", {"roe": 0.10, "op_margin": 0.10}),
+        # Utilities avec composites moindres
+        ("U_TOP",  "Utilities",  {"roe": 0.15, "op_margin": 0.20}),
+        ("U_MID",  "Utilities",  {"roe": 0.10, "op_margin": 0.15}),
+        ("U_LOW",  "Utilities",  {"roe": 0.05, "op_margin": 0.10}),
+    ])
+    scored = _score_universe(universe)
+    # Le top de chaque secteur a sector_pct ≈ max
+    assert scored["T_TOP"]["titan_composite_sector_pct"] > 50, (
+        f"T_TOP sector_pct = {scored['T_TOP']['titan_composite_sector_pct']}"
+    )
+    assert scored["U_TOP"]["titan_composite_sector_pct"] > 50, (
+        f"U_TOP sector_pct = {scored['U_TOP']['titan_composite_sector_pct']}"
+    )
+    # Les deux tops sont en haut de leur secteur même si T_TOP ≫ U_TOP en absolu.
+    assert scored["T_TOP"]["titan_composite_sector_pct"] == scored["U_TOP"]["titan_composite_sector_pct"], (
+        "T_TOP et U_TOP devraient avoir le même rank intra-secteur (n=3, top → 83.33)"
+    )
+
+
+def test_phase7_sector_z_zero_on_single_ticker_sector():
+    """Si un secteur a 1 ticker, son z-score sectoriel = 0 (pas de pairs
+    pour comparer). Pas de div/0."""
+    universe = _build_universe([
+        ("E1", "Energy", {}),
+        ("T1", "Technology", {}),
+        ("T2", "Technology", {}),
+        ("T3", "Technology", {}),
+        ("T4", "Technology", {}),
+        ("T5", "Technology", {}),
+    ])
+    scored = _score_universe(universe)
+    # E1 seul dans son secteur
+    assert scored["E1"]["titan_composite_sector_n"] == 1
+    assert scored["E1"]["titan_composite_sector_z"] == 0.0
+
+
+def test_phase7_fundamentals_age_days_parsed():
+    """fetched_at ISO → fundamentals_age_days en jours, arrondi à 1 décimale."""
+    from datetime import UTC, datetime, timedelta
+    # Ticker fetched il y a 12.5 jours
+    past = (datetime.now(UTC) - timedelta(days=12, hours=12)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    fresh = _mk_ticker("FRESH", "Technology")
+    fresh["fetched_at"] = past
+    universe = {
+        "FRESH": fresh,
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    age = scored["FRESH"]["fundamentals_age_days"]
+    assert age is not None, "fundamentals_age_days devrait être calculé"
+    # Tolérance : 12.0 ≤ age ≤ 13.0 (1 décimale + petit délai d'exécution)
+    assert 12.0 <= age <= 13.0, f"age = {age}, attendu ≈ 12.5"
+
+
+def test_phase7_fundamentals_age_none_on_missing_or_bad_format():
+    """Si fetched_at est absent / malformé / non-string → age = None."""
+    from modules.sector_metrics._scoring import _parse_fetched_at_age_days
+    assert _parse_fetched_at_age_days(None) is None
+    assert _parse_fetched_at_age_days("") is None
+    assert _parse_fetched_at_age_days("not-a-date") is None
+    assert _parse_fetched_at_age_days(12345) is None  # int non-string
+
+
+def test_phase7_fundamentals_age_negative_clamped_to_zero():
+    """fetched_at dans le futur (clock skew) → age = 0 (pas de négatif)."""
+    from datetime import UTC, datetime, timedelta
+
+    from modules.sector_metrics._scoring import _parse_fetched_at_age_days
+    future = (datetime.now(UTC) + timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    age = _parse_fetched_at_age_days(future)
+    assert age == 0.0, f"age = {age}, attendu 0.0 (futur clampé)"

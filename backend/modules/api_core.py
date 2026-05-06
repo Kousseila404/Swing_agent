@@ -58,6 +58,11 @@ LOG_PATHS: dict[str, Path] = {
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mGKHFABCDJsu]")
 
+# Validation des job_id externes (path traversal guard) : `launch_job` génère des
+# uuid4().hex[:8] — un hex en lower-case de longueur fixe. On refuse tout autre
+# format AVANT de toucher au filesystem pour neutraliser les `../` et chemins absolus.
+JOB_ID_RE = re.compile(r"^[0-9a-f]{8}$")
+
 # Capital de référence pour /equity_curve, /performance_metrics, /portfolio.
 # Lu depuis config.ACCOUNT_SIZE pour rester cohérent avec tracker / broker
 # (fallback 100_000 si config non importable — ne devrait jamais arriver côté API).
@@ -189,7 +194,8 @@ def load_journal() -> list[dict]:
         with FileLock(str(CSV_LOCK_PATH), timeout=10):
             df = read_journal_df()
         return df.fillna("").to_dict(orient="records")
-    except Exception:
+    except (OSError, ValueError, TimeoutError) as exc:
+        logger.warning(f"[load_journal] lecture échouée ({CSV_PATH.name}): {exc}")
         return []
 
 
@@ -227,7 +233,8 @@ def tail_log(path: Path, n: int = 200) -> list[str]:
             for line in fh:
                 buf.append(ANSI_RE.sub("", line).rstrip("\n"))
         return list(buf)
-    except Exception:
+    except OSError as exc:
+        logger.warning(f"[tail_log] lecture {path} échouée: {exc}")
         return []
 
 
@@ -383,16 +390,28 @@ def list_jobs(n: int = 12) -> list[dict]:
 
 
 def get_job_output(job_id: str) -> dict:
+    if not JOB_ID_RE.match(job_id or ""):
+        raise HTTPException(400, "job_id invalide")
     meta_path = JOBS_DIR / f"{job_id}.json"
     if not meta_path.exists():
         raise HTTPException(404, "Job introuvable")
     meta = json.loads(meta_path.read_text())
+    # Le log_path est écrit par launch_job(...) sous JOBS_DIR ; on confine la
+    # lecture à ce répertoire pour qu'un meta corrompu (ou édité hors API) ne
+    # puisse pas exfiltrer un fichier arbitraire.
     log_path = Path(meta.get("log_path", ""))
     running = job_running(meta.get("pid", -1))
-    lines = []
+    lines: list[str] = []
     if log_path.exists():
-        raw = log_path.read_text(errors="replace")
-        lines = ANSI_RE.sub("", raw).splitlines()
+        try:
+            log_path.resolve().relative_to(JOBS_DIR.resolve())
+        except ValueError:
+            logger.warning(
+                f"[get_job_output] log_path hors JOBS_DIR ignoré : {log_path}"
+            )
+        else:
+            raw = log_path.read_text(errors="replace")
+            lines = ANSI_RE.sub("", raw).splitlines()
     return {"job_id": job_id, "running": running, "cmd": meta.get("cmd"), "lines": lines[-300:]}
 
 

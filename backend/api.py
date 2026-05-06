@@ -37,10 +37,11 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Ajoute backend/ au PYTHONPATH pour que `import config` et les `from modules …`
 # fonctionnent quand uvicorn pointe sur api:app depuis n'importe quel CWD.
@@ -152,13 +153,51 @@ _ALLOWED_ORIGINS = [o.strip() for o in os.getenv(
     "http://localhost:5173,http://localhost:3000",
 ).split(",") if o.strip()]
 
+# Garde-fou : un wildcard "*" combiné avec un Bearer token est non seulement
+# inutile (Authorization n'est pas envoyé sur cross-origin avec credentials)
+# mais expose en plus tous les endpoints publics à n'importe quel domaine.
+# On retire le wildcard et on log un warning explicite.
+if "*" in _ALLOWED_ORIGINS:
+    logger.warning(
+        "[API] CORS_ORIGINS contient '*' — retiré (incompatible avec Bearer auth). "
+        "Listez explicitement les domaines frontend autorisés."
+    )
+    _ALLOWED_ORIGINS = [o for o in _ALLOWED_ORIGINS if o != "*"]
+if not _ALLOWED_ORIGINS:
+    logger.warning(
+        "[API] Aucune origine CORS autorisée — l'UI ne pourra pas appeler l'API. "
+        "Définir CORS_ORIGINS=https://votre-frontend.example."
+    )
+
 app = FastAPI(title="SwingQuant TITAN API", version="2.0.0", lifespan=_lifespan)
+
+
+# Security headers (defense in depth — le reverse proxy en prod en pose
+# probablement déjà mais on ne dépend pas de lui).
+#   - X-Content-Type-Options: nosniff   → bloque le MIME sniffing.
+#   - X-Frame-Options: DENY              → empêche l'embed iframe (clickjacking).
+#   - Referrer-Policy: same-origin       → fuite minimale sur les liens sortants.
+#   - Cache-Control private par défaut sur /api/* (les endpoints sensibles
+#     posent leur propre Cache-Control plus strict si besoin).
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response: Response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        if request.url.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "private, max-age=0")
+        return response
+
+
+app.add_middleware(_SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "If-None-Match"],
+    expose_headers=["ETag"],
 )
 
 # GZip pour tout payload > 1 KB. Économise ~10× sur /api/universe (638 KB → 60 KB),

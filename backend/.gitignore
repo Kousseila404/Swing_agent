@@ -25,6 +25,9 @@ data/*.json
 data/*.jsonl
 data/*.csv
 data/*.html
+# Lock files créés par filelock (runtime uniquement, jamais committés).
+data/*.lock
+data/*.json.lock
 
 # Keep schema/example files explicitly if needed
 !data/.keep
