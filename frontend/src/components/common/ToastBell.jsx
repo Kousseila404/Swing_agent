@@ -5,16 +5,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { clearHistory, getHistory, subscribe } from '../../utils/toastBus';
+import { session } from '../../utils/storage';
 
 const READ_KEY = 'toast_last_read_ts';
 
-function _lastRead() {
-  try { return sessionStorage.getItem(READ_KEY) || ''; } catch { return ''; }
-}
-
-function _markRead(ts) {
-  try { sessionStorage.setItem(READ_KEY, ts); } catch { /* private mode */ }
-}
+const _lastRead  = () => session.readString(READ_KEY, '');
+const _markRead  = (ts) => session.writeString(READ_KEY, ts);
 
 function relTime(iso) {
   if (!iso) return '';

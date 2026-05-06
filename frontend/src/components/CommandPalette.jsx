@@ -17,26 +17,10 @@
 // groupées avec en-tête sticky. Footer affiche les raccourcis.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useUniverse, useWatchlist } from '../hooks/useApi';
 
-const NAV_TARGETS = [
-  { id: 'briefing',    icon: '☀️', label: 'Briefing',     hint: 'Page · Briefing du jour' },
-  { id: 'watchlist',   icon: '👁',  label: 'Watchlist',    hint: 'Page · Tickers observés' },
-  { id: 'universe',    icon: '🌐', label: 'Univers',      hint: 'Page · Univers Quantamental' },
-  { id: 'sectors',     icon: '🏛',  label: 'Secteurs',     hint: 'Page · Rotation sectorielle' },
-  { id: 'portfolio',   icon: '📊', label: 'Portfolio',    hint: 'Page · Positions et journal' },
-  { id: 'proposals',   icon: '📬', label: 'Propositions', hint: 'Page · Veto humain TITAN' },
-  { id: 'performance', icon: '📈', label: 'Performance',  hint: 'Page · Sharpe, Sortino, DD' },
-  { id: 'attribution', icon: '🎲', label: 'Attribution',  hint: 'Page · Win rate par bucket TITAN entry' },
-  { id: 'ticker',      icon: '🎯', label: 'Ticker Detail',hint: 'Page · Score history' },
-  { id: 'datahealth',  icon: '🩺', label: 'Data Health',  hint: 'Page · Providers et cache' },
-  { id: 'risk',        icon: '⚠️', label: 'Risk Monitor', hint: 'Page · Budget et VIX' },
-  { id: 'calendar',    icon: '🗓',  label: 'Catalysts',    hint: 'Page · Earnings + Macro consolidés' },
-  { id: 'news',        icon: '📰', label: 'News',         hint: 'Page · Firehose positions + watchlist' },
-  { id: 'macro',       icon: '📅', label: 'Macro',        hint: 'Page · Calendrier événements' },
-  { id: 'audit',       icon: '🔍', label: 'Audit',        hint: 'Page · Survivorship + WFO' },
-  { id: 'settings',    icon: '⚙️', label: 'Préférences',  hint: 'Page · Apparence + Defaults + API Token' },
-];
+import { NAV_TARGETS } from '../config/nav';
+import { useUniverse, useWatchlist } from '../hooks/useApi';
+import { readJSON, writeJSON } from '../utils/storage';
 
 // Actions globales — déclenchées via onAction(actionId).
 const GLOBAL_ACTIONS = [
@@ -51,22 +35,17 @@ const RECENTS_KEY = 'cmdk_recents';
 const RECENTS_MAX = 6;
 
 function readRecents() {
-  try {
-    const raw = localStorage.getItem(RECENTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+  return readJSON(RECENTS_KEY, []);
 }
 
 function pushRecent(item) {
-  try {
-    const list = readRecents().filter(x => x.id !== item.id);
-    list.unshift({
-      id: item.id, kind: item.kind, label: item.label,
-      hint: item.hint, icon: item.icon, payload: item.payload,
-      ts: Date.now(),
-    });
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, RECENTS_MAX)));
-  } catch { /* private mode */ }
+  const list = readRecents().filter((x) => x.id !== item.id);
+  list.unshift({
+    id: item.id, kind: item.kind, label: item.label,
+    hint: item.hint, icon: item.icon, payload: item.payload,
+    ts: Date.now(),
+  });
+  writeJSON(RECENTS_KEY, list.slice(0, RECENTS_MAX));
 }
 
 // Fuzzy score simple : 0 si pas de match, sinon plus haut = meilleur.

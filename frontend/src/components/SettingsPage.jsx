@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import { fetchMonitorPreview, runMonitorAlerts } from '../api/client';
 import { usePreferences } from '../utils/preferences';
+import { readBoolean, readNumber, readString, remove, writeString } from '../utils/storage';
 
 const KEYS = {
   apiToken:       'api_token',
@@ -27,21 +28,15 @@ const DEFAULTS = {
   fractional:  false,
 };
 
+// Wrapper typé sur storage : choisit le bon reader selon le type du fallback.
 function readPref(key, fallback) {
-  try {
-    const v = localStorage.getItem(key);
-    if (v == null) return fallback;
-    if (typeof fallback === 'number') {
-      const n = parseFloat(v);
-      return Number.isFinite(n) ? n : fallback;
-    }
-    if (typeof fallback === 'boolean') return v === 'true';
-    return v;
-  } catch { return fallback; }
+  if (typeof fallback === 'number')  return readNumber(key, fallback);
+  if (typeof fallback === 'boolean') return readBoolean(key, fallback);
+  return readString(key, fallback);
 }
 
 function writePref(key, value) {
-  try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
+  writeString(key, value);
 }
 
 function FieldGroup({ title, hint, children }) {
@@ -238,7 +233,7 @@ export default function SettingsPage() {
     if (!window.confirm('Réinitialiser toutes les préférences UI ?')) return;
     [
       KEYS.capital, KEYS.maxHoldings, KEYS.topNMode, KEYS.fractional,
-    ].forEach(k => { try { localStorage.removeItem(k); } catch { /* private mode */ } });
+    ].forEach((k) => remove(k));
     setCapital(DEFAULTS.capital);
     setMaxHoldings(DEFAULTS.maxHoldings);
     setTopNMode(DEFAULTS.topNMode);

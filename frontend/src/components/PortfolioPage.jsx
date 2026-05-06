@@ -20,6 +20,7 @@ import { PageSkeleton } from './common/Skeleton';
 import PositionCard from './portfolio/PositionCard';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
+import { readString, writeString } from '../utils/storage';
 
 function downloadFile(filename, content, type = 'text/csv') {
   const blob = new Blob([content], { type });
@@ -162,13 +163,12 @@ export default function PortfolioPage() {
   const [tab, setTab]                     = useState('open');
   // Refonte UI 2026-04-29 — vue cartes par défaut (4-15 positions),
   // tableau pour qui veut le mode dense.
-  const [viewMode, setViewMode]           = useState(() => {
-    try { return localStorage.getItem('portfolio_view_mode') || 'cards'; }
-    catch { return 'cards'; }
-  });
+  const [viewMode, setViewMode] = useState(() =>
+    readString('portfolio_view_mode', '') || 'cards',
+  );
   const setViewModePersisted = (m) => {
     setViewMode(m);
-    try { localStorage.setItem('portfolio_view_mode', m); } catch { /* private mode */ }
+    writeString('portfolio_view_mode', m);
   };
   const [closingTicker, setClosingTicker] = useState('');
   // Ticker pour modal d'analyse (clic sur ticker dans la carte ou le tableau).
