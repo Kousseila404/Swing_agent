@@ -1004,13 +1004,13 @@ def test_phase7_sector_rank_independent_per_sector():
     composite global le top Tech écrase le top Utilities."""
     universe = _build_universe([
         # Tech avec composites élevés (ROE haut, etc.)
-        ("T_TOP",  "Technology", {"roe": 0.70, "operating_margin": 0.50}),
-        ("T_MID",  "Technology", {"roe": 0.40, "operating_margin": 0.30}),
-        ("T_LOW",  "Technology", {"roe": 0.10, "operating_margin": 0.10}),
+        ("T_TOP",  "Technology", {"roe": 0.70, "op_margin": 0.50}),
+        ("T_MID",  "Technology", {"roe": 0.40, "op_margin": 0.30}),
+        ("T_LOW",  "Technology", {"roe": 0.10, "op_margin": 0.10}),
         # Utilities avec composites moindres
-        ("U_TOP",  "Utilities",  {"roe": 0.15, "operating_margin": 0.20}),
-        ("U_MID",  "Utilities",  {"roe": 0.10, "operating_margin": 0.15}),
-        ("U_LOW",  "Utilities",  {"roe": 0.05, "operating_margin": 0.10}),
+        ("U_TOP",  "Utilities",  {"roe": 0.15, "op_margin": 0.20}),
+        ("U_MID",  "Utilities",  {"roe": 0.10, "op_margin": 0.15}),
+        ("U_LOW",  "Utilities",  {"roe": 0.05, "op_margin": 0.10}),
     ])
     scored = _score_universe(universe)
     # Le top de chaque secteur a sector_pct ≈ max

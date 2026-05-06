@@ -53,10 +53,12 @@ def test_financials_fields_count_is_smaller():
 
 def _mk_tech_ticker_full() -> dict:
     """Tech avec tous les fields DQ renseignés → DQ=1.0.
-    Lot 12 : ajout de revenue_growth au champs requis."""
+    Lot 12 : ajout de revenue_growth aux champs requis.
+    Phase 6 (2026-05-06) : ajout de return_on_assets (ROA leverage-neutre)."""
     return {
         "ticker": "AAPL", "sector": "Technology",
-        "return_on_equity": 0.3, "operating_margin": 0.25,
+        "return_on_equity": 0.3, "return_on_assets": 0.15,
+        "operating_margin": 0.25,
         "ev_to_ebitda": 15.0, "forward_pe": 20.0,
         "free_cash_flow": 1e11, "debt_to_equity": 1.5,
         "current_ratio": 1.0, "recommendation_mean": 2.0,
@@ -67,10 +69,13 @@ def _mk_tech_ticker_full() -> dict:
 
 def _mk_bank_ticker() -> dict:
     """Banque type : manque ev_to_ebitda, current_ratio, free_cash_flow,
-    debt_to_equity — tous non applicables au bilan bancaire (réalité yfinance)."""
+    debt_to_equity — tous non applicables au bilan bancaire (réalité yfinance).
+    Phase 6 : ROA reste applicable pour les banques (NI / Total Assets a un sens
+    pour une banque), donc fourni."""
     return {
         "ticker": "JPM", "sector": "Financial Services",
-        "return_on_equity": 0.17, "operating_margin": 0.30,
+        "return_on_equity": 0.17, "return_on_assets": 0.012,  # 1.2% typique grande banque
+        "operating_margin": 0.30,
         "ev_to_ebitda": None,              # non applicable
         "forward_pe": 12.0,
         "free_cash_flow": None,            # non applicable banking
@@ -88,7 +93,8 @@ def test_dq_technology_full_is_100pct():
 
 
 def test_dq_bank_without_inapplicable_fields_is_100pct():
-    """Avant fix : 6/10 = 60 %. Après fix : 6/6 = 100 %."""
+    """Avant fix sector-aware : 6/10 = 60 %. Après : 8/8 = 100 % (Phase 6 :
+    8 fields applicables aux banques, ROA inclus)."""
     dq = _compute_data_quality(_mk_bank_ticker())
     assert dq == 1.0
 
@@ -98,15 +104,15 @@ def test_dq_bank_with_missing_applicable_field_penalized():
     bank = _mk_bank_ticker()
     bank["return_on_equity"] = None  # field applicable manquant
     dq = _compute_data_quality(bank)
-    # Lot 12 : bank applicable fields = 7 (inc. revenue_growth), 6 remplis → 6/7 ≈ 85.7 %
-    assert abs(dq - (6/7)) < 0.01
+    # Phase 6 : bank applicable fields = 8 (inc. ROA), 7 remplis → 7/8 = 87.5 %
+    assert abs(dq - (7/8)) < 0.01
 
 
 def test_dq_bank_vs_tech_equal_applicable_density_equal_dq():
     """Invariance : une banque et un tech avec le même taux de remplissage sur
     leurs champs applicables doivent avoir le même DQ score."""
-    bank = _mk_bank_ticker()  # 6/6 = 100 %
-    tech = _mk_tech_ticker_full()  # 10/10 = 100 %
+    bank = _mk_bank_ticker()  # 8/8 = 100 % (Phase 6)
+    tech = _mk_tech_ticker_full()  # 12/12 = 100 % (Phase 6 : +ROA)
     assert _compute_data_quality(bank) == _compute_data_quality(tech) == 1.0
 
 
@@ -118,17 +124,18 @@ def test_dq_tech_missing_ev_ebitda_penalized_unlike_bank():
     tech_dq = _compute_data_quality(tech_sparse)
     bank_dq = _compute_data_quality(_mk_bank_ticker())
     assert tech_dq < bank_dq
-    # Lot 12 : Tech applicable = 11 fields, 10 remplis → 10/11 ≈ 90.9 %
-    assert abs(tech_dq - (10/11)) < 0.01
+    # Phase 6 : Tech applicable = 12 fields, 11 remplis → 11/12 ≈ 91.7 %
+    assert abs(tech_dq - (11/12)) < 0.01
 
 
 def test_dq_unknown_sector_falls_back_to_default_fields():
     """Un ticker sans secteur est scoré sur le jeu complet."""
     t = _mk_bank_ticker()
     t["sector"] = None
-    # Lot 12 : default 11 fields, bank ticker a 7 remplis → 7/11 ≈ 63.6 %
+    # Phase 6 : default 12 fields. Bank ticker a 8 fills (ROE, ROA, opm, fwd_pe,
+    # reco, target, mom_return, rev_growth) → 8/12 ≈ 66.7 %.
     dq = _compute_data_quality(t)
-    assert abs(dq - (7/11)) < 0.01
+    assert abs(dq - (8/12)) < 0.01
 
 
 def test_dq_threshold_bumped_to_0_70():
