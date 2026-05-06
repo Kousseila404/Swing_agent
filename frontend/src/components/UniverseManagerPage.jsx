@@ -10,6 +10,7 @@ import { factorColor } from '../utils/colors';
 import Pagination from './Pagination';
 import PresetBar from './common/PresetBar';
 import TickerAnalysisModal from './TickerAnalysisModal';
+import { readJSON, writeJSON } from '../utils/storage';
 
 // Seuils de la règle d'achat manuelle (cf. memory user_buy_rule_manual.md) :
 // TITAN ≥ 80 nominal, override possible si TITAN ∈ [70, 80[ + signal externe.
@@ -21,16 +22,8 @@ const BUY_TITAN_OVERRIDE_THRESHOLD = 70;
 // unique scopée à la page pour ne pas polluer d'autres préfs.
 const PERSIST_KEY = 'swing.universePage.filters.v1';
 
-const loadPersistedFilters = () => {
-  try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PERSIST_KEY) : null;
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-};
-
-const savePersistedFilters = (state) => {
-  try { localStorage.setItem(PERSIST_KEY, JSON.stringify(state)); } catch { /* private mode */ }
-};
+const loadPersistedFilters = () => readJSON(PERSIST_KEY, null);
+const savePersistedFilters = (state) => writeJSON(PERSIST_KEY, state);
 
 // Tooltips détaillés (Tier C #3) — composition de chaque pilier TITAN.
 // Source : modules/sector_metrics/_scoring.py. On vise une explication courte

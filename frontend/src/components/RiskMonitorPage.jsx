@@ -7,6 +7,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { useMacro, usePortfolio, useStatus } from '../hooks/useApi';
+import { PageSkeleton } from './common/Skeleton';
 
 const KILLSWITCH_PCT   = 4.0;
 const RISK_PER_TRADE   = 0.25;
@@ -99,7 +100,7 @@ export default function RiskMonitorPage() {
   }), [openPositions]);
 
   if (portQ.isLoading || macroQ.isLoading) {
-    return <div className="loading-pulse"><div className="spinner" /><p>Chargement risk monitor…</p></div>;
+    return <PageSkeleton tiles={5} blockHeight={220} rows={3} />;
   }
 
   return (

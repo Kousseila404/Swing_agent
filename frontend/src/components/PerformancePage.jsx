@@ -16,6 +16,7 @@ import {
 } from 'recharts';
 import { usePerformanceMetrics } from '../hooks/useApi';
 import { histogramBins, computeUnderwater, INITIAL_CAPITAL } from '../utils/performance';
+import { PageSkeleton } from './common/Skeleton';
 
 // Gradient statique hors render : évite de reparser le <defs> à chaque tick RQ.
 const EQ_GRAD_DEFS = (
@@ -68,12 +69,12 @@ export default function PerformancePage() {
       .sort((a, b) => (b.total_pnl ?? 0) - (a.total_pnl ?? 0));
   }, [data]);
 
-  if (isLoading) return <div className="loading-pulse"><div className="spinner" /><p>Calcul métriques…</p></div>;
+  if (isLoading) return <PageSkeleton tiles={6} blockHeight={280} rows={3} />;
   if (isError || !data) return (
     <div className="api-error">
       <div className="api-error-icon">⚠️</div>
       <p>Erreur /api/performance_metrics — vérifiez FastAPI + data/trade_journal.csv</p>
-      <button className="action-btn" style={{ maxWidth: 200 }} onClick={() => refetch()}>Réessayer</button>
+      <button className="btn btn-primary" style={{ maxWidth: 200 }} onClick={() => refetch()}>Réessayer</button>
     </div>
   );
 

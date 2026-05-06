@@ -4,6 +4,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
+import { POLL, STALE } from '../config/api.js'
 import {
   addNote,
   addToWatchlist,
@@ -47,15 +48,15 @@ import {
 } from '../api/client.js'
 
 export const useStatus = (opts = {}) =>
-  useQuery({ queryKey: ['status'], queryFn: fetchStatus, refetchInterval: 30_000, ...opts })
+  useQuery({ queryKey: ['status'], queryFn: fetchStatus, refetchInterval: POLL.STATUS_FAST, ...opts })
 
 // Poll ~60s : l'horloge NYSE bascule 2× / jour (open + close).
 export const useMarketStatus = (opts = {}) =>
   useQuery({
     queryKey: ['market_status'],
     queryFn: fetchMarketStatus,
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: POLL.MARKET_STATUS,
+    staleTime: STALE.STATUS,
     ...opts,
   })
 
@@ -69,7 +70,7 @@ export const usePerformanceMetrics = (opts = {}) =>
   useQuery({
     queryKey: ['performance_metrics'],
     queryFn: fetchPerformanceMetrics,
-    staleTime: 60_000,
+    staleTime: STALE.PERFORMANCE,
     ...opts,
   })
 
@@ -80,7 +81,7 @@ export const useMacroCalendar = (horizonDays = 60, opts = {}) =>
   useQuery({
     queryKey: ['macro_calendar', horizonDays],
     queryFn: () => fetchMacroCalendar(horizonDays),
-    staleTime: 5 * 60_000,
+    staleTime: STALE.MACRO_CALENDAR,
     ...opts,
   })
 
@@ -113,7 +114,7 @@ export const useJob = (id, opts = {}) =>
     queryKey: ['job', id],
     queryFn: () => fetchJob(id),
     enabled: !!id,
-    refetchInterval: (q) => (q.state.data?.running ? 2_000 : false),
+    refetchInterval: (q) => (q.state.data?.running ? POLL.JOB : false),
     ...opts,
   })
 
@@ -136,7 +137,7 @@ export const useProposals = ({ status = null, limit = 200 } = {}, opts = {}) =>
   useQuery({
     queryKey: ['proposals', status, limit],
     queryFn: () => fetchProposals({ status, limit }),
-    refetchInterval: 30_000,
+    refetchInterval: POLL.PROPOSALS,
     ...opts,
   })
 
@@ -207,7 +208,7 @@ export const useSnapshotsList = (opts = {}) =>
   useQuery({
     queryKey: ['history_snapshots'],
     queryFn: fetchSnapshotsList,
-    staleTime: 60_000,
+    staleTime: STALE.SNAPSHOTS,
     ...opts,
   })
 
@@ -215,8 +216,8 @@ export const useDataHealth = (opts = {}) =>
   useQuery({
     queryKey: ['data_health'],
     queryFn: fetchDataHealth,
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: POLL.DATA_HEALTH,
+    staleTime: STALE.STATUS,
     ...opts,
   })
 
@@ -225,7 +226,7 @@ export const useTickerHistory = (ticker, opts = {}) =>
     queryKey: ['ticker_history', ticker, opts.start, opts.end, opts.fields],
     queryFn: () => fetchTickerHistory(ticker, opts),
     enabled: !!ticker,
-    staleTime: 60_000,
+    staleTime: STALE.TICKER_HISTORY,
     ...opts,
   })
 
@@ -236,7 +237,7 @@ export const useDelisted = (opts = {}) =>
   useQuery({
     queryKey: ['delisted'],
     queryFn: fetchDelisted,
-    staleTime: 5 * 60_000,
+    staleTime: STALE.DELISTED,
     ...opts,
   })
 
@@ -244,8 +245,8 @@ export const useWfoWeights = (opts = {}) =>
   useQuery({
     queryKey: ['wfo_weights'],
     queryFn: fetchWfoWeights,
-    staleTime: 60 * 60_000, // poids changent au plus mensuellement (cron)
-    retry: false,            // 404 si jamais lancé → pas de retry
+    staleTime: STALE.WFO,    // poids changent au plus mensuellement (cron)
+    retry: false,             // 404 si jamais lancé → pas de retry
     ...opts,
   })
 
@@ -253,7 +254,7 @@ export const useWfoHistory = (limit = 50, opts = {}) =>
   useQuery({
     queryKey: ['wfo_history', limit],
     queryFn: () => fetchWfoHistory({ limit }),
-    staleTime: 60 * 60_000,
+    staleTime: STALE.WFO,
     ...opts,
   })
 
@@ -261,7 +262,7 @@ export const useAuditFull = (opts = {}) =>
   useQuery({
     queryKey: ['audit_full'],
     queryFn: () => fetchAuditFull(),
-    staleTime: 30 * 60_000, // backend cache 24h ; on rafraîchit rarement
+    staleTime: STALE.AUDIT_FULL, // backend cache 24h ; on rafraîchit rarement
     ...opts,
   })
 
@@ -283,7 +284,7 @@ export const useNews = (ticker, days = 14, opts = {}) =>
     queryKey: ['news', ticker, days],
     queryFn: () => fetchNews(ticker, days),
     enabled: !!ticker,
-    staleTime: 30 * 60_000,   // news cache backend = 1h ; UI stale = 30min
+    staleTime: STALE.NEWS,    // news cache backend = 1h ; UI stale = 30min
     ...opts,
   })
 
@@ -291,7 +292,7 @@ export const useNewsFirehose = (days = 7, maxPerTicker = 5, opts = {}) =>
   useQuery({
     queryKey: ['news_firehose', days, maxPerTicker],
     queryFn: () => fetchNewsFirehose(days, maxPerTicker),
-    staleTime: 10 * 60_000,
+    staleTime: STALE.NEWS_FIREHOSE,
     ...opts,
   })
 
@@ -299,7 +300,7 @@ export const useAttribution = (opts = {}) =>
   useQuery({
     queryKey: ['attribution'],
     queryFn: fetchAttribution,
-    staleTime: 5 * 60_000,
+    staleTime: STALE.ATTRIBUTION,
     ...opts,
   })
 
@@ -307,7 +308,7 @@ export const useSectorBenchmarkPortfolio = (opts = {}) =>
   useQuery({
     queryKey: ['sector_benchmark_portfolio'],
     queryFn: fetchSectorBenchmarkPortfolio,
-    staleTime: 30 * 60_000,  // backend cache 1h, UI 30min
+    staleTime: STALE.SECTOR_BENCH,  // backend cache 1h, UI 30min
     ...opts,
   })
 
@@ -316,7 +317,7 @@ export const useSecFilings = (ticker, limit = 30, opts = {}) =>
     queryKey: ['sec_filings', ticker, limit],
     queryFn: () => fetchSecFilings(ticker, limit),
     enabled: !!ticker,
-    staleTime: 60 * 60_000,  // backend cache 6h, UI 1h
+    staleTime: STALE.SEC_FILINGS,   // backend cache 6h, UI 1h
     ...opts,
   })
 
@@ -324,7 +325,7 @@ export const useCatalystCalendar = (days = 30, opts = {}) =>
   useQuery({
     queryKey: ['calendar', days],
     queryFn: () => fetchCatalystCalendar(days),
-    staleTime: 5 * 60_000,
+    staleTime: STALE.CALENDAR,
     ...opts,
   })
 
@@ -332,7 +333,7 @@ export const useWatchlist = (opts = {}) =>
   useQuery({
     queryKey: ['watchlist'],
     queryFn: fetchWatchlist,
-    staleTime: 30_000,
+    staleTime: STALE.WATCHLIST,
     ...opts,
   })
 
@@ -357,7 +358,7 @@ export const useNotes = (ticker, opts = {}) =>
     queryKey: ['notes', ticker],
     queryFn: () => fetchNotes(ticker),
     enabled: !!ticker,
-    staleTime: 30_000,
+    staleTime: STALE.NOTES,
     ...opts,
   })
 

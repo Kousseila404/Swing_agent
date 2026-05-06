@@ -1,35 +1,52 @@
 // CommandPalette — palette globale Cmd+K / Ctrl+K.
 //
 // Indexe :
-//   - les pages de la nav (jump-to-page)
-//   - les actions globales (refresh proposals, ouvrir watchlist…)
-//   - tous les tickers de l'univers (jump-to-factsheet)
+//   - Pages de la nav (jump-to-page)
+//   - Actions globales (toggle theme/density, refresh proposals, …)
+//   - Watchlist (jump-to-factsheet, contextuelle)
+//   - Tickers de l'univers (jump-to-factsheet, gros volume)
+//   - Recents (les 6 dernières exécutions, persistés en localStorage)
 //
-// Implémentation maison (pas de dépendance) : Set focus piégé, Esc ferme,
-// j/k ou ↑/↓ navigue, Enter exécute. Fuzzy matching simple par sous-chaîne
-// + boost si match au début du nom.
+// Implémentation maison (zéro dépendance) :
+//   - Esc ferme
+//   - ↑↓ ou Ctrl+P/N navigue
+//   - Enter exécute
+//   - Cmd+Enter (si dispo) : exécute en gardant la palette ouverte
+//
+// Fuzzy matching simple : sous-chaîne + boost si match au début. Sections
+// groupées avec en-tête sticky. Footer affiche les raccourcis.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useUniverse, useWatchlist } from '../hooks/useApi';
 
-const NAV_TARGETS = [
-  { id: 'briefing',    icon: '☀️', label: 'Briefing',     hint: 'Page · Briefing du jour' },
-  { id: 'watchlist',   icon: '👁',  label: 'Watchlist',    hint: 'Page · Tickers observés' },
-  { id: 'universe',    icon: '🌐', label: 'Univers',      hint: 'Page · Univers Quantamental' },
-  { id: 'sectors',     icon: '🏛',  label: 'Secteurs',     hint: 'Page · Rotation sectorielle' },
-  { id: 'portfolio',   icon: '📊', label: 'Portfolio',    hint: 'Page · Positions et journal' },
-  { id: 'proposals',   icon: '📬', label: 'Propositions', hint: 'Page · Veto humain TITAN' },
-  { id: 'performance', icon: '📈', label: 'Performance',  hint: 'Page · Sharpe, Sortino, DD' },
-  { id: 'attribution', icon: '🎲', label: 'Attribution',  hint: 'Page · Win rate par bucket TITAN entry' },
-  { id: 'ticker',      icon: '🎯', label: 'Ticker Detail',hint: 'Page · Score history' },
-  { id: 'datahealth',  icon: '🩺', label: 'Data Health',  hint: 'Page · Providers et cache' },
-  { id: 'risk',        icon: '⚠️', label: 'Risk Monitor', hint: 'Page · Budget et VIX' },
-  { id: 'calendar',    icon: '🗓',  label: 'Catalysts',    hint: 'Page · Earnings + Macro consolidés' },
-  { id: 'news',        icon: '📰', label: 'News',         hint: 'Page · Firehose positions + watchlist' },
-  { id: 'macro',       icon: '📅', label: 'Macro',        hint: 'Page · Calendrier événements' },
-  { id: 'audit',       icon: '🔍', label: 'Audit',        hint: 'Page · Survivorship + WFO' },
-  { id: 'settings',    icon: '⚙️', label: 'Préférences',  hint: 'Page · Apparence + Defaults + API Token' },
+import { NAV_TARGETS } from '../config/nav';
+import { useUniverse, useWatchlist } from '../hooks/useApi';
+import { readJSON, writeJSON } from '../utils/storage';
+
+// Actions globales — déclenchées via onAction(actionId).
+const GLOBAL_ACTIONS = [
+  { id: 'toggle-theme',   icon: '🌓', label: 'Basculer thème clair/sombre', hint: 'Action · prefers-color-scheme' },
+  { id: 'toggle-density', icon: '↕️',  label: 'Basculer densité compact/cosy', hint: 'Action · plus de lignes visibles' },
+  { id: 'goto-briefing',  icon: '☀️', label: 'Ouvrir Briefing du jour',     hint: 'Action · raccourci' },
+  { id: 'goto-proposals', icon: '📬', label: 'Ouvrir Propositions',         hint: 'Action · veto humain' },
+  { id: 'goto-settings',  icon: '⚙️', label: 'Ouvrir Préférences',          hint: 'Action · apparence + API token' },
 ];
+
+const RECENTS_KEY = 'cmdk_recents';
+const RECENTS_MAX = 6;
+
+function readRecents() {
+  return readJSON(RECENTS_KEY, []);
+}
+
+function pushRecent(item) {
+  const list = readRecents().filter((x) => x.id !== item.id);
+  list.unshift({
+    id: item.id, kind: item.kind, label: item.label,
+    hint: item.hint, icon: item.icon, payload: item.payload,
+    ts: Date.now(),
+  });
+  writeJSON(RECENTS_KEY, list.slice(0, RECENTS_MAX));
+}
 
 // Fuzzy score simple : 0 si pas de match, sinon plus haut = meilleur.
 function fuzzyScore(query, target) {
@@ -41,7 +58,6 @@ function fuzzyScore(query, target) {
   if (t.startsWith(q)) return 500;
   const idx = t.indexOf(q);
   if (idx >= 0) return 200 - idx;
-  // Fallback : tous les chars de q présents dans t en ordre.
   let i = 0;
   for (const c of t) {
     if (c === q[i]) i++;
@@ -50,16 +66,16 @@ function fuzzyScore(query, target) {
   return 0;
 }
 
-export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker }) {
+export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker, onAction }) {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef(null);
   const listRef = useRef(null);
 
-  const universeQ = useUniverse(null, { enabled: open });
+  const universeQ  = useUniverse(null, { enabled: open });
   const watchlistQ = useWatchlist({ enabled: open });
 
-  // Reset quand on ouvre.
+  // Reset à l'ouverture, focus sur l'input.
   useEffect(() => {
     if (open) {
       setQuery('');
@@ -68,7 +84,6 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
     }
   }, [open]);
 
-  // Listes brutes
   const tickerItems = useMemo(() => {
     const tickers = universeQ.data?.tickers || {};
     return Object.entries(tickers).map(([t, info]) => ({
@@ -76,10 +91,7 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
       id: `ticker:${t}`,
       icon: '🎯',
       label: t,
-      hint: [
-        info?.name,
-        info?.sector,
-      ].filter(Boolean).join(' · ') || 'Ticker',
+      hint: [info?.name, info?.sector].filter(Boolean).join(' · ') || 'Ticker',
       payload: t,
     }));
   }, [universeQ.data]);
@@ -98,68 +110,94 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
 
   const navItems = useMemo(() =>
     NAV_TARGETS.map(n => ({
-      kind: 'nav',
-      id: `nav:${n.id}`,
-      icon: n.icon,
-      label: n.label,
-      hint: n.hint,
-      payload: n.id,
-    })),
-    [],
-  );
+      kind: 'nav', id: `nav:${n.id}`, icon: n.icon,
+      label: n.label, hint: n.hint, payload: n.id,
+    })), []);
 
-  // Match + score + sort + cap
-  const results = useMemo(() => {
-    const all = [...navItems, ...watchlistItems, ...tickerItems];
+  const actionItems = useMemo(() =>
+    GLOBAL_ACTIONS.map(a => ({
+      kind: 'action', id: `act:${a.id}`, icon: a.icon,
+      label: a.label, hint: a.hint, payload: a.id,
+    })), []);
+
+  // Recents sont rechargés à chaque ouverture (et après exécution).
+  const [recentTick, setRecentTick] = useState(0);
+  const recentItems = useMemo(() => {
+    if (!open) return [];
+    return readRecents().map(r => ({ ...r, kind: r.kind || 'nav' }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, recentTick]);
+
+  // Sections regroupées en sortie : pas de dédup entre sections (la dédup
+  // tickers vs watchlist se fait quand on construit la liste filtrée).
+  const sections = useMemo(() => {
     if (!query) {
-      // Quand vide : nav d'abord, puis watchlist, puis quelques tickers.
-      return [
-        ...navItems,
-        ...watchlistItems.slice(0, 5),
-      ].slice(0, 30);
-    }
-    const scored = [];
-    for (const item of all) {
-      const labelScore = fuzzyScore(query, item.label);
-      const hintScore  = fuzzyScore(query, item.hint) * 0.3;
-      const total = labelScore + hintScore;
-      if (total > 0) {
-        // Boost nav et watchlist (sont moins nombreux mais plus utiles).
-        const boost = item.kind === 'nav' ? 50 : item.kind === 'watchlist' ? 25 : 0;
-        scored.push({ ...item, _score: total + boost });
+      // Vue par défaut : Recents + Actions + Pages + Watchlist (top 6)
+      const out = [];
+      if (recentItems.length > 0) out.push({ label: 'Récents', items: recentItems });
+      out.push({ label: 'Actions', items: actionItems });
+      out.push({ label: 'Pages', items: navItems });
+      if (watchlistItems.length > 0) {
+        out.push({ label: 'Watchlist', items: watchlistItems.slice(0, 8) });
       }
+      return out;
     }
-    scored.sort((a, b) => b._score - a._score);
-    // Dédupe ticker présent en watchlist + univers : garde watchlist (plus contextuel).
-    const seenLabels = new Set();
-    const out = [];
-    for (const it of scored) {
-      if (it.kind === 'ticker' && seenLabels.has(`label:${it.label}`)) continue;
-      out.push(it);
-      seenLabels.add(`label:${it.label}`);
-      if (out.length >= 30) break;
-    }
-    return out;
-  }, [query, navItems, watchlistItems, tickerItems]);
 
-  // Reset cursor quand results changent
+    // Recherche : on score chaque kind séparément, puis on garde top N par section.
+    const scoreList = (items, boostKind = 0) => {
+      const scored = [];
+      for (const item of items) {
+        const labelScore = fuzzyScore(query, item.label);
+        const hintScore  = fuzzyScore(query, item.hint) * 0.3;
+        const total = labelScore + hintScore;
+        if (total > 0) scored.push({ ...item, _score: total + boostKind });
+      }
+      scored.sort((a, b) => b._score - a._score);
+      return scored;
+    };
+
+    const navMatches    = scoreList(navItems, 50).slice(0, 8);
+    const actionMatches = scoreList(actionItems, 30).slice(0, 6);
+    const watchMatches  = scoreList(watchlistItems, 20).slice(0, 8);
+    const tickerMatches = scoreList(tickerItems).slice(0, 14);
+
+    // Dédup : si un ticker apparaît déjà en watchlist, on le retire de Tickers.
+    const watchLabels = new Set(watchMatches.map(w => w.label));
+    const tickerFiltered = tickerMatches.filter(t => !watchLabels.has(t.label));
+
+    const out = [];
+    if (actionMatches.length) out.push({ label: 'Actions', items: actionMatches });
+    if (navMatches.length)    out.push({ label: 'Pages',   items: navMatches });
+    if (watchMatches.length)  out.push({ label: 'Watchlist', items: watchMatches });
+    if (tickerFiltered.length) out.push({ label: 'Tickers', items: tickerFiltered });
+    return out;
+  }, [query, navItems, actionItems, watchlistItems, tickerItems, recentItems]);
+
+  // Liste à plat pour la navigation clavier (cursor index).
+  const flatList = useMemo(() => sections.flatMap(s => s.items), [sections]);
+
+  // Reset cursor quand la liste change (nouvelle query).
   useEffect(() => { setCursor(0); }, [query]);
 
-  // Scroll auto pour garder le cursor visible
+  // Scroll auto pour garder le cursor visible.
   useEffect(() => {
     if (!listRef.current) return;
     const active = listRef.current.querySelector(`[data-idx="${cursor}"]`);
     if (active) active.scrollIntoView({ block: 'nearest' });
   }, [cursor]);
 
-  const execute = (item) => {
+  const execute = (item, keepOpen = false) => {
     if (!item) return;
+    pushRecent(item);
+    setRecentTick(t => t + 1);
     if (item.kind === 'nav') {
       onNavigate?.(item.payload);
+    } else if (item.kind === 'action') {
+      onAction?.(item.payload);
     } else if (item.kind === 'ticker' || item.kind === 'watchlist') {
       onOpenTicker?.(item.payload);
     }
-    onClose?.();
+    if (!keepOpen) onClose?.();
   };
 
   const onKeyDown = (e) => {
@@ -170,7 +208,7 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
     }
     if (e.key === 'ArrowDown' || (e.key === 'n' && e.ctrlKey)) {
       e.preventDefault();
-      setCursor(c => Math.min(results.length - 1, c + 1));
+      setCursor(c => Math.min(flatList.length - 1, c + 1));
       return;
     }
     if (e.key === 'ArrowUp' || (e.key === 'p' && e.ctrlKey)) {
@@ -178,128 +216,100 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
       setCursor(c => Math.max(0, c - 1));
       return;
     }
+    if (e.key === 'Home') {
+      e.preventDefault(); setCursor(0); return;
+    }
+    if (e.key === 'End') {
+      e.preventDefault(); setCursor(flatList.length - 1); return;
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
-      execute(results[cursor]);
+      execute(flatList[cursor], e.metaKey || e.ctrlKey);
       return;
     }
   };
 
   if (!open) return null;
 
+  // On numérote chaque item de manière monotone à travers les sections
+  // pour que cursor reste cohérent.
+  let runningIdx = -1;
+
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(0,0,0,0.55)',
-        backdropFilter: 'blur(2px)',
-        zIndex: 2000,
-        display: 'flex', justifyContent: 'center', alignItems: 'flex-start',
-        padding: '12vh 1rem 1rem',
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 640,
-          background: 'var(--panel-bg)',
-          border: '1px solid var(--panel-border)',
-          borderRadius: 12,
-          boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
-          overflow: 'hidden',
-          backdropFilter: 'blur(20px)',
-        }}
-      >
-        <div style={{
-          padding: '0.85rem 1rem',
-          borderBottom: '1px solid var(--panel-border)',
-          display: 'flex', alignItems: 'center', gap: 10,
-        }}>
-          <span style={{ fontSize: '1.1rem', opacity: 0.6 }}>⌘</span>
+    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Palette de commandes">
+      <div className="cmdk-root" onClick={e => e.stopPropagation()}>
+        <div className="cmdk-input-row">
+          <span style={{ fontSize: '1.05rem', opacity: 0.6 }} aria-hidden="true">⌘</span>
           <input
             ref={inputRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="Tape pour chercher : ticker, page, action…"
-            style={{
-              flex: 1, background: 'none', border: 'none', outline: 'none',
-              color: 'var(--text-main)', fontFamily: 'inherit',
-              fontSize: '0.95rem',
-            }}
+            className="cmdk-input"
+            aria-label="Recherche dans la palette"
+            aria-autocomplete="list"
+            aria-controls="cmdk-listbox"
           />
-          <span style={{
-            fontSize: '0.66rem', color: 'var(--text-muted)',
-            border: '1px solid var(--panel-border)',
-            padding: '2px 6px', borderRadius: 4,
-            fontFamily: 'monospace',
-          }}>esc</span>
+          <kbd>esc</kbd>
         </div>
 
-        <div ref={listRef} style={{ maxHeight: '50vh', overflowY: 'auto' }}>
-          {results.length === 0 && (
-            <div style={{
-              padding: '2rem', textAlign: 'center', fontSize: '0.85rem',
-              color: 'var(--text-muted)',
-            }}>
-              📭 Aucun résultat pour "{query}"
+        <div ref={listRef} className="cmdk-list" id="cmdk-listbox" role="listbox">
+          {flatList.length === 0 && (
+            <div className="cmdk-empty">
+              📭 Aucun résultat pour <strong>"{query}"</strong>
             </div>
           )}
-          {results.map((it, i) => {
-            const active = i === cursor;
-            return (
-              <div
-                key={it.id}
-                data-idx={i}
-                onClick={() => execute(it)}
-                onMouseEnter={() => setCursor(i)}
-                style={{
-                  padding: '0.55rem 1rem',
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  cursor: 'pointer',
-                  background: active ? 'rgba(59,130,246,0.10)' : 'transparent',
-                  borderLeft: active ? '3px solid var(--accent-primary)' : '3px solid transparent',
-                  fontSize: '0.85rem',
-                }}
-              >
-                <span style={{ fontSize: '1.05rem', opacity: 0.85 }}>{it.icon}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontWeight: 600,
-                    color: active ? 'var(--text-main)' : 'var(--text-main)',
-                    fontFamily: it.kind === 'nav' ? 'inherit' : 'monospace',
-                  }}>
-                    {it.label}
+          {sections.map(section => (
+            <div key={section.label} className="cmdk-section">
+              <div className="cmdk-section-label">{section.label}</div>
+              {section.items.map((it) => {
+                runningIdx++;
+                const idx = runningIdx;
+                const active = idx === cursor;
+                return (
+                  <div
+                    key={it.id}
+                    data-idx={idx}
+                    onClick={() => execute(it)}
+                    onMouseEnter={() => setCursor(idx)}
+                    className={`cmdk-item ${active ? 'active' : ''}`}
+                    role="option"
+                    aria-selected={active}
+                  >
+                    <span className="cmdk-item-icon">{it.icon}</span>
+                    <div className="cmdk-item-body">
+                      <div
+                        className="cmdk-item-label"
+                        style={{ fontFamily: it.kind === 'ticker' || it.kind === 'watchlist' ? 'monospace' : 'inherit' }}
+                      >
+                        {it.label}
+                      </div>
+                      <div className="cmdk-item-hint">{it.hint}</div>
+                    </div>
+                    <span className="cmdk-item-tag">
+                      {it.kind === 'ticker' ? 'Ticker'
+                        : it.kind === 'watchlist' ? 'Watch'
+                        : it.kind === 'action' ? 'Action'
+                        : 'Page'}
+                    </span>
                   </div>
-                  <div style={{
-                    fontSize: '0.7rem', color: 'var(--text-muted)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {it.hint}
-                  </div>
-                </div>
-                <span style={{
-                  fontSize: '0.6rem', color: 'var(--text-muted)',
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                }}>
-                  {it.kind === 'ticker' ? 'Ticker' : it.kind === 'watchlist' ? 'Watch' : 'Page'}
-                </span>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          ))}
         </div>
 
-        <div style={{
-          padding: '0.5rem 1rem',
-          borderTop: '1px solid var(--panel-border)',
-          fontSize: '0.66rem', color: 'var(--text-muted)',
-          display: 'flex', gap: 14, justifyContent: 'flex-end',
-          fontFamily: 'monospace',
-        }}>
-          <span>↑↓ naviguer</span>
-          <span>↵ exécuter</span>
-          <span>esc fermer</span>
+        <div className="cmdk-footer">
+          <span style={{ opacity: 0.7 }}>
+            {flatList.length} résultat{flatList.length > 1 ? 's' : ''}
+          </span>
+          <div className="cmdk-footer-keys">
+            <span><kbd>↑</kbd><kbd>↓</kbd> naviguer</span>
+            <span><kbd>↵</kbd> exécuter</span>
+            <span><kbd>⌘↵</kbd> garder ouvert</span>
+            <span><kbd>esc</kbd> fermer</span>
+          </div>
         </div>
       </div>
     </div>

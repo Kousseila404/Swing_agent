@@ -14,7 +14,8 @@ import {
   useProposals,
   useStatus,
 } from '../hooks/useApi';
-import { fmtNum, fmtPctRaw, fmtPrice, fmtSignedPct } from '../utils/format';
+import { fmtNum, fmtPrice, fmtSignedPct } from '../utils/format';
+import { PageSkeleton } from './common/Skeleton';
 import TickerSpark from './common/TickerSpark';
 
 const REGIME_STYLES = {
@@ -98,10 +99,11 @@ export default function BriefingPage({ onNavigate }) {
   const market         = marketQ.data || {};
   const portfolio      = portfolioQ.data || {};
   const equity         = portfolio.equity || {};
-  const openPositions  = equity.open_positions || [];
   const proposalsData  = proposalsQ.data || {};
-  const calendarEvents = macroCalendarQ.data?.events || [];
   const inBlackout     = macroCalendarQ.data?.in_blackout || false;
+  // openPositions et calendarEvents ne sont PAS extraits ici car les
+  // useMemo en aval lisent directement portfolioQ.data / macroCalendarQ.data
+  // pour éviter les deps "|| []" qui changent à chaque render.
 
   const regime      = macro.confirmed_regime || macro.regime || 'UNKNOWN';
   const regimeStyle = REGIME_STYLES[regime] || REGIME_STYLES.UNKNOWN;
@@ -110,12 +112,12 @@ export default function BriefingPage({ onNavigate }) {
   const current     = equity.current_equity ?? status.account_equity ?? 100_000;
   const start       = equity.starting_equity ?? 100_000;
   const dailyDdPct  = start > 0 ? Math.max(0, (start - current) / start * 100) : 0;
-  const realized    = equity.realized_pnl ?? 0;
   const unrealized  = equity.unrealized_pnl ?? 0;
 
   // Positions à surveiller : <5% du SL OU <3% du TP (très proche d'un trigger).
   const positionsAtRisk = useMemo(() => {
-    return openPositions
+    const list = portfolioQ.data?.equity?.open_positions || [];
+    return list
       .map((p) => {
         const toSl = p.pct_to_sl;
         const toTp = p.pct_to_tp;
@@ -135,32 +137,31 @@ export default function BriefingPage({ onNavigate }) {
         if (ai !== bi) return ai - bi;
         return (a.pct_to_sl ?? a.pct_to_tp ?? 999) - (b.pct_to_sl ?? b.pct_to_tp ?? 999);
       });
-  }, [openPositions]);
+  }, [portfolioQ.data]);
 
   // Macro J+0 → J+7 (filtre upcoming + horizon 7j).
   const upcomingMacro = useMemo(() => {
-    return calendarEvents
+    const events = macroCalendarQ.data?.events || [];
+    return events
       .filter(e => e.days_delta >= 0 && e.days_delta <= 7)
       .sort((a, b) => a.days_delta - b.days_delta);
-  }, [calendarEvents]);
+  }, [macroCalendarQ.data]);
 
   // Top P&L latent positif et négatif.
   const topMovers = useMemo(() => {
-    const sorted = [...openPositions]
+    const list = portfolioQ.data?.equity?.open_positions || [];
+    return [...list]
       .filter(p => Number.isFinite(p.unrealized_pnl))
       .sort((a, b) => Math.abs(b.unrealized_pnl) - Math.abs(a.unrealized_pnl))
       .slice(0, 5);
-    return sorted;
-  }, [openPositions]);
+  }, [portfolioQ.data]);
+
+  // Pour l'affichage hors memo (KPIs, listes simples).
+  const openPositions = portfolioQ.data?.equity?.open_positions || [];
 
   const isLoading = statusQ.isLoading || macroQ.isLoading || portfolioQ.isLoading;
   if (isLoading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Préparation du briefing…</p>
-      </div>
-    );
+    return <PageSkeleton tiles={6} blockHeight={160} rows={5} />;
   }
 
   const nPending = proposalsData.n_pending ?? 0;

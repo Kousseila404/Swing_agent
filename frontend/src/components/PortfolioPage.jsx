@@ -12,13 +12,16 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio, fetchThesisStatus } from '../api/client';
+import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio } from '../api/client';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
+import { POLL } from '../config/api';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import { PageSkeleton } from './common/Skeleton';
 import PositionCard from './portfolio/PositionCard';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
+import { readString, writeString } from '../utils/storage';
 
 function downloadFile(filename, content, type = 'text/csv') {
   const blob = new Blob([content], { type });
@@ -138,25 +141,10 @@ function ThesisBadge({ thesis }) {
 export default function PortfolioPage() {
   const qc = useQueryClient();
 
-  const portfolioQ = useQuery({ queryKey: ['portfolio'], queryFn: fetchPortfolio, refetchInterval: 15_000 });
-  const curveQ     = useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, refetchInterval: 15_000 });
+  const portfolioQ = useQuery({ queryKey: ['portfolio'],     queryFn: fetchPortfolio,    refetchInterval: POLL.PORTFOLIO });
+  const curveQ     = useQuery({ queryKey: ['equity_curve'],  queryFn: fetchEquityCurve,  refetchInterval: POLL.PORTFOLIO });
   const benchQ     = useSectorBenchmarkPortfolio();
-  const thesisQ    = useQuery({ queryKey: ['thesis_status'], queryFn: fetchThesisStatus, refetchInterval: 5 * 60_000 });
   const ltQ        = useQuery({ queryKey: ['lt_decision'],   queryFn: fetchLtDecision,   refetchInterval: 5 * 60_000 });
-
-  const thesisByTicker = useMemo(() => {
-    const idx = {};
-    for (const it of thesisQ.data?.items || []) {
-      const t = String(it.ticker || '').toUpperCase();
-      // En cas de doublon (multiple OPEN même ticker), garde le pire status.
-      const order = { BROKEN: 3, WARN: 2, INTACT: 1, NO_DATA: 0 };
-      const prev = idx[t];
-      if (!prev || (order[it.status] ?? 0) > (order[prev.status] ?? 0)) {
-        idx[t] = it;
-      }
-    }
-    return idx;
-  }, [thesisQ.data]);
 
   const ltByTicker = useMemo(() => {
     const idx = {};
@@ -172,18 +160,16 @@ export default function PortfolioPage() {
   }, [ltQ.data]);
 
   const ltSummary = ltQ.data?.summary;
-  const addOnTickers = ltSummary?.tickers_by_action?.ADD_ON || [];
 
   const [tab, setTab]                     = useState('open');
   // Refonte UI 2026-04-29 — vue cartes par défaut (4-15 positions),
   // tableau pour qui veut le mode dense.
-  const [viewMode, setViewMode]           = useState(() => {
-    try { return localStorage.getItem('portfolio_view_mode') || 'cards'; }
-    catch { return 'cards'; }
-  });
+  const [viewMode, setViewMode] = useState(() =>
+    readString('portfolio_view_mode', '') || 'cards',
+  );
   const setViewModePersisted = (m) => {
     setViewMode(m);
-    try { localStorage.setItem('portfolio_view_mode', m); } catch {}
+    writeString('portfolio_view_mode', m);
   };
   const [closingTicker, setClosingTicker] = useState('');
   // Ticker pour modal d'analyse (clic sur ticker dans la carte ou le tableau).
@@ -328,7 +314,7 @@ export default function PortfolioPage() {
     return { wins: wins.length, losses: losses.length, opens: livePositions.length, pf, sumWin, sumLoss };
   }, [closedTrades, livePositions]);
 
-  if (portfolioQ.isLoading) return <div className="loading-pulse"><div className="spinner" /><p>Chargement du portfolio…</p></div>;
+  if (portfolioQ.isLoading) return <PageSkeleton tiles={6} blockHeight={260} rows={5} />;
   if (portfolioQ.isError || !data) return <ApiErrorBanner msg={portfolioQ.error?.message || 'API indisponible — vérifiez que FastAPI tourne sur :8000'} onRetry={() => portfolioQ.refetch()} />;
 
   const { equity, stats } = data;

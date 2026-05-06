@@ -44,14 +44,17 @@ export default function TradingViewWidget({ ticker, height = 420 }) {
   const containerId = `tv_${id}`;
 
   useEffect(() => {
-    if (!ticker) return;
+    if (!ticker) return undefined;
     let cancelled = false;
+    // Capture la ref à l'entrée de l'effet : containerRef.current pourrait
+    // pointer ailleurs au moment du cleanup (warning exhaustive-deps).
+    const container = containerRef.current;
 
     loadTvScript()
       .then(() => {
-        if (cancelled || !containerRef.current || !window.TradingView) return;
+        if (cancelled || !container || !window.TradingView) return;
         // Clear any previous widget DOM (re-render on ticker change).
-        containerRef.current.innerHTML = '';
+        container.innerHTML = '';
         const theme = document.documentElement.getAttribute('data-theme') === 'light'
           ? 'light' : 'dark';
 
@@ -77,8 +80,8 @@ export default function TradingViewWidget({ ticker, height = 420 }) {
       })
       .catch((e) => {
         if (cancelled) return;
-        if (containerRef.current) {
-          containerRef.current.innerHTML = '<div style="padding:1rem;color:var(--text-muted);font-size:0.78rem">Impossible de charger TradingView (réseau bloqué ?)</div>';
+        if (container) {
+          container.innerHTML = '<div style="padding:1rem;color:var(--text-muted);font-size:0.78rem">Impossible de charger TradingView (réseau bloqué ?)</div>';
         }
         console.warn('[TradingViewWidget] script load failed', e);
       });
@@ -87,7 +90,7 @@ export default function TradingViewWidget({ ticker, height = 420 }) {
       cancelled = true;
       try {
         widgetRef.current = null;
-        if (containerRef.current) containerRef.current.innerHTML = '';
+        if (container) container.innerHTML = '';
       } catch { /* noop */ }
     };
   }, [ticker, containerId]);

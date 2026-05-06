@@ -2,104 +2,24 @@
    SWING QUANT V5 — PERSONAL SAAS UI — FULL STYLES
    ───────────────────────────────────────────────────────────── */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/*
+   Architecture CSS :
+   - styles/tokens.css   : design tokens (couleurs, espacements, motion)
+                           + thèmes light/dark + density + reset
+   - this file (legacy)  : styles historiques par page (asset selector,
+                           strategy card, scanner table, portfolio, etc.)
+                           + family / equity / universe-modal
+   - styles/shell.css    : app shell v2 (focus-visible, skip-link,
+                           sidebar collapsible, sticky header, market
+                           clock, btn primitives, skeleton, modal,
+                           toast variants, command palette)
 
-/* ── DESIGN TOKENS ── */
-:root {
-  --bg-dark: #080c14;
-  --panel-bg: rgba(18, 24, 40, 0.75);
-  --panel-border: rgba(255, 255, 255, 0.06);
-  --accent-primary: #3b82f6;
-  --accent-secondary: #8b5cf6;
-  --success: #10b981;
-  --danger: #ef4444;
-  --warning: #f59e0b;
-  --text-main: #f1f5f9;
-  --text-muted: #94a3b8;
-  --glass-shadow: 0 8px 40px rgba(0,0,0,0.5);
-  --glass-blur: blur(16px);
-  /* Aliases pour code récent (BriefingPage, ProposalsPage). */
-  --text: var(--text-main);
-  --text-primary: var(--text-main);
-  --bg-tertiary: rgba(255,255,255,0.03);
-  --border: var(--panel-border);
-  --accent: var(--accent-primary);
-  /* Tokens densité — overridés par [data-density="compact"]. */
-  --row-py: 0.875rem;
-  --row-px: 1rem;
-  --nav-py: 0.8rem;
-  --nav-fs: 0.95rem;
-  --card-pad: 1.25rem;
-}
+   Ordre d'import important : tokens en premier (variables CSS),
+   puis legacy (utilise les variables), puis shell (ajoute les
+   primitives modernes qui peuvent overrider le legacy).
+*/
 
-/* ── THEME LIGHT ── */
-[data-theme="light"] {
-  --bg-dark: #f5f7fb;
-  --panel-bg: rgba(255, 255, 255, 0.92);
-  --panel-border: rgba(15, 23, 42, 0.10);
-  --accent-primary: #2563eb;
-  --accent-secondary: #7c3aed;
-  --success: #047857;
-  --danger: #dc2626;
-  --warning: #b45309;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --glass-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
-  --bg-tertiary: rgba(15,23,42,0.04);
-}
-[data-theme="light"] body {
-  background-image:
-    radial-gradient(ellipse at 5% 40%, rgba(37,99,235,0.05) 0%, transparent 50%),
-    radial-gradient(ellipse at 95% 20%, rgba(124,58,237,0.05) 0%, transparent 50%) !important;
-}
-[data-theme="light"] .scan-table th { background: rgba(15,23,42,0.04); }
-[data-theme="light"] .scan-row:hover { background: rgba(15,23,42,0.04); }
-[data-theme="light"] .nav-item:hover { background: rgba(15,23,42,0.05); }
-[data-theme="light"] .nav-item.active {
-  background: linear-gradient(90deg, rgba(37,99,235,0.10), transparent);
-}
-[data-theme="light"] .as-ticker-btn:hover,
-[data-theme="light"] .as-sector-header:hover,
-[data-theme="light"] .as-sector-header.open,
-[data-theme="light"] .as-ticker-chip:hover {
-  background: rgba(15,23,42,0.05);
-}
-[data-theme="light"] .as-ticker-chip.active,
-[data-theme="light"] .as-ticker-btn.active {
-  background: rgba(37,99,235,0.10);
-}
-
-/* ── DENSITY COMPACT ── */
-[data-density="compact"] {
-  --row-py: 0.45rem;
-  --row-px: 0.7rem;
-  --nav-py: 0.55rem;
-  --nav-fs: 0.88rem;
-  --card-pad: 0.85rem;
-}
-[data-density="compact"] .scan-table th,
-[data-density="compact"] .scan-table td {
-  padding: var(--row-py) var(--row-px);
-}
-[data-density="compact"] .scan-table { font-size: 0.82rem; }
-[data-density="compact"] .nav-item {
-  padding: var(--nav-py) 0.85rem;
-  font-size: var(--nav-fs);
-}
-
-/* ── RESET ── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  font-family: 'Inter', sans-serif;
-  background: var(--bg-dark);
-  background-image:
-    radial-gradient(ellipse at 5% 40%, rgba(59,130,246,0.07) 0%, transparent 50%),
-    radial-gradient(ellipse at 95% 20%, rgba(139,92,246,0.07) 0%, transparent 50%);
-  color: var(--text-main);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
+@import url('./styles/tokens.css');
 
 /* ── LAYOUT ── */
 .app-container { display: flex; min-height: 100vh; }
@@ -1185,3 +1105,7 @@ body {
 }
 .toast-stack .api-toast { pointer-events: auto; }
 
+
+/* shell.css est importé séparément depuis main.jsx (pour préserver
+   l'ordre cascade : tokens → legacy → shell). Vite n'inline pas les
+   @import placés ailleurs qu'en début de fichier CSS. */

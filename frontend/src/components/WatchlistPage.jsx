@@ -13,6 +13,8 @@ import {
   useWatchlist,
 } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import EmptyState from './common/EmptyState';
+import { PageSkeleton } from './common/Skeleton';
 import TickerSpark from './common/TickerSpark';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import TitanAlertsPanel from './TitanAlertsPanel';
@@ -32,13 +34,15 @@ export default function WatchlistPage() {
   });
   const [error, setError] = useState(null);
 
-  const items = watchQ.data?.items || [];
-
+  // On lit `items` à l'intérieur du useMemo pour ne pas dépendre d'une
+  // référence (`||  []` crée un nouvel array à chaque render).
   const sortedItems = useMemo(() => {
-    return [...items].sort((a, b) =>
+    const list = watchQ.data?.items || [];
+    return [...list].sort((a, b) =>
       (b.added_at || '').localeCompare(a.added_at || '')
     );
-  }, [items]);
+  }, [watchQ.data]);
+  const items = watchQ.data?.items || [];
 
   const handleAdd = (ev) => {
     ev.preventDefault();
@@ -81,12 +85,7 @@ export default function WatchlistPage() {
   };
 
   if (watchQ.isLoading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Chargement watchlist…</p>
-      </div>
-    );
+    return <PageSkeleton tiles={3} blockHeight={180} rows={5} />;
   }
 
   if (watchQ.isError) {
@@ -208,9 +207,11 @@ export default function WatchlistPage() {
         </div>
 
         {sortedItems.length === 0 ? (
-          <div className="as-empty" style={{ padding: '3rem' }}>
-            📭 Watchlist vide. Ajoute un ticker pour commencer à le suivre.
-          </div>
+          <EmptyState
+            icon="👁"
+            title="Watchlist vide"
+            desc="Ajoute un ticker via le formulaire ci-dessus pour commencer à le suivre — tu pourras lui attacher un tag (LT_QARP, GARP…), un target buy et des notes."
+          />
         ) : (
           <table className="scan-table" style={{ margin: 0 }}>
             <thead>

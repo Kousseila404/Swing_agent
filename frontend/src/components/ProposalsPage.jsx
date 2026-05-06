@@ -24,7 +24,9 @@ import {
 import { fmtNum, fmtPctRaw, fmtPrice, fmtSignedPct } from '../utils/format';
 import { factorColor } from '../utils/colors';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import EmptyState from './common/EmptyState';
 import PresetBar from './common/PresetBar';
+import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import TickerSpark from './common/TickerSpark';
 import { loadProposalDefaults } from '../utils/preferences';
@@ -1209,9 +1211,7 @@ export default function ProposalsPage() {
 
       {/* États */}
       {proposalsQ.isLoading && (
-        <div className="card" style={{ padding: 24, textAlign: 'center' }}>
-          <div className="spinner" />
-        </div>
+        <PageSkeleton tiles={3} blockHeight={140} rows={5} />
       )}
       {proposalsQ.isError && (
         <ApiErrorBanner
@@ -1221,13 +1221,15 @@ export default function ProposalsPage() {
       )}
 
       {!proposalsQ.isLoading && !proposalsQ.isError && sortedItems.length === 0 && (
-        <div className="card" style={{
-          padding: 32, textAlign: 'center', color: 'var(--text-muted)',
-        }}>
-          {statusFilter === 'pending'
-            ? '📭 Aucune proposition en attente. Lancez un refresh pour générer un plan.'
-            : `Aucune proposition (statut "${statusFilter || 'toutes'}").`}
-        </div>
+        <EmptyState
+          icon={statusFilter === 'pending' ? '📬' : '📭'}
+          title={statusFilter === 'pending'
+            ? 'Aucune proposition en attente'
+            : `Aucune proposition (statut "${statusFilter || 'toutes'}")`}
+          desc={statusFilter === 'pending'
+            ? 'Lance un refresh pour que TITAN génère un nouveau plan basé sur les scores actuels.'
+            : 'Bascule sur un autre filtre de statut pour voir les propositions historiques.'}
+        />
       )}
 
       {sortedItems.length > 0 && (

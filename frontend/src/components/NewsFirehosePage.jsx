@@ -6,6 +6,8 @@
 import { useMemo, useState } from 'react';
 import { useNewsFirehose } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import EmptyState from './common/EmptyState';
+import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
 
 const HORIZONS = [3, 7, 14, 30];
@@ -37,34 +39,31 @@ export default function NewsFirehosePage() {
 
   const newsQ = useNewsFirehose(days, 5);
   const data = newsQ.data || {};
-  const items = data.items || [];
   const errors = data.errors || [];
   const scope = data.scope || {};
 
-  const tickers = useMemo(
-    () => [...new Set(items.map(i => i.ticker))].sort(),
-    [items],
-  );
+  // `items` est dérivé de newsQ.data — on ne le sort PAS d'un useMemo car
+  // un `|| []` produirait une nouvelle référence à chaque render. On lit
+  // newsQ.data?.items à l'intérieur des memos qui en dépendent.
+  const tickers = useMemo(() => {
+    const list = newsQ.data?.items || [];
+    return [...new Set(list.map(i => i.ticker))].sort();
+  }, [newsQ.data]);
 
   const filtered = useMemo(() => {
-    return items.filter(it => {
+    const list = newsQ.data?.items || [];
+    return list.filter(it => {
       if (scopeFilter === 'position'  && !it.scope?.includes('position'))  return false;
       if (scopeFilter === 'watchlist' && !it.scope?.includes('watchlist')) return false;
       if (tickerFilter && it.ticker !== tickerFilter) return false;
       return true;
     });
-  }, [items, scopeFilter, tickerFilter]);
+  }, [newsQ.data, scopeFilter, tickerFilter]);
 
   if (newsQ.isLoading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Chargement du firehose news…</p>
-        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          (1er chargement ~{(scope.n_tickers || 0) * 1.5}s si cache vide)
-        </p>
-      </div>
-    );
+    // 1er chargement peut prendre plusieurs secondes (le backend rebuild
+    // le cache 1h par ticker) — skeleton en attendant.
+    return <PageSkeleton tiles={3} blockHeight={120} rows={6} />;
   }
 
   if (newsQ.isError) {
@@ -82,7 +81,7 @@ export default function NewsFirehosePage() {
       <div className="cp-status-bar">
         <div className="status-chip">
           <span className="sc-lbl">Articles</span>
-          <span className="sc-val">{items.length}</span>
+          <span className="sc-val">{(data.items || []).length}</span>
           <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
             sur {data.n_tickers || 0} tickers
           </span>
@@ -184,9 +183,11 @@ export default function NewsFirehosePage() {
 
         {/* List */}
         {filtered.length === 0 ? (
-          <div className="as-empty" style={{ padding: '3rem' }}>
-            📭 Aucun article — vérifie ta watchlist + positions ouvertes.
-          </div>
+          <EmptyState
+            icon="📰"
+            title="Aucun article"
+            desc="Pas de news pour ces filtres. Élargis l'horizon, retire le filtre ticker, ou vérifie que ta watchlist + positions ouvertes ne sont pas vides."
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {filtered.map(a => (

@@ -7,64 +7,35 @@
  *
  * 100 % données existantes (no IA, no API externe). Endpoint /api/ticker_analysis/{ticker}.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { addPriceAlert, fetchTickerAnalysis } from '../api/client.js';
-import {
-  useAddNote,
-  useAddToWatchlist,
-  useDeleteNote,
-  useNews,
-  useNotes,
-  useSecFilings,
-  useUpdateNote,
-} from '../hooks/useApi.js';
 import { fmtMarketCap, fmtNum, fmtPct } from '../utils/format.js';
 import PeerComparison from './PeerComparison.jsx';
 import TickerPriceChart from './common/TickerPriceChart.jsx';
 import TitanScoreChart from './common/TitanScoreChart.jsx';
 import TradingViewWidget from './common/TradingViewWidget.jsx';
 
-const FLAG_PALETTE = {
-  ok:     { bg: 'rgba(34,197,94,0.15)',  fg: '#4ade80', border: 'rgba(34,197,94,0.5)'  },
-  warn:   { bg: 'rgba(251,191,36,0.15)', fg: '#fbbf24', border: 'rgba(251,191,36,0.5)' },
-  danger: { bg: 'rgba(248,113,113,0.15)',fg: '#f87171', border: 'rgba(248,113,113,0.5)' },
-  info:   { bg: 'rgba(96,165,250,0.12)', fg: '#60a5fa', border: 'rgba(96,165,250,0.45)' },
-};
+// Sections extraites dans tickerAnalysis/* pour découper ce fichier.
+import NewsSection from './tickerAnalysis/NewsSection.jsx';
+import NotesSection from './tickerAnalysis/NotesSection.jsx';
+import SecFilingsSection from './tickerAnalysis/SecFilingsSection.jsx';
 
-// Lot 16 — palette pour les Factor Grades (lettres A+/A/B+/B/C+/C/D/F).
-const GRADE_PALETTE = {
-  'A+': { bg: 'rgba(34,197,94,0.20)',  fg: '#22c55e' },
-  'A':  { bg: 'rgba(34,197,94,0.15)',  fg: '#4ade80' },
-  'B+': { bg: 'rgba(132,204,22,0.18)', fg: '#a3e635' },
-  'B':  { bg: 'rgba(132,204,22,0.12)', fg: '#bef264' },
-  'C+': { bg: 'rgba(251,191,36,0.18)', fg: '#fbbf24' },
-  'C':  { bg: 'rgba(251,191,36,0.12)', fg: '#fcd34d' },
-  'D':  { bg: 'rgba(248,113,113,0.15)',fg: '#fb7185' },
-  'F':  { bg: 'rgba(248,113,113,0.20)',fg: '#f87171' },
-  'N/A':{ bg: 'rgba(148,163,184,0.10)',fg: 'var(--text-muted)' },
-};
-
-// Quant Rating (TITAN composite mapping).
-const RATING_LABEL = {
-  STRONG_BUY:   { label: 'STRONG BUY',   bg: 'rgba(34,197,94,0.20)',  fg: '#22c55e' },
-  BUY:          { label: 'BUY',          bg: 'rgba(132,204,22,0.18)', fg: '#a3e635' },
-  HOLD:         { label: 'HOLD',         bg: 'rgba(251,191,36,0.16)', fg: '#fbbf24' },
-  SELL:         { label: 'SELL',         bg: 'rgba(251,113,113,0.18)',fg: '#fb7185' },
-  STRONG_SELL:  { label: 'STRONG SELL',  bg: 'rgba(248,113,113,0.22)',fg: '#f87171' },
-  'N/A':        { label: 'N/A',          bg: 'rgba(148,163,184,0.12)',fg: 'var(--text-muted)' },
-};
-
-const DIVIDEND_LEVEL_TONE = {
-  VERY_SAFE: '#22c55e', SAFE: '#4ade80', MODERATE: '#fbbf24',
-  RISKY: '#fb7185', UNSAFE: '#f87171',
-  NO_DIVIDEND: 'var(--text-muted)', INSUFFICIENT_DATA: 'var(--text-muted)',
-};
-
-const SURPRISE_LEVEL_TONE = {
-  STRONG_BEAT: '#22c55e', BEAT: '#4ade80', INLINE: 'var(--text-muted)',
-  MISS: '#fb7185', STRONG_MISS: '#f87171', INSUFFICIENT_DATA: 'var(--text-muted)',
-};
+// Constantes (palettes, mappings) — source unique tickerAnalysis/constants.js
+import {
+  BUY_SIGNAL_PALETTE,
+  DIVIDEND_LEVEL_TONE,
+  ENTRY_RECO_PALETTE,
+  FLAG_PALETTE,
+  GRADE_PALETTE,
+  MODAL_TABS,
+  RATING_LABEL,
+  SURPRISE_LEVEL_TONE,
+  THESIS_PALETTE,
+} from './tickerAnalysis/constants';
+import { Grid, KV, Section } from './tickerAnalysis/Layout';
+import { pctToneSigned } from './tickerAnalysis/helpers';
 
 function GradeBadge({ grade }) {
   const p = GRADE_PALETTE[grade] || GRADE_PALETTE['N/A'];
@@ -150,17 +121,6 @@ function BullBearCases({ cases }) {
 }
 
 // Lot 18 — Big BUY badge prominent (couleur + icône + sizing).
-const BUY_SIGNAL_PALETTE = {
-  STRONG_BUY:        { bg: 'rgba(34,197,94,0.22)',  fg: '#22c55e', icon: '🟢🟢', big: true },
-  BUY:               { bg: 'rgba(132,204,22,0.20)', fg: '#84cc16', icon: '🟢',   big: true },
-  WATCH:             { bg: 'rgba(251,191,36,0.18)', fg: '#fbbf24', icon: '👁️',   big: false },
-  EARNINGS_BLACKOUT: { bg: 'rgba(248,113,113,0.20)',fg: '#f87171', icon: '⏸️',   big: false },
-  CHEAP_JUNK:        { bg: 'rgba(248,113,113,0.20)',fg: '#f87171', icon: '⚠️',   big: false },
-  FALLING_KNIFE:     { bg: 'rgba(248,113,113,0.20)',fg: '#f87171', icon: '🔻',   big: false },
-  SKIP:              { bg: 'rgba(148,163,184,0.10)',fg: 'var(--text-muted)', icon: '—', big: false },
-  NO_DATA:           { bg: 'rgba(148,163,184,0.08)',fg: 'var(--text-muted)', icon: '?', big: false },
-};
-
 function BuySignalBadge({ signal }) {
   if (!signal || !signal.verdict) return null;
   const p = BUY_SIGNAL_PALETTE[signal.verdict] || BUY_SIGNAL_PALETTE.SKIP;
@@ -241,17 +201,6 @@ function EarningsBadge({ days, date }) {
 // ─────────────────────────────────────────────────────────────────
 // EntryPlan — plan d'achat fractionné (issu de /api/ticker_analysis)
 // ─────────────────────────────────────────────────────────────────
-const ENTRY_RECO_PALETTE = {
-  WAIT_PULLBACK: { bg: 'rgba(248,113,113,0.18)', fg: '#f87171', icon: '⏸️',
-                   label: 'Wait pullback' },
-  SPLIT_3:       { bg: 'rgba(251,191,36,0.18)',  fg: '#fbbf24', icon: '📊',
-                   label: 'Entry fractionnée (3 tranches)' },
-  SPLIT_2:       { bg: 'rgba(132,204,22,0.16)',  fg: '#a3e635', icon: '⚖️',
-                   label: 'Entry fractionnée (2 tranches)' },
-  MARKET_FULL:   { bg: 'rgba(34,197,94,0.18)',   fg: '#22c55e', icon: '🟢',
-                   label: 'Market — full size' },
-};
-
 function EntryPlanSection({ plan, ticker }) {
   const [pendingTier, setPendingTier] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -386,17 +335,6 @@ function EntryPlanSection({ plan, ticker }) {
 
 
 // Phase 2 SL/TP — thesis_stop fondamental.
-const THESIS_PALETTE = {
-  INTACT:  { bg: 'rgba(34,197,94,0.16)',   fg: '#22c55e', icon: '🟢',
-             label: 'Thèse intacte' },
-  WARN:    { bg: 'rgba(251,191,36,0.18)',  fg: '#fbbf24', icon: '⚠️',
-             label: 'Thèse en alerte' },
-  BROKEN:  { bg: 'rgba(248,113,113,0.20)', fg: '#f87171', icon: '🔴',
-             label: 'Thèse cassée — exit recommandé' },
-  NO_DATA: { bg: 'rgba(148,163,184,0.10)', fg: 'var(--text-muted)', icon: '?',
-             label: 'Pas d\'entry scores' },
-};
-
 function ThesisStatusPanel({ thesis }) {
   if (!thesis || !thesis.status) return null;
   const p = THESIS_PALETTE[thesis.status] || THESIS_PALETTE.NO_DATA;
@@ -452,520 +390,12 @@ function FlagBadge({ flag }) {
   );
 }
 
-function Section({ title, children }) {
-  return (
-    <div style={{ marginBottom: '0.8rem' }}>
-      <h3 style={{
-        fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.08em',
-        textTransform: 'uppercase', color: 'var(--text-muted)',
-        marginBottom: '0.4rem', borderBottom: '1px solid var(--border)',
-        paddingBottom: '0.25rem',
-      }}>{title}</h3>
-      {children}
-    </div>
-  );
-}
+// Section / KV / Grid / pctToneSigned déplacés dans tickerAnalysis/Layout.jsx
+// FORM_TONE déplacé dans tickerAnalysis/constants.js
 
-function KV({ label, value, hint, tone }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-      <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)',
-                     letterSpacing: '0.03em' }}>{label}</span>
-      <span style={{
-        fontSize: '0.85rem', fontFamily: 'monospace', fontWeight: 600,
-        color: tone || 'var(--text-primary)',
-      }} title={hint || ''}>{value}</span>
-    </div>
-  );
-}
-
-function Grid({ children, cols = 4 }) {
-  return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-      gap: '0.6rem 1rem',
-    }}>{children}</div>
-  );
-}
-
-function pctToneSigned(v) {
-  if (v == null || !Number.isFinite(v)) return 'var(--text-muted)';
-  return v >= 0 ? 'var(--success)' : 'var(--danger)';
-}
-
-function pctToneFromGoodness(v, goodHigh = true) {
-  if (v == null || !Number.isFinite(v)) return 'var(--text-muted)';
-  return goodHigh ? (v >= 0 ? '#4ade80' : '#f87171') : (v <= 0 ? '#4ade80' : '#f87171');
-}
-
-// Form palette pour les filings SEC.
-const FORM_TONE = {
-  '10-K':   { bg: 'rgba(34,197,94,0.18)',  fg: '#4ade80', icon: '📘' },
-  '10-K/A': { bg: 'rgba(34,197,94,0.12)',  fg: '#4ade80', icon: '📘' },
-  '10-Q':   { bg: 'rgba(132,204,22,0.16)', fg: '#a3e635', icon: '📗' },
-  '10-Q/A': { bg: 'rgba(132,204,22,0.12)', fg: '#a3e635', icon: '📗' },
-  '8-K':    { bg: 'rgba(251,191,36,0.18)', fg: '#fbbf24', icon: '⚡' },
-  '8-K/A':  { bg: 'rgba(251,191,36,0.12)', fg: '#fbbf24', icon: '⚡' },
-  '4':      { bg: 'rgba(168,85,247,0.16)', fg: '#c084fc', icon: '🏛️' },
-  '4/A':    { bg: 'rgba(168,85,247,0.12)', fg: '#c084fc', icon: '🏛️' },
-  '13F-HR': { bg: 'rgba(96,165,250,0.16)', fg: '#60a5fa', icon: '🐋' },
-  'DEF 14A':{ bg: 'rgba(148,163,184,0.16)', fg: 'var(--text-muted)', icon: '🗳️' },
-  'S-1':    { bg: 'rgba(248,113,113,0.16)', fg: '#fb7185', icon: '🚀' },
-  '20-F':   { bg: 'rgba(34,197,94,0.16)',   fg: '#4ade80', icon: '🌐' },
-};
-
-function SecFilingsSection({ ticker }) {
-  const [formFilter, setFormFilter] = useState('all');
-  const filingsQ = useSecFilings(ticker, 50);
-  const data = filingsQ.data || {};
-  const filings = data.filings || [];
-
-  const filtered = useMemo(() => {
-    if (formFilter === 'all') return filings;
-    if (formFilter === 'reports') {
-      return filings.filter(f => /^10-[KQ]/.test(f.form));
-    }
-    if (formFilter === 'events') {
-      return filings.filter(f => /^8-K/.test(f.form));
-    }
-    if (formFilter === 'insider') {
-      return filings.filter(f => /^4/.test(f.form));
-    }
-    return filings;
-  }, [filings, formFilter]);
-
-  return (
-    <Section title={`📂 Filings SEC EDGAR (${data.n_filings ?? 0})`}>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap',
-                    marginBottom: 8, alignItems: 'center' }}>
-        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-          Filtre :
-        </span>
-        {[
-          { id: 'all',     label: 'Tout' },
-          { id: 'reports', label: '10-K/Q' },
-          { id: 'events',  label: '8-K' },
-          { id: 'insider', label: 'Insider' },
-        ].map(f => (
-          <button key={f.id}
-                  type="button"
-                  onClick={() => setFormFilter(f.id)}
-                  className={`scan-filter-btn ${formFilter === f.id ? 'active' : ''}`}
-                  style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem' }}>
-            {f.label}
-          </button>
-        ))}
-        {data.cik && (
-          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)',
-                         marginLeft: 'auto', fontFamily: 'monospace' }}>
-            CIK {data.cik}
-          </span>
-        )}
-      </div>
-
-      {filingsQ.isLoading && (
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)',
-                      padding: '0.5rem' }}>
-          Chargement filings…
-        </div>
-      )}
-
-      {data.error && (
-        <div style={{
-          padding: '0.6rem', borderRadius: 6, fontSize: '0.78rem',
-          background: 'rgba(248,113,113,0.08)', color: '#fb7185',
-          border: '1px solid rgba(248,113,113,0.3)',
-        }}>
-          ⚠️ {data.error === 'cik_unknown'
-            ? "Ticker introuvable dans l'index SEC EDGAR."
-            : data.error}
-        </div>
-      )}
-
-      {!filingsQ.isLoading && filtered.length === 0 && !data.error && (
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)',
-                      padding: '0.5rem' }}>
-          📭 Aucun filing pour ce filtre.
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {filtered.map(f => {
-          const meta = FORM_TONE[f.form] || {
-            bg: 'rgba(148,163,184,0.10)', fg: 'var(--text-muted)', icon: '📄',
-          };
-          return (
-            <a key={f.accession + f.form}
-               href={f.url} target="_blank" rel="noopener noreferrer"
-               style={{
-                 display: 'flex', alignItems: 'center', gap: 10,
-                 padding: '0.4rem 0.7rem',
-                 background: 'var(--bg-tertiary)',
-                 borderRadius: 5,
-                 border: '1px solid var(--border)',
-                 textDecoration: 'none', color: 'inherit',
-                 transition: 'border-color 0.15s, background 0.15s',
-               }}
-               onMouseEnter={e => {
-                 e.currentTarget.style.borderColor = 'var(--accent-primary)';
-               }}
-               onMouseLeave={e => {
-                 e.currentTarget.style.borderColor = 'var(--border)';
-               }}>
-              <span style={{
-                fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.04em',
-                padding: '0.2rem 0.5rem', borderRadius: 4,
-                background: meta.bg, color: meta.fg,
-                minWidth: 78, textAlign: 'center', fontFamily: 'monospace',
-              }}>
-                {meta.icon} {f.form}
-              </span>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                {f.form_label}
-              </span>
-              <span style={{ marginLeft: 'auto', display: 'flex', gap: 12,
-                             alignItems: 'center', fontSize: '0.74rem' }}>
-                <span style={{ fontFamily: 'monospace', color: 'var(--text-main)' }}>
-                  {f.date}
-                </span>
-                <span style={{ color: 'var(--text-muted)', minWidth: 60,
-                               textAlign: 'right' }}>
-                  {f.days_ago === 0 ? "auj." : `il y a ${f.days_ago}j`}
-                </span>
-                <span style={{ color: 'var(--accent-primary)', fontSize: '0.85rem' }}>
-                  ↗
-                </span>
-              </span>
-            </a>
-          );
-        })}
-      </div>
-    </Section>
-  );
-}
-
-function relTime(iso) {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    const diffMs = Date.now() - d.getTime();
-    const m = Math.round(diffMs / 60_000);
-    if (m < 60)  return `il y a ${m}min`;
-    const h = Math.round(m / 60);
-    if (h < 24)  return `il y a ${h}h`;
-    const j = Math.round(h / 24);
-    return `il y a ${j}j`;
-  } catch { return iso; }
-}
-
-function NewsSection({ ticker }) {
-  const [days, setDays] = useState(14);
-  const newsQ = useNews(ticker, days);
-  const data = newsQ.data || {};
-  const articles = data.articles || [];
-
-  return (
-    <Section title={`📰 News (${data.n_articles ?? 0})`}>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10,
-                    justifyContent: 'flex-end', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-          Fenêtre :
-        </span>
-        {[7, 14, 30].map(d => (
-          <button key={d} type="button"
-                  onClick={() => setDays(d)}
-                  className={`scan-filter-btn ${days === d ? 'active' : ''}`}
-                  style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem' }}>
-            {d}j
-          </button>
-        ))}
-        {data.cached && (
-          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)',
-                         marginLeft: 6 }} title="Servi depuis le cache 1h">
-            ⚡ cache
-          </span>
-        )}
-      </div>
-
-      {newsQ.isLoading && (
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)',
-                      padding: '1rem', textAlign: 'center' }}>
-          Chargement news…
-        </div>
-      )}
-
-      {data.error && (
-        <div style={{
-          padding: '0.7rem', borderRadius: 6, fontSize: '0.78rem',
-          background: 'rgba(248,113,113,0.08)', color: '#fb7185',
-          border: '1px solid rgba(248,113,113,0.3)',
-        }}>
-          ⚠️ {data.error}
-          {data.error.includes('FINNHUB_API_KEY') && (
-            <div style={{ marginTop: 4, fontSize: '0.7rem',
-                          color: 'var(--text-muted)' }}>
-              Configure <code>FINNHUB_API_KEY</code> dans <code>backend/.env</code> puis
-              redémarre <code>swing-api.service</code>.
-            </div>
-          )}
-        </div>
-      )}
-
-      {!newsQ.isLoading && articles.length === 0 && !data.error && (
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)',
-                      padding: '1rem', textAlign: 'center' }}>
-          📭 Aucune news sur les {days} derniers jours.
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {articles.map(a => (
-          <a key={a.id || a.url}
-             href={a.url} target="_blank" rel="noopener noreferrer"
-             style={{
-               display: 'flex', gap: 10, padding: '0.65rem 0.8rem',
-               background: 'var(--bg-tertiary)', borderRadius: 6,
-               border: '1px solid var(--border)',
-               textDecoration: 'none', color: 'inherit',
-               transition: 'background 0.15s, border-color 0.15s',
-             }}
-             onMouseEnter={e => {
-               e.currentTarget.style.borderColor = 'var(--accent-primary)';
-             }}
-             onMouseLeave={e => {
-               e.currentTarget.style.borderColor = 'var(--border)';
-             }}>
-            {a.image && (
-              <img src={a.image} alt=""
-                   loading="lazy"
-                   onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                   style={{
-                     width: 64, height: 48, objectFit: 'cover',
-                     borderRadius: 4, flexShrink: 0,
-                   }} />
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: '0.85rem', fontWeight: 600, lineHeight: 1.35,
-                color: 'var(--text-main)',
-              }}>
-                {a.headline}
-              </div>
-              {a.summary && (
-                <div style={{
-                  fontSize: '0.74rem', color: 'var(--text-muted)',
-                  marginTop: 3, lineHeight: 1.4,
-                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                }}>
-                  {a.summary}
-                </div>
-              )}
-              <div style={{
-                fontSize: '0.66rem', color: 'var(--text-muted)',
-                marginTop: 4, display: 'flex', gap: 8, alignItems: 'center',
-              }}>
-                {a.source && (
-                  <span style={{
-                    fontWeight: 700, color: 'var(--accent-primary)',
-                  }}>
-                    {a.source}
-                  </span>
-                )}
-                {a.datetime && <span>· {relTime(a.datetime)}</span>}
-                {a.category && (
-                  <span style={{
-                    border: '1px solid var(--border)', borderRadius: 3,
-                    padding: '0 5px', textTransform: 'capitalize',
-                  }}>
-                    {a.category}
-                  </span>
-                )}
-              </div>
-            </div>
-          </a>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function NotesSection({ ticker }) {
-  const notesQ    = useNotes(ticker);
-  const addMut    = useAddNote();
-  const updateMut = useUpdateNote();
-  const deleteMut = useDeleteNote();
-  const watchMut  = useAddToWatchlist();
-
-  const [draft, setDraft] = useState('');
-  const [editing, setEditing] = useState(null); // { id, body } | null
-
-  const notes = notesQ.data?.notes || [];
-
-  const submitNew = (e) => {
-    e.preventDefault();
-    const body = draft.trim();
-    if (!body) return;
-    addMut.mutate({ ticker, body }, {
-      onSuccess: (res) => { if (res?.ok !== false) setDraft(''); },
-    });
-  };
-
-  const saveEdit = () => {
-    if (!editing) return;
-    const body = (editing.body || '').trim();
-    if (!body) return;
-    updateMut.mutate({ id: editing.id, body }, {
-      onSuccess: (res) => { if (res?.ok !== false) setEditing(null); },
-    });
-  };
-
-  const remove = (note) => {
-    if (!window.confirm('Supprimer cette note ?')) return;
-    deleteMut.mutate({ id: note.id, ticker });
-  };
-
-  const addToWatch = () => {
-    watchMut.mutate({ ticker });
-  };
-
-  return (
-    <Section title={`📝 Notes (${notes.length})`}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-        <button
-          type="button"
-          className="scan-filter-btn"
-          onClick={addToWatch}
-          disabled={watchMut.isPending}
-          style={{ fontSize: '0.7rem' }}
-          title="Ajouter ce ticker à la watchlist"
-        >
-          {watchMut.isPending ? '⏳' : '👁'} Watchlist
-        </button>
-      </div>
-
-      <form onSubmit={submitNew} style={{ marginBottom: 10 }}>
-        <textarea
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          placeholder="Thèse, observations, rappel earnings… (markdown libre)"
-          rows={3}
-          style={{
-            width: '100%', resize: 'vertical', fontFamily: 'inherit',
-            padding: '0.55rem 0.7rem', fontSize: '0.82rem',
-            background: 'var(--bg-tertiary)', color: 'var(--text-main)',
-            border: '1px solid var(--border)', borderRadius: 6,
-          }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-          <button
-            type="submit"
-            className="action-btn"
-            disabled={addMut.isPending || !draft.trim()}
-            style={{ padding: '0.4rem 0.85rem', fontSize: '0.78rem' }}
-          >
-            {addMut.isPending ? '⏳' : '+ Ajouter note'}
-          </button>
-        </div>
-      </form>
-
-      {notesQ.isLoading && (
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Chargement notes…
-        </div>
-      )}
-
-      {notes.length === 0 && !notesQ.isLoading && (
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)',
-                      textAlign: 'center', padding: '1rem' }}>
-          📭 Aucune note pour ce ticker.
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {notes.map(n => (
-          <div key={n.id} style={{
-            background: 'var(--bg-tertiary)', padding: '0.55rem 0.7rem',
-            borderRadius: 6, border: '1px solid var(--border)',
-            fontSize: '0.82rem',
-          }}>
-            {editing?.id === n.id ? (
-              <>
-                <textarea
-                  value={editing.body}
-                  onChange={e => setEditing(s => ({ ...s, body: e.target.value }))}
-                  rows={3}
-                  style={{
-                    width: '100%', resize: 'vertical', fontFamily: 'inherit',
-                    padding: '0.4rem 0.55rem', fontSize: '0.82rem',
-                    background: 'var(--panel-bg)', color: 'var(--text-main)',
-                    border: '1px solid var(--border)', borderRadius: 4,
-                  }}
-                />
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end',
-                              marginTop: 6 }}>
-                  <button type="button" className="scan-filter-btn"
-                          onClick={() => setEditing(null)}
-                          style={{ fontSize: '0.7rem' }}>
-                    Annuler
-                  </button>
-                  <button type="button" className="action-btn"
-                          onClick={saveEdit}
-                          disabled={updateMut.isPending || !editing.body.trim()}
-                          style={{ fontSize: '0.7rem', padding: '0.3rem 0.7rem' }}>
-                    {updateMut.isPending ? '⏳' : '💾 Enregistrer'}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                              lineHeight: 1.45, marginBottom: 6 }}>
-                  {n.body}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between',
-                              alignItems: 'center', fontSize: '0.66rem',
-                              color: 'var(--text-muted)' }}>
-                  <span>
-                    {n.updated_at?.slice(0, 16)?.replace('T', ' ') || '—'}
-                    {n.updated_at !== n.created_at && ' (modifiée)'}
-                  </span>
-                  <span style={{ display: 'flex', gap: 4 }}>
-                    <button type="button"
-                            className="scan-filter-btn"
-                            onClick={() => setEditing({ id: n.id, body: n.body })}
-                            style={{ fontSize: '0.65rem', padding: '0.15rem 0.45rem' }}>
-                      ✎
-                    </button>
-                    <button type="button"
-                            className="scan-filter-btn"
-                            onClick={() => remove(n)}
-                            style={{ fontSize: '0.65rem', padding: '0.15rem 0.45rem',
-                                     color: 'var(--danger)',
-                                     borderColor: 'rgba(239,68,68,0.3)' }}>
-                      🗑
-                    </button>
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
 
 // ─── Onglets ─────────────────────────────────────────────────────
-const MODAL_TABS = [
-  { id: 'overview',     icon: '🎯', label: 'Aperçu' },
-  { id: 'fundamentals', icon: '💰', label: 'Fondamentaux' },
-  { id: 'action',       icon: '📈', label: 'Action & catalyseurs' },
-  { id: 'peers',        icon: '🤝', label: 'Peers & analystes' },
-  { id: 'news',         icon: '📰', label: 'News' },
-  { id: 'notes',        icon: '📝', label: 'Notes' },
-];
-
+// MODAL_TABS déplacé dans tickerAnalysis/constants.js
 function TabButton({ tab, active, onClick }) {
   return (
     <button
@@ -991,19 +421,28 @@ function TabButton({ tab, active, onClick }) {
 }
 
 export default function TickerAnalysisModal({ ticker, onClose }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Hack idiomatique : on stocke le ticker précédent dans un state, et on
+  // détecte le changement *pendant le render* pour reset le tab — sans
+  // useEffect (évite cascading render). Pattern recommandé par la doc React.
   const [tab, setTab] = useState('overview');
+  const [prevTicker, setPrevTicker] = useState(ticker);
+  if (prevTicker !== ticker) {
+    setPrevTicker(ticker);
+    setTab('overview');
+  }
   const [chartMode, setChartMode] = useState('compact'); // 'compact' | 'tradingview'
 
-  useEffect(() => {
-    if (!ticker) return;
-    setLoading(true); setError(null); setData(null); setTab('overview');
-    fetchTickerAnalysis(ticker)
-      .then(d => { setData(d); setLoading(false); })
-      .catch(e => { setError(e?.message || String(e)); setLoading(false); });
-  }, [ticker]);
+  // Migration vers React Query : annule le fetch précédent au changement de
+  // ticker, pas de cascade setState dans useEffect.
+  const analysisQ = useQuery({
+    queryKey: ['ticker_analysis', ticker],
+    queryFn: () => fetchTickerAnalysis(ticker),
+    enabled: !!ticker,
+    staleTime: 60_000,
+  });
+  const data = analysisQ.data;
+  const loading = analysisQ.isLoading;
+  const error = analysisQ.isError ? (analysisQ.error?.message || String(analysisQ.error)) : null;
 
   // ESC pour fermer
   useEffect(() => {

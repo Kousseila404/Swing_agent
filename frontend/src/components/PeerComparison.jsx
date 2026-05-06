@@ -7,7 +7,7 @@
  *
  * Lazy fetch : quand le parent monte le composant. Re-fetch quand `ticker` change.
  */
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { fetchPeers } from '../api/client.js';
 import { fmtMarketCap, fmtNum, fmtPct } from '../utils/format.js';
@@ -35,21 +35,20 @@ function toneFor(value, median, goodHigh, ignoreNegative) {
 }
 
 export default function PeerComparison({ ticker }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!ticker) return;
-    setLoading(true); setError(null); setData(null);
-    fetchPeers(ticker, 5)
-      .then((d) => { setData(d); setLoading(false); })
-      .catch((e) => { setError(e?.message || String(e)); setLoading(false); });
-  }, [ticker]);
+  // Migration vers React Query : annule le fetch précédent au changement de
+  // ticker, partage le cache avec d'autres consommateurs, et supprime les
+  // useEffect/setState manuels (pattern du reste du projet).
+  const peersQ = useQuery({
+    queryKey: ['peers', ticker, 5],
+    queryFn: () => fetchPeers(ticker, 5),
+    enabled: !!ticker,
+    staleTime: 5 * 60_000,
+  });
 
   if (!ticker) return null;
-  if (loading) return <div style={{ padding: '0.5rem 0', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Chargement peers…</div>;
-  if (error) return <div style={{ padding: '0.5rem 0', fontSize: '0.7rem', color: '#fbbf24' }}>Peers indisponibles : {error}</div>;
+  if (peersQ.isLoading) return <div style={{ padding: '0.5rem 0', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Chargement peers…</div>;
+  if (peersQ.isError) return <div style={{ padding: '0.5rem 0', fontSize: '0.7rem', color: '#fbbf24' }}>Peers indisponibles : {peersQ.error?.message || 'erreur'}</div>;
+  const data = peersQ.data;
   if (!data) return null;
 
   const peers = data.peers || [];

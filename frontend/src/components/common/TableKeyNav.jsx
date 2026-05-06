@@ -19,7 +19,7 @@ const isInput = () => {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 };
 
-export default function TableKeyNav({ onOpen, scope = 'document' }) {
+export default function TableKeyNav({ onOpen }) {
   const cursorIdxRef = useRef(0);
 
   useEffect(() => {
