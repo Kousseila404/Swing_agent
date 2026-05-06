@@ -186,6 +186,13 @@ class DrawdownCircuitBreaker:
     -3% → taille réduite à 50%
     -4% → pause totale 5 jours de trading
 
+    Phase 2 audit (2026-05-06) — peak_equity = max sur les `rolling_window`
+    dernières lectures (buffer FIFO), pas le pic absolu de l'historique. Sans
+    ça, un fat-finger 1-min ou un gap overnight anormal cale le peak à un
+    niveau aberrant et provoque ensuite un faux drawdown sur du trading
+    normal. Avec rolling_window=20, le pic est aged-out après ~20 cycles
+    (≈ 100 min en cron 5-min, ou 20 jours en cycle daily).
+
     Utilisation :
         cb = DrawdownCircuitBreaker(peak_equity)
         multiplier = cb.get_size_multiplier(current_equity)
@@ -193,15 +200,45 @@ class DrawdownCircuitBreaker:
             # skip new entries
     """
 
-    def __init__(self, peak_equity: float, pause_days: int = 5):
-        self.peak_equity = peak_equity
+    def __init__(
+        self,
+        peak_equity: float,
+        pause_days: int = 5,
+        rolling_window: int = 20,
+        equity_history: list[float] | None = None,
+    ):
         self.pause_days = pause_days
         self._pause_remaining = 0   # jours de pause restants
+        # Buffer FIFO pour le calcul du peak rolling. On seed avec peak_equity
+        # pour rétro-compatibilité (le caller passe historiquement le pic).
+        self._rolling_window = max(1, int(rolling_window))
+        if equity_history:
+            self._equity_history = [float(v) for v in equity_history if v and v > 0]
+        else:
+            self._equity_history = [float(peak_equity)] if peak_equity > 0 else []
+        # Trim au rolling_window au cas où on charge un historique plus long.
+        if len(self._equity_history) > self._rolling_window:
+            self._equity_history = self._equity_history[-self._rolling_window:]
+
+    @property
+    def peak_equity(self) -> float:
+        """Peak rolling sur les `_rolling_window` dernières lectures."""
+        if not self._equity_history:
+            return 0.0
+        return max(self._equity_history)
+
+    @peak_equity.setter
+    def peak_equity(self, value: float) -> None:
+        """Préserve l'API legacy : assigner peak_equity = X seed le buffer."""
+        if value and value > 0:
+            self._equity_history = [float(value)]
 
     def update(self, current_equity: float) -> None:
-        """Met à jour le peak et décrémente le compteur de pause."""
-        if current_equity > self.peak_equity:
-            self.peak_equity = current_equity
+        """Pousse l'equity courante dans le buffer rolling, décrémente pause."""
+        if current_equity is not None and current_equity > 0:
+            self._equity_history.append(float(current_equity))
+            if len(self._equity_history) > self._rolling_window:
+                self._equity_history.pop(0)
         if self._pause_remaining > 0:
             self._pause_remaining -= 1
 

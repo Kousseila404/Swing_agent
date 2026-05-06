@@ -98,12 +98,22 @@ def run_cycle() -> None:
     cb = get_circuit_breaker()
     if cb is None:
         _cb_saved = read_circuit_breaker_state()
+        # Phase 2 audit — restore le rolling buffer si dispo, sinon seed avec
+        # max(peak_persisté, current). Le peak n'est plus immutable : il
+        # vivra dans les `_rolling_window` lectures les plus récentes.
+        _hist = _cb_saved.get("equity_history") or []
+        _window = int(_cb_saved.get("rolling_window", 20) or 20)
         _peak = max(float(_cb_saved.get("peak_equity", 0) or 0), current_equity)
-        cb = DrawdownCircuitBreaker(peak_equity=_peak)
+        cb = DrawdownCircuitBreaker(
+            peak_equity=_peak,
+            rolling_window=_window,
+            equity_history=_hist if _hist else None,
+        )
         cb._pause_remaining = int(_cb_saved.get("pause_remaining", 0) or 0)
         set_circuit_breaker(cb)
         logger.info(
-            f"[CircuitBreaker] Initialisé — Peak equity : ${_peak:,.2f}"
+            f"[CircuitBreaker] Initialisé — Peak rolling : ${cb.peak_equity:,.2f} "
+            f"(window={_window}, n_history={len(cb._equity_history)})"
             + (f" | Pause restante : {cb._pause_remaining} cycle(s)" if cb._pause_remaining else "")
         )
     else:

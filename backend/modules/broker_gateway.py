@@ -481,22 +481,43 @@ class AlpacaBroker(BrokerGateway):
             order = client.submit_order(order_data=order_data)
             order_id  = str(order.id)
             filled_at = float(order.filled_avg_price or 0)
+            order_status = str(getattr(order, "status", "")).lower()
 
             logger.info(
                 f"[AlpacaBroker] Ordre soumis {scan.ticker} {scan.direction} "
-                f"×{scan.position_size} | ID={order_id} | status={order.status}"
+                f"×{scan.position_size} | ID={order_id} | status={order_status}"
             )
 
+            # Phase 2 audit (2026-05-06) — bracket parent fail-fast :
+            # si Alpaca renvoie immédiatement un statut terminal négatif, on
+            # NE journalise PAS un trade fantôme dans le CSV (avant : log
+            # systématique → lignes OPEN orphelines à nettoyer manuellement).
+            # On force aussi la cancellation des enfants au cas où.
+            terminal_failures = {"rejected", "canceled", "expired", "suspended"}
+            if order_status in terminal_failures:
+                logger.warning(
+                    f"[AlpacaBroker] Parent {order_id} a un statut terminal "
+                    f"négatif ({order_status}) — pas de log CSV ; tentative "
+                    f"cancellation enfants bracket."
+                )
+                self._cancel_bracket_children(scan.ticker)
+                return OrderResult(
+                    success=False,
+                    ticker=scan.ticker,
+                    order_id=order_id,
+                    message=f"Parent bracket rejeté : status={order_status}",
+                )
+
             # Journalise dans le CSV avec l'order_id Alpaca réel.
-            # Note : on log même si status=accepted/pending_new/new (fill pas encore
-            # confirmé). L'alpaca-sync réconciliera les fills/expiries a posteriori.
+            # Note : on log si status=accepted/pending_new/new/filled/partially_filled
+            # — l'alpaca-sync réconciliera les fills/expiries a posteriori.
             self._log_to_csv(scan, order_id, filled_at or scan.price)
 
             return OrderResult(
                 success=True,
                 ticker=scan.ticker,
                 order_id=order_id,
-                message=f"Ordre bracket Alpaca soumis — status={order.status}",
+                message=f"Ordre bracket Alpaca soumis — status={order_status}",
                 filled_at=filled_at,
             )
 

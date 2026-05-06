@@ -176,13 +176,19 @@ def set_circuit_breaker(cb: DrawdownCircuitBreaker) -> None:
 
 
 def save_cb_state(cb: DrawdownCircuitBreaker, multiplier: float) -> None:
-    """Persiste l'état du circuit breaker dans data/circuit_breaker_state.json."""
+    """Persiste l'état du circuit breaker dans data/circuit_breaker_state.json.
+
+    Phase 2 audit — sauve aussi `equity_history` (buffer rolling) pour que le
+    peak rolling survive aux restarts du tracker.
+    """
     try:
         state = {
             "peak_equity":    round(cb.peak_equity, 2),
             "pause_remaining": cb._pause_remaining,
             "size_multiplier": round(multiplier, 4),
             "is_paused":       cb.is_paused(),
+            "equity_history":  [round(v, 2) for v in getattr(cb, "_equity_history", [])],
+            "rolling_window":  getattr(cb, "_rolling_window", 20),
             "updated_at":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         CB_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)

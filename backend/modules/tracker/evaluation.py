@@ -397,6 +397,8 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
         except Exception as exc:
             logger.debug(f"[thesis_stop] Préfetch scored_universe échoué : {exc}")
 
+    n_stale_prices = 0
+    stale_tickers: list[str] = []
     for idx, row in open_trades.iterrows():
         ticker    = str(row["Ticker"]).strip().upper()
         entry     = float(row["Entry"])
@@ -413,6 +415,16 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
 
         current_price, df_hist = market_data.get(ticker, (None, None))
         if current_price is None:
+            # Phase 2 audit (2026-05-06) — stale price hard-warning : on ne
+            # peut PAS évaluer SL/TP avec un prix manquant. Avant, le `continue`
+            # était silencieux → la position passait le cycle sans contrôle.
+            # Maintenant on log + on track le ticker pour escalade.
+            n_stale_prices += 1
+            stale_tickers.append(ticker)
+            logger.warning(
+                f"[{ticker}] STALE PRICE — provider down ou ticker inconnu. "
+                f"SL/TP NON évalués ce cycle. Position laissée OPEN."
+            )
             continue
 
         # P&L du trade (positif = en profit, quelle que soit la direction)
@@ -782,5 +794,23 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             mark_price_alerts_check_run()
         except Exception as exc:
             logger.debug(f"[price_alerts] check intraday échoué : {exc}")
+
+    # Phase 2 audit — escalade prix stale : si plus de la moitié des positions
+    # n'ont pas de prix, c'est un problème provider global et non un ticker
+    # individuel ; alerte CRITICAL pour qu'un opérateur regarde immédiatement.
+    if n_stale_prices > 0:
+        n_open = len(open_trades)
+        ratio = n_stale_prices / max(1, n_open)
+        if ratio >= 0.5:
+            logger.critical(
+                f"[STALE PRICES] {n_stale_prices}/{n_open} positions sans prix "
+                f"({ratio*100:.0f}%) — provider down probable. Tickers: "
+                f"{','.join(stale_tickers[:10])}"
+            )
+        else:
+            logger.warning(
+                f"[STALE PRICES] {n_stale_prices}/{n_open} positions sans prix "
+                f"ce cycle — tickers : {','.join(stale_tickers[:10])}"
+            )
 
     return df, closed_count, modified_count
