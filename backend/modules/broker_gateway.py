@@ -70,6 +70,7 @@ def _entry_scores_dict(scan) -> dict[str, str]:
     attrs avant submit_order. Les trades manuels (/trade/add) n'ont pas ces
     attrs → retourne des chaînes vides (schéma CSV préservé, pas de None).
     """
+    conf = getattr(scan, "confidence_entry", None)
     return {
         "Titan_Score_Entry": _fmt_score(getattr(scan, "titan_score_entry",  None)),
         "Quality_Entry":     _fmt_score(getattr(scan, "quality_entry",      None)),
@@ -80,6 +81,8 @@ def _entry_scores_dict(scan) -> dict[str, str]:
         "Growth_Entry":      _fmt_score(getattr(scan, "growth_entry",       None)),
         "F_Score_Entry":     str(getattr(scan, "f_score_entry", "") or ""),
         "Tilt_Flags_Entry":  ",".join(getattr(scan, "tilt_flags_entry", []) or []),
+        # Phase 1 data hardening — confidence_score à l'entrée (entier 0-100).
+        "Confidence_Entry":  str(int(conf)) if isinstance(conf, (int, float)) and conf is not None else "",
     }
 
 

@@ -1,18 +1,27 @@
-"""Suggestion SL/TP σ-adaptive pour l'endpoint /recommendations.
+"""Niveaux SL/TP — refonte LT 2026-04-29 (philosophie Buffett).
 
-On dérive les niveaux à partir de la volatilité annualisée déjà calculée par
-le pipeline momentum (`volatility_pct`) — aucun I/O supplémentaire. La vol
-quotidienne = vol_annual / √252, rescalée sur un horizon Long-Term (~30 jours
-ouvrés) via √30 — convention sizing pour une position Quantamental tenue
-1-3 mois (audit 2026-04-23 : ancien horizon 5j incohérent avec MAX_HOLDING_DAYS
-et avec la thèse "convergence fondamentale").
+Ce module ne pilote PLUS la décision d'exit. Il fournit deux niveaux purement
+techniques destinés au broker (Alpaca bracket order exige un SL et un TP) :
+
+  - SL = catastrophe_floor : filet large (~3.5σ) anti black-swan (fraude,
+    bankruptcy, guerre). N'est PAS censé être touché en LT sain — la vraie
+    sortie est `lt_exit_policy.decide` (couche 2/3 : thèse cassée ou
+    survalorisation extrême). Buffett : « Risk comes from not knowing what
+    you're doing » → la qualité d'entrée (TITAN ≥ 80 + Support + F-Score)
+    EST le stop ; le floor est un dernier recours.
+
+  - TP = ceiling_cap : plafond de sanité contre outliers de vol (penny
+    σ 300 % → tp brut +1000 % absurde). Ne plafonne PAS les vrais winners
+    power-law. Le « vrai » TP est désormais une décision fondamentale prise
+    par lt_exit_policy quand le pilier Value chute fortement ou que la
+    valuation devient extrême — pas un % arbitraire.
 
 Formules :
   horizon_vol_pct = volatility_pct × √(holding_days / 252)
-  SL_pct = k_sl × horizon_vol_pct   (par défaut k_sl = 2 → ~95 % CI)
-  TP_pct = k_tp × horizon_vol_pct   (par défaut k_tp = 4 → RR 2:1)
+  SL_pct = K_SL × horizon_vol_pct   (K_SL = 3.5 → ~99.95 % CI normale)
+  TP_pct = K_TP × horizon_vol_pct   (K_TP = 6   → ratio 1.7:1 en σ pur)
 
-Fallback quand vol absente ou price ≤ 0 : −5 % / +15 % (fixed % legacy).
+Fallback quand vol absente ou price ≤ 0 : −10 % / +25 % (fixed % large).
 """
 from __future__ import annotations
 
@@ -24,28 +33,32 @@ import math
 _HOLDING_HORIZON_DAYS = 30
 _TRADING_DAYS_PER_YEAR = 252
 
-# Multiplicateurs σ — k_sl = 2 (~95 % CI normale), k_tp = 4 → RR cible 2:1.
-_K_SL = 2.0
-_K_TP = 4.0
+# Refonte 2026-04-29 — Multiplicateurs σ Buffett-LT.
+# K_SL = 3.5 (~99.95 % CI normale) — on accepte un drawdown profond plutôt
+# que de couper sur du bruit ; la vraie sortie est lt_exit_policy.
+# K_TP = 6 — laisse courir les winners ; le plafond est un anti-outlier, pas
+# un objectif. Le RR σ pur 1.7:1 est volontairement asymétrique : on n'a plus
+# besoin d'un RR 2:1 quand l'exit fondamental remplace le TP statique.
+_K_SL = 3.5
+_K_TP = 6.0
 
-# Fallback % fixe si vol indisponible (FMP stable sans history, ou série < 20 j).
-_FALLBACK_SL_PCT = 0.05   # −5 %
-_FALLBACK_TP_PCT = 0.15   # +15 %
+# Fallback % fixe si vol indisponible. Élargi (5→10 / 15→25 %) pour cohérence
+# avec la philosophie « catastrophe floor, pas anti-bruit ».
+_FALLBACK_SL_PCT = 0.10   # −10 %
+_FALLBACK_TP_PCT = 0.25   # +25 %
 
-# Bornes de sanité — calibrées pour horizon LT (30 j ouvrés). Évite des SL/TP
-# aberrants sur un outlier de vol (ex: penny stock σ annualisée 300 % → SL
-# à −100 % = absurde) tout en laissant respirer un hold 1-3 mois.
-# Recalibrage 2026-04-27 : SL max élargi à −30 %, TP max +100 %.
-# Recalibrage 2026-04-29 (P3 transition) : TP max élargi à +200 % pour ne plus
-# plafonner les vrais winners power-law (un name TITAN 90 sur 1-3 mois peut
-# délivrer +150 %). Filet conservé contre les outliers de vol (penny σ 300 %
-# → tp brut +412 % serait absurde). Pas de retrait complet du plafond tant que
-# thesis_stop n'a pas 20+ trades clos pour valider la sortie fondamentale.
-# Le ratio R/R cible reste 2:1 sur la zone non-clampée (k_tp/k_sl = 4/2).
-_MIN_SL_PCT = 0.04   # −4 % (stop minimum — un hold 2 mois mérite +3 % de corde)
-_MAX_SL_PCT = 0.30   # −30 % (garde-fou catastrophe LT — pas anti-bruit)
-_MIN_TP_PCT = 0.10   # +10 % (pas de TP ridicule sur un LT)
-_MAX_TP_PCT = 2.00   # +200 % (filet anti-outlier vol, mais ne plafonne plus les vrais winners)
+# Bornes de sanité — refonte 2026-04-29 (Buffett-LT).
+# SL : floor catastrophe → 35 % (était 30). Wide-net anti black-swan, pas
+# anti-correction ordinaire. La vraie sortie passe par lt_exit_policy.
+# TP : plafond élargi à 500 % pour ne plus jamais plafonner un winner LT
+# (Buffett : « Our favorite holding period is forever »). Le plafond n'existe
+# que pour empêcher l'envoi d'un bracket order absurde côté Alpaca sur un
+# ticker à σ 300 % annualisée. Le minimum SL/TP reste pour Alpaca (refus
+# d'un TP < entry × 1.001).
+_MIN_SL_PCT = 0.05   # −5 % (broker minimum — distance ≥ 0.5 % requise)
+_MAX_SL_PCT = 0.35   # −35 % (catastrophe floor élargi)
+_MIN_TP_PCT = 0.10   # +10 % (sanity broker)
+_MAX_TP_PCT = 5.00   # +500 % (plafond Alpaca uniquement, pas un objectif)
 
 
 def suggest_trade_levels(
@@ -63,7 +76,7 @@ def suggest_trade_levels(
       non déployé tant que l'UI ne le propose pas).
 
     Retourne None pour sl/tp si `price` invalide ; sinon 4 décimales.
-    `method` trace l'origine ("sigma_scaled" | "fixed_fallback") pour audit.
+    `method` trace l'origine ("catastrophe_floor" | "fixed_fallback") pour audit.
     """
     if price is None or not math.isfinite(price) or price <= 0:
         return {"sl": None, "tp": None, "sl_pct": None, "tp_pct": None, "method": "invalid_price"}
@@ -78,16 +91,16 @@ def suggest_trade_levels(
     )
 
     if vol_usable:
-        # Vol sur horizon swing = vol_annuelle × √(horizon / 252)
+        # Vol sur horizon LT = vol_annuelle × √(horizon / 252)
         horizon_vol_frac = (volatility_pct / 100.0) * math.sqrt(
             holding_days / _TRADING_DAYS_PER_YEAR
         )
         sl_pct = _K_SL * horizon_vol_frac
         tp_pct = _K_TP * horizon_vol_frac
-        # Clamp aux bornes de sanité
+        # Clamp aux bornes de sanité (catastrophe floor + ceiling)
         sl_pct = max(_MIN_SL_PCT, min(_MAX_SL_PCT, sl_pct))
         tp_pct = max(_MIN_TP_PCT, min(_MAX_TP_PCT, tp_pct))
-        method = "sigma_scaled"
+        method = "catastrophe_floor"  # ex sigma_scaled — exit primaire = lt_exit_policy
     else:
         sl_pct = _FALLBACK_SL_PCT
         tp_pct = _FALLBACK_TP_PCT

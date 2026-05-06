@@ -107,6 +107,11 @@ CSV_SCHEMA = [
     "Growth_Entry",      # Pillar G 0-100
     "F_Score_Entry",     # "8/9" — F-Score Piotroski absolu
     "Tilt_Flags_Entry",  # CSV des flags ex: "qarp,consistent" ou "cheap_junk"
+    # Phase 1 data hardening (2026-04-29) — confiance des inputs au moment de
+    # l'achat. Permet à lt_exit_policy de détecter une chute de confiance
+    # entre entrée et état courant : si on a acheté à 90 et qu'on est à 40
+    # aujourd'hui, c'est que les data sources se sont dégradées sur ce name.
+    "Confidence_Entry",  # 0-100 ex: "85"
 ]
 
 

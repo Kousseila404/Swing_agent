@@ -65,6 +65,7 @@ _COLUMN_TYPES: dict[str, str] = {
     "Growth_Entry":      "DOUBLE",
     "F_Score_Entry":     "VARCHAR",  # "8/9" format
     "Tilt_Flags_Entry":  "VARCHAR",  # CSV ex "qarp,consistent"
+    "Confidence_Entry":  "DOUBLE",   # 0-100 (data_confidence à l'entrée)
 }
 
 # Sécurise l'accès multi-thread (FastAPI peut appeler depuis plusieurs workers).

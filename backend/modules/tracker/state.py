@@ -48,6 +48,20 @@ PRICE_ALERTS_CHECK_INTERVAL_MIN = 5  # Intraday price_alerts : check toutes les 
                                       # Le cron daily 16:30 NY (run_monitor_alerts) reste
                                       # le filet pour les tickers hors-portefeuille.
 
+# Cooldowns par action LT (refonte 2026-04-29). Calibrés par sévérité :
+#   ADD_ON : 48h — suggérer un renfort 2× max par fenêtre, le marché bouge.
+#   TRIM : 24h — érosion de thèse, on alerte une fois par jour.
+#   EXIT_VALUATION : 24h — survalorisation persistante.
+#   EXIT_CATASTROPHE : 6h — vraie urgence, mais pas de spam intra-journée
+#     si le SL est touché à plusieurs reprises sur du gap intraday.
+LT_DECISION_COOLDOWN_HOURS = {
+    "ADD_ON":            48,
+    "TRIM":              24,
+    "EXIT_THESIS":       THESIS_ALERT_COOLDOWN_HOURS,  # 24h, aligné rétrocompat thesis_break
+    "EXIT_VALUATION":    24,
+    "EXIT_CATASTROPHE":   6,
+}
+
 
 # ─────────────────────────────────────────────────────────────────
 # INITIALISATION DE L'ESPACE DE TRAVAIL

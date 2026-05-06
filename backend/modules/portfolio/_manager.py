@@ -312,6 +312,13 @@ class PortfolioManager:
             weights, vol_diag, eq_fallback = compute_weights(priced, scored=scored_view)
             hrp_diag = {"applied": False, "reason": "weighting_method=risk_parity"}
 
+        # 5b. Tilt Buffett-style — concentre sur les compounders (Q≥85+P≥8 → ×1.5),
+        #     dilue les juniors (Q<50 ou P<4 → ×0.7). S'applique APRÈS risk-parity
+        #     (qui équilibre la vol) et AVANT les caps (qui borneront les excès).
+        #     Refonte 2026-04-29 (étape 3).
+        from ._sizing_buffett import apply_buffett_tilt
+        weights, buffett_tilt_diag = apply_buffett_tilt(weights, scored_view)
+
         # 6. Sector cap 30 % — après risk parity, avant vol-targeting.
         sector_by_ticker = {
             t: (scored_view.get(t) or {}).get("sector") or "Unknown"
@@ -599,6 +606,7 @@ class PortfolioManager:
                 1 for d in vol_diag.values()
                 if d.get("method") == "portfolio_median_impute"
             ),
+            "buffett_tilt":           buffett_tilt_diag,
             "sector_cap":             sector_cap_diag,
             "per_name_cap":           per_name_diag,
             "correlation_check":      corr_diag,

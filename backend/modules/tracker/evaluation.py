@@ -27,9 +27,14 @@ from filelock import FileLock
 import config
 from modules.alerter import (
     send_close_alert,
+    send_lt_decision_alert,
     send_price_alert_fired,
     send_thesis_break_alert,
 )
+from modules import lt_exit_policy
+from modules.data_confidence import compute_confidence
+from modules.fundamentals_levels import compute_fundamental_levels
+from modules.portfolio._sizing_buffett import _tilt_factor
 from modules.thesis_stop import compute_sector_drift_baseline, compute_thesis_status
 from modules.utils import CSV_LOCK_PATH, CSV_PATH, ensure_csv_schema
 
@@ -37,6 +42,7 @@ from .market import get_current_price
 from .state import (
     ALERT_COOLDOWN_PATH,
     DATE_FMT,
+    LT_DECISION_COOLDOWN_HOURS,
     PRICE_ALERTS_CHECK_INTERVAL_MIN,
     SL_ALERT_COOLDOWN_HOURS,
     THESIS_ALERT_COOLDOWN_HOURS,
@@ -155,6 +161,45 @@ def mark_thesis_alert_sent(ticker: str) -> None:
             with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
                 state = json.load(fh)
         state.setdefault("thesis_break", {})[ticker] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ALERT_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(ALERT_COOLDOWN_PATH, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2)
+    except Exception:
+        pass
+
+
+def can_send_lt_decision_alert(ticker: str, action: str) -> bool:
+    """Cooldown par (ticker, action LT). Refonte 2026-04-29.
+
+    Granularité par action : on peut alerter EXIT_CATASTROPHE même si on a
+    récemment alerté ADD_ON (état changé radicalement).
+    """
+    cooldown_h = LT_DECISION_COOLDOWN_HOURS.get(action)
+    if cooldown_h is None:
+        return False  # action sans cooldown explicite (HOLD, NO_DATA) → pas d'alerte
+    try:
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+            last_str = state.get("lt_decision", {}).get(action, {}).get(ticker, "")
+            if last_str:
+                last_dt = datetime.strptime(last_str, "%Y-%m-%d %H:%M:%S")
+                elapsed_h = (datetime.now() - last_dt).total_seconds() / 3600
+                return elapsed_h >= cooldown_h
+    except Exception:
+        pass
+    return True
+
+
+def mark_lt_decision_alert_sent(ticker: str, action: str) -> None:
+    """Enregistre l'heure d'envoi d'une alerte lt_decision (par action)."""
+    try:
+        state: dict = {}
+        if ALERT_COOLDOWN_PATH.exists():
+            with open(ALERT_COOLDOWN_PATH, encoding="utf-8") as fh:
+                state = json.load(fh)
+        bucket = state.setdefault("lt_decision", {}).setdefault(action, {})
+        bucket[ticker] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ALERT_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(ALERT_COOLDOWN_PATH, "w", encoding="utf-8") as fh:
             json.dump(state, fh, indent=2)
@@ -381,44 +426,130 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             f"SL={sl:.4f} | TP={tp:.4f} | P&L={pct_gain:+.2f}%"
         )
 
-        # ── 0. Thesis stop Phase 2 — signal informatif (non bloquant) ──
-        # Si on a un scored_universe + des entry scores, on évalue la cassure
-        # de thèse. BROKEN + cooldown OK → push Telegram. Le tracker NE FERME
-        # PAS la position (philosophie LT — décision manuelle après lecture).
+        # ── 0. LT exit policy (refonte 2026-04-29 — Buffett-style) ─────
+        # Couche unifiée qui agrège thesis_stop + drawdown + survalorisation
+        # + signal Buffett d'ADD_ON. Le tracker NE FERME PAS la position :
+        # toutes les actions (TRIM/EXIT/ADD_ON) restent informatives. Le SL
+        # technique reste actif plus bas comme dernière digue.
         if scored_universe:
             try:
-                _current = scored_universe.get(ticker, {})
-                if _current:
-                    _sector = _current.get("sector")
-                    _baseline = sector_drifts.get(str(_sector)) if _sector else None
-                    _thesis = compute_thesis_status(
-                        entry={
-                            "Titan_Score_Entry": row.get("Titan_Score_Entry"),
-                            "Quality_Entry":     row.get("Quality_Entry"),
-                            "Value_Entry":       row.get("Value_Entry"),
-                            "Risk_Entry":        row.get("Risk_Entry"),
-                            "Momentum_Entry":    row.get("Momentum_Entry"),
-                            "Piotroski_Entry":   row.get("Piotroski_Entry"),
-                            "Growth_Entry":      row.get("Growth_Entry"),
-                            "F_Score_Entry":     row.get("F_Score_Entry"),
-                            "Tilt_Flags_Entry":  row.get("Tilt_Flags_Entry") or "",
-                        },
-                        current=_current,
-                        sector_drift_baseline=_baseline,
-                    )
-                    if _thesis.get("status") == "BROKEN" and can_send_thesis_alert(ticker):
-                        send_thesis_break_alert(
-                            ticker, direction, entry, current_price,
-                            _thesis.get("reasons_break") or [],
-                            _thesis.get("drift"),
+                _current = scored_universe.get(ticker, {}) or {}
+                _sector = _current.get("sector")
+                _baseline = sector_drifts.get(str(_sector)) if _sector else None
+                _thesis = compute_thesis_status(
+                    entry={
+                        "Titan_Score_Entry": row.get("Titan_Score_Entry"),
+                        "Quality_Entry":     row.get("Quality_Entry"),
+                        "Value_Entry":       row.get("Value_Entry"),
+                        "Risk_Entry":        row.get("Risk_Entry"),
+                        "Momentum_Entry":    row.get("Momentum_Entry"),
+                        "Piotroski_Entry":   row.get("Piotroski_Entry"),
+                        "Growth_Entry":      row.get("Growth_Entry"),
+                        "F_Score_Entry":     row.get("F_Score_Entry"),
+                        "Tilt_Flags_Entry":  row.get("Tilt_Flags_Entry") or "",
+                    },
+                    current=_current,
+                    sector_drift_baseline=_baseline,
+                ) if _current else None
+
+                # Support level optionnel — si le scored_universe l'expose,
+                # on l'utilise pour gate ADD_ON. Sinon None (renfort permis
+                # avec note prudentielle dans les reasons).
+                _support_lvl = _current.get("support_level") if _current else None
+
+                # Étape 2 Buffett — fair value ceiling fundamentals-anchored.
+                # On passe les niveaux Buffett (calculés depuis le scored_universe)
+                # à la décision pour activer EXIT_OVERVALUED_VS_FAIRVALUE.
+                _buffett = compute_fundamental_levels(
+                    current_price,
+                    quality_score=_current.get("quality_score") if _current else None,
+                    piotroski_score=_current.get("f_score") if _current else None,
+                    value_score=_current.get("value_score") if _current else None,
+                    peg_ratio=_current.get("peg_ratio") if _current else None,
+                    direction=direction,
+                ) if _current else {}
+
+                # Étape 4 Buffett — catégorie entry → now (dérive flagged).
+                def _parse_f(v):
+                    try:
+                        if v is None:
+                            return None
+                        s = str(v).strip()
+                        if "/" in s:
+                            return int(s.split("/")[0])
+                        return int(float(s))
+                    except (TypeError, ValueError):
+                        return None
+                _entry_q = row.get("Quality_Entry")
+                try:
+                    _entry_q = float(_entry_q) if _entry_q is not None else None
+                except (TypeError, ValueError):
+                    _entry_q = None
+                _entry_f = _parse_f(row.get("F_Score_Entry"))
+                _entry_cat = _tilt_factor(_entry_q, _entry_f)[1] if (_entry_q or _entry_f) else None
+                _current_cat = _tilt_factor(
+                    _current.get("quality_score") if _current else None,
+                    _current.get("f_score") if _current else None,
+                )[1] if _current else None
+
+                _confidence = compute_confidence(_current) if _current else {"score": None}
+                _entry_conf_raw = row.get("Confidence_Entry")
+                try:
+                    _entry_conf = (int(float(_entry_conf_raw))
+                                   if _entry_conf_raw not in (None, "", "nan") else None)
+                except (TypeError, ValueError):
+                    _entry_conf = None
+                _decision = lt_exit_policy.decide(
+                    ticker=ticker,
+                    entry_price=entry,
+                    current_price=current_price,
+                    stop_loss=sl if (sl is not None and not math.isnan(sl)) else None,
+                    direction=direction,
+                    thesis=_thesis,
+                    entry_value_pillar=row.get("Value_Entry"),
+                    current_value_pillar=_current.get("value_score") if _current else None,
+                    current_peg_ratio=_current.get("peg_ratio") if _current else None,
+                    current_forward_pe=_current.get("forward_pe") if _current else None,
+                    support_level=_support_lvl,
+                    buffett_tp=_buffett.get("tp"),
+                    let_it_ride=bool(_buffett.get("let_it_ride")),
+                    entry_category=_entry_cat,
+                    current_category=_current_cat,
+                    confidence_score=_confidence.get("score"),
+                    entry_confidence=_entry_conf,
+                    insider_score=_current.get("insider_score") if _current else None,
+                )
+
+                # On pousse Telegram pour les actions actionnables uniquement.
+                # HOLD/NO_DATA = pas d'alerte. EXIT_CATASTROPHE est rare car
+                # la branche SL plus bas ferme et alerte ; ce cas couvre
+                # surtout drawdown ≤ −35 % sans SL physique valide.
+                if _decision.action in ("ADD_ON", "TRIM", "EXIT_THESIS",
+                                        "EXIT_VALUATION", "EXIT_CATASTROPHE"):
+                    if can_send_lt_decision_alert(ticker, _decision.action):
+                        send_lt_decision_alert(
+                            ticker=ticker,
+                            action=_decision.action,
+                            direction=direction,
+                            entry_price=entry,
+                            current_price=current_price,
+                            pct_gain=_decision.pct_gain or 0.0,
+                            reasons=_decision.reasons,
                         )
-                        mark_thesis_alert_sent(ticker)
-                        logger.warning(
-                            f"🧠 [{ticker}] THÈSE CASSÉE → "
-                            f"{', '.join((_thesis.get('reasons_break') or [])[:2])}"
+                        mark_lt_decision_alert_sent(ticker, _decision.action)
+                        # Maintien rétro-compat du cooldown thesis_break
+                        # historique pour ne pas double-alerter via le
+                        # legacy path.
+                        if _decision.action == "EXIT_THESIS":
+                            mark_thesis_alert_sent(ticker)
+                        log_fn = (logger.warning
+                                  if _decision.severity >= 3 else logger.info)
+                        log_fn(
+                            f"📋 [{ticker}] LT {_decision.action} → "
+                            f"{', '.join(_decision.reasons[:2])}"
                         )
             except Exception as exc:
-                logger.debug(f"[{ticker}] thesis_stop check échoué : {exc}")
+                logger.debug(f"[{ticker}] lt_exit_policy check échoué : {exc}")
 
         # ── 1. Time exit (priorité maximale) ───────────────────────
         entry_date_str = str(row.get("Date", ""))

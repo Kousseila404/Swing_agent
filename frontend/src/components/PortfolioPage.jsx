@@ -12,10 +12,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { addTrade, closeTrade, fetchEquityCurve, fetchPortfolio, fetchThesisStatus } from '../api/client';
+import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio, fetchThesisStatus } from '../api/client';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import PositionCard from './portfolio/PositionCard';
+import TickerAnalysisModal from './TickerAnalysisModal';
 import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
 
 function downloadFile(filename, content, type = 'text/csv') {
@@ -34,6 +36,76 @@ const THESIS_BADGE_PALETTE = {
   INTACT:  { bg: 'rgba(34,197,94,0.16)',   fg: '#22c55e', icon: '🟢', short: 'OK' },
   NO_DATA: null, // pas de badge si pas de data
 };
+
+// Refonte 2026-04-29 — décision LT Buffett. Source de vérité pour l'action
+// recommandée sur une position OPEN (remplace la lecture isolée du thesis_status).
+const LT_DECISION_PALETTE = {
+  HOLD:              { bg: 'rgba(148,163,184,0.18)', fg: '#94a3b8', icon: '⏸',  short: 'HOLD' },
+  ADD_ON:            { bg: 'rgba(59,130,246,0.20)',  fg: '#60a5fa', icon: '📈', short: 'ADD' },
+  TRIM:              { bg: 'rgba(251,191,36,0.20)',  fg: '#fbbf24', icon: '✂️', short: 'TRIM' },
+  EXIT_THESIS:       { bg: 'rgba(248,113,113,0.20)', fg: '#f87171', icon: '🧠', short: 'EXIT' },
+  EXIT_VALUATION:    { bg: 'rgba(192,132,252,0.20)', fg: '#c084fc', icon: '💎', short: 'EXIT' },
+  EXIT_CATASTROPHE:  { bg: 'rgba(239,68,68,0.30)',   fg: '#ef4444', icon: '🚨', short: 'EXIT' },
+  NO_DATA:           null,
+};
+
+// Refonte 2026-04-29 étape 3 — catégorie sizing Buffett.
+const BUFFETT_CATEGORY_PALETTE = {
+  compounder:           { bg: 'rgba(34,197,94,0.20)',  fg: '#22c55e', icon: '🏔️', short: 'COMPOUNDER', tip: 'Q≥85 + P≥8 — sizing ×1.5 (Buffett concentre)' },
+  high_quality:         { bg: 'rgba(59,130,246,0.18)', fg: '#60a5fa', icon: '⭐',  short: 'HIGH-Q',     tip: 'Q≥75 + P≥7 — sizing ×1.2' },
+  high_quality_partial: { bg: 'rgba(59,130,246,0.18)', fg: '#60a5fa', icon: '⭐',  short: 'HIGH-Q',     tip: 'Q≥85 (sans F-score) — sizing ×1.2 prudent' },
+  baseline:             null,
+  baseline_no_data:     null,
+  junior:               { bg: 'rgba(251,191,36,0.16)', fg: '#fbbf24', icon: '⚠',   short: 'JUNIOR',     tip: 'Q<50 ou P<4 — sizing ×0.7 (déconcentrer)' },
+  junior_partial:       { bg: 'rgba(251,191,36,0.16)', fg: '#fbbf24', icon: '⚠',   short: 'JUNIOR',     tip: 'Score partiel défavorable — sizing ×0.7' },
+  junk:                 { bg: 'rgba(248,113,113,0.18)', fg: '#f87171', icon: '🗑',   short: 'JUNK',       tip: 'Q<35 ET P<3 — sizing ×0.5 (à éviter)' },
+};
+
+function BuffettCategoryBadge({ category, sizeFactor }) {
+  if (!category) return null;
+  const p = BUFFETT_CATEGORY_PALETTE[category];
+  if (!p) return null;
+  const factorLabel = sizeFactor != null && sizeFactor !== 1.0 ? ` (×${sizeFactor})` : '';
+  return (
+    <span
+      title={`${p.tip}${factorLabel}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 3,
+        marginLeft: 6, padding: '0.1rem 0.4rem',
+        fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.04em',
+        borderRadius: 4, background: p.bg, color: p.fg,
+        verticalAlign: 'middle', cursor: 'help',
+      }}
+    >
+      {p.icon} {p.short}
+    </span>
+  );
+}
+
+function LtDecisionBadge({ decision }) {
+  if (!decision) return null;
+  const p = LT_DECISION_PALETTE[decision.action];
+  if (!p) return null;
+  const tooltipLines = [`Action LT : ${decision.action}`];
+  if (decision.pct_gain != null) {
+    tooltipLines.push(`P&L ${decision.pct_gain > 0 ? '+' : ''}${decision.pct_gain}%`);
+  }
+  for (const r of (decision.reasons || []).slice(0, 3)) tooltipLines.push(`• ${r}`);
+  return (
+    <span
+      title={tooltipLines.join('\n')}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 3,
+        marginLeft: 6, padding: '0.1rem 0.4rem',
+        fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.04em',
+        borderRadius: 4, background: p.bg, color: p.fg,
+        verticalAlign: 'middle', cursor: 'help',
+      }}
+    >
+      {p.icon} {p.short}
+    </span>
+  );
+}
 
 function ThesisBadge({ thesis }) {
   if (!thesis) return null;
@@ -70,6 +142,7 @@ export default function PortfolioPage() {
   const curveQ     = useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, refetchInterval: 15_000 });
   const benchQ     = useSectorBenchmarkPortfolio();
   const thesisQ    = useQuery({ queryKey: ['thesis_status'], queryFn: fetchThesisStatus, refetchInterval: 5 * 60_000 });
+  const ltQ        = useQuery({ queryKey: ['lt_decision'],   queryFn: fetchLtDecision,   refetchInterval: 5 * 60_000 });
 
   const thesisByTicker = useMemo(() => {
     const idx = {};
@@ -85,8 +158,36 @@ export default function PortfolioPage() {
     return idx;
   }, [thesisQ.data]);
 
+  const ltByTicker = useMemo(() => {
+    const idx = {};
+    const order = { EXIT_CATASTROPHE: 4, EXIT_THESIS: 3, EXIT_VALUATION: 3, TRIM: 2, ADD_ON: 1, HOLD: 0, NO_DATA: -1 };
+    for (const it of ltQ.data?.items || []) {
+      const t = String(it.ticker || '').toUpperCase();
+      const prev = idx[t];
+      if (!prev || (order[it.action] ?? -1) > (order[prev.action] ?? -1)) {
+        idx[t] = it;
+      }
+    }
+    return idx;
+  }, [ltQ.data]);
+
+  const ltSummary = ltQ.data?.summary;
+  const addOnTickers = ltSummary?.tickers_by_action?.ADD_ON || [];
+
   const [tab, setTab]                     = useState('open');
+  // Refonte UI 2026-04-29 — vue cartes par défaut (4-15 positions),
+  // tableau pour qui veut le mode dense.
+  const [viewMode, setViewMode]           = useState(() => {
+    try { return localStorage.getItem('portfolio_view_mode') || 'cards'; }
+    catch { return 'cards'; }
+  });
+  const setViewModePersisted = (m) => {
+    setViewMode(m);
+    try { localStorage.setItem('portfolio_view_mode', m); } catch {}
+  };
   const [closingTicker, setClosingTicker] = useState('');
+  // Ticker pour modal d'analyse (clic sur ticker dans la carte ou le tableau).
+  const [analysisTicker, setAnalysisTicker] = useState(null);
   const [closeForm, setCloseForm]         = useState({ exit_price: '', result: 'WIN' });
   const [addForm, setAddForm]             = useState({ ticker:'', direction:'LONG', entry:'', stop_loss:'', take_profit:'', size:1, signal:'MANUAL', sector:'' });
 
@@ -305,6 +406,101 @@ export default function PortfolioPage() {
       {/* ── Open Positions ── */}
       {tab === 'open' && (
         <>
+          {/* Refonte UI 2026-04-29 — bandeau compact (compteur + toggle vue) */}
+          {livePositions.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              flexWrap: 'wrap', gap: '0.6rem', margin: '0.5rem 0 1rem',
+              padding: '0.55rem 0.85rem', borderRadius: 8,
+              background: 'rgba(15,23,42,0.45)',
+              border: '1px solid rgba(148,163,184,0.18)',
+            }}>
+              <div style={{ display: 'flex', gap: '0.7rem', flexWrap: 'wrap', fontSize: '0.78rem' }}>
+                <span><strong style={{ color: '#fff' }}>{livePositions.length}</strong> position{livePositions.length > 1 ? 's' : ''}</span>
+                {Object.entries(ltSummary?.counts || {})
+                  .filter(([k]) => k !== 'NO_DATA')
+                  .sort((a, b) => {
+                    const ord = { EXIT_CATASTROPHE: 0, EXIT_THESIS: 1, EXIT_VALUATION: 2, TRIM: 3, ADD_ON: 4, HOLD: 5 };
+                    return (ord[a[0]] ?? 99) - (ord[b[0]] ?? 99);
+                  })
+                  .map(([action, n]) => (
+                    <span key={action} style={{ color: 'var(--text-muted)' }}>
+                      • <strong style={{ color: '#cbd5e1' }}>{n}</strong>{' '}
+                      {action === 'HOLD' ? 'hold'
+                        : action === 'ADD_ON' ? '📈 add'
+                        : action === 'TRIM' ? '✂️ trim'
+                        : action.startsWith('EXIT') ? '🚪 exit' : action.toLowerCase()}
+                    </span>
+                  ))}
+              </div>
+              <div style={{ display: 'flex', gap: 4, padding: 2,
+                background: 'rgba(0,0,0,0.25)', borderRadius: 6 }}>
+                {[
+                  { v: 'cards', label: '🃏 Cartes' },
+                  { v: 'table', label: '📊 Tableau' },
+                ].map(({ v, label }) => (
+                  <button key={v}
+                    onClick={() => setViewModePersisted(v)}
+                    style={{
+                      padding: '0.3rem 0.7rem', borderRadius: 4, border: 'none',
+                      background: viewMode === v ? 'rgba(96,165,250,0.20)' : 'transparent',
+                      color: viewMode === v ? '#60a5fa' : 'var(--text-muted)',
+                      fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
+                    }}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Mode CARTES — vue par défaut, refonte Buffett-LT */}
+          {viewMode === 'cards' && livePositions.length > 0 && (
+            <div>
+              {livePositions.map((p) => (
+                <PositionCard
+                  key={p.Ticker}
+                  position={p}
+                  lt={ltByTicker[String(p.Ticker || '').toUpperCase()]}
+                  onClickClose={() => { setClosingTicker(p.Ticker); setCloseForm({ exit_price: p.current_price ?? p.Entry, result: 'WIN' }); }}
+                  onTickerClick={(t) => setAnalysisTicker(t)}
+                />
+              ))}
+              {/* Form de clôture inline si actif */}
+              {closingTicker && (
+                <div style={{
+                  marginTop: '1rem', padding: '0.85rem 1rem', borderRadius: 8,
+                  background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.30)',
+                }}>
+                  <strong>Clôture {closingTicker}</strong>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      type="number" step="0.01"
+                      value={closeForm.exit_price}
+                      onChange={e => setCloseForm({ ...closeForm, exit_price: e.target.value })}
+                      placeholder="Prix de sortie"
+                      style={{ padding: '0.3rem 0.5rem', borderRadius: 4, border: '1px solid var(--border)' }}
+                    />
+                    <select
+                      value={closeForm.result}
+                      onChange={e => setCloseForm({ ...closeForm, result: e.target.value })}
+                      style={{ padding: '0.3rem 0.5rem', borderRadius: 4 }}
+                    >
+                      <option value="WIN">WIN</option>
+                      <option value="LOSS">LOSS</option>
+                    </select>
+                    <button onClick={() => handleClose(closingTicker)} disabled={closeMut.isPending}
+                      style={{ padding: '0.3rem 0.8rem', borderRadius: 4, background: 'var(--danger)', color: '#fff', border: 'none', cursor: 'pointer' }}
+                    >Confirmer</button>
+                    <button onClick={() => setClosingTicker('')}
+                      style={{ padding: '0.3rem 0.8rem', borderRadius: 4, background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}
+                    >Annuler</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Mode TABLEAU — vue dense alternative */}
+          {viewMode === 'table' && (
           <div className="port-table-wrap">
             {livePositions.length === 0 ? (
               <div className="as-empty" style={{ padding: '3rem' }}>📭 Aucune position ouverte actuellement.</div>
@@ -336,8 +532,14 @@ export default function PortfolioPage() {
                       <tr key={p.Ticker} className="scan-row" id={`open-${p.Ticker}`}
                           data-ticker={p.Ticker}>
                         <td>
-                          <strong>{p.Ticker}</strong>
-                          <ThesisBadge thesis={thesisByTicker[String(p.Ticker || '').toUpperCase()]} />
+                          <strong
+                            onClick={() => setAnalysisTicker(p.Ticker)}
+                            style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+                            title="Voir l'analyse complète"
+                          >{p.Ticker}</strong>
+                          {/* Mode tableau dense — un seul badge dominant : la décision LT.
+                              Catégorie + thèse sont surfacées dans la vue cartes. */}
+                          <LtDecisionBadge decision={ltByTicker[String(p.Ticker || '').toUpperCase()]} />
                         </td>
                         <td>
                           <span className="scan-signal-badge" style={{ color: dirIsLong ? 'var(--success)' : 'var(--danger)', borderColor: (dirIsLong ? 'var(--success)' : 'var(--danger)') + '50' }}>
@@ -452,6 +654,7 @@ export default function PortfolioPage() {
               </table>
             )}
           </div>
+          )}
 
           {/* PnL latent bar chart */}
           {livePositions.some(p => p.unrealized_pnl != null) && (
@@ -569,6 +772,14 @@ export default function PortfolioPage() {
       )}
 
       {/* ── Add Trade ── */}
+      {/* ── Modal d'analyse ticker (clic ticker) ── */}
+      {analysisTicker && (
+        <TickerAnalysisModal
+          ticker={analysisTicker}
+          onClose={() => setAnalysisTicker(null)}
+        />
+      )}
+
       {tab === 'add' && (
         <div className="card">
           <h3 className="card-title">➕ Ajouter un trade manuel</h3>

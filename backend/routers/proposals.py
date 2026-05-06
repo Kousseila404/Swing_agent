@@ -788,6 +788,23 @@ def approve_proposals_batch(
             f"{int(f_score)}/{int(f_score_max)}"
             if f_score is not None and f_score_max is not None else ""
         )
+
+        # Phase 1 data hardening (2026-04-29) — confidence à l'entrée.
+        # On la calcule depuis le context fundamentals déjà capturé.
+        try:
+            from modules.data_confidence import compute_confidence
+            _conf = compute_confidence({
+                "data_quality":            ctx.get("data_quality"),
+                "quality_score":           ctx.get("quality_score"),
+                "f_score":                 ctx.get("f_score"),
+                "peg_ratio":               ctx.get("peg_ratio"),
+                "forward_pe":              ctx.get("forward_pe"),
+                "fundamentals_age_days":   ctx.get("fundamentals_age_days"),
+            })
+            confidence_entry_value = _conf.get("score")
+        except Exception:
+            confidence_entry_value = None
+
         scan = SimpleNamespace(
             ticker=ticker,
             direction=direction,
@@ -808,6 +825,8 @@ def approve_proposals_batch(
             growth_entry=ctx.get("growth_score"),
             f_score_entry=f_score_str,
             tilt_flags_entry=ctx.get("titan_tilt_flags") or [],
+            # Phase 1 data hardening — confidence à l'entrée.
+            confidence_entry=confidence_entry_value,
         )
         try:
             broker = get_broker()

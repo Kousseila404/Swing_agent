@@ -160,6 +160,11 @@ export const deletePriceAlert  = (id) =>
   _del(`/price_alerts/${encodeURIComponent(id)}`);
 // Thesis status — vue cockpit positions OPEN.
 export const fetchThesisStatus = () => get('/thesis_status');
+// LT decision — refonte 2026-04-29 (Buffett-style). Agrégat des 4 couches
+// (catastrophe / thesis / valuation / add-on) par position OPEN.
+export const fetchLtDecision   = () => get('/lt_decision');
+export const fetchLtDecisionForTicker = (ticker) =>
+  get(`/lt_decision/${encodeURIComponent(ticker)}`);
 // Backfill rétroactif des *_Entry depuis universe_history (admin).
 export const backfillEntryScores = (dryRun = true) =>
   post(`/portfolio/backfill_entry_scores?dry_run=${dryRun ? 'true' : 'false'}`, {});

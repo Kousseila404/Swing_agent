@@ -244,7 +244,12 @@ def test_mark_sl_alert_sent_persists(_isolate: Path):
 # ─────────────────────────────────────────────────────────────────
 
 def test_thesis_break_triggers_alert(monkeypatch, _isolate: Path):
-    """Position OPEN avec TITAN_Entry=85 et current=50 → BROKEN → alerte envoyée."""
+    """Position OPEN avec TITAN_Entry=85 et current=50 → BROKEN → alerte LT EXIT_THESIS.
+
+    Refonte 2026-04-29 : la sortie unifiée passe par send_lt_decision_alert,
+    le cooldown est tracé sous lt_decision[EXIT_THESIS] (et legacy thesis_break
+    pour rétro-compatibilité du dashboard).
+    """
     monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
     # Stub scored_universe : current TITAN très en dessous de l'entrée
     fake_scored = {"AAPL": {
@@ -258,7 +263,7 @@ def test_thesis_break_triggers_alert(monkeypatch, _isolate: Path):
 
     sent: list[tuple] = []
     monkeypatch.setattr(
-        evaluation, "send_thesis_break_alert",
+        evaluation, "send_lt_decision_alert",
         lambda *a, **k: (sent.append((a, k)), True)[1],
     )
 
@@ -268,14 +273,18 @@ def test_thesis_break_triggers_alert(monkeypatch, _isolate: Path):
     ))
     out, closed, _ = evaluation.evaluate_trades(df)
     assert closed == 0
-    assert len(sent) == 1, "Alerte BROKEN attendue (TITAN −35 ≤ −20)"
-    # Cooldown persisté
+    assert len(sent) == 1, "Alerte LT attendue (TITAN −35 ≤ −20 → BROKEN → EXIT_THESIS)"
+    # L'action passée doit être EXIT_THESIS.
+    kwargs = sent[0][1] or {}
+    assert kwargs.get("action") == "EXIT_THESIS", f"action attendue EXIT_THESIS, reçue {kwargs.get('action')!r}"
+    # Cooldown persisté (granulaire par action + legacy thesis_break maintenu).
     data = json.loads((_isolate / "alert_cooldown.json").read_text())
+    assert "AAPL" in data.get("lt_decision", {}).get("EXIT_THESIS", {})
     assert "AAPL" in data.get("thesis_break", {})
 
 
 def test_thesis_intact_no_alert(monkeypatch):
-    """TITAN_Entry=80 et current=78 → INTACT → pas d'alerte."""
+    """TITAN_Entry=80 et current=78 → INTACT → pas d'alerte LT."""
     monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
     fake_scored = {"AAPL": {
         "sector": "Tech", "titan_composite_score": 78.0,
@@ -288,21 +297,21 @@ def test_thesis_intact_no_alert(monkeypatch):
 
     sent: list = []
     monkeypatch.setattr(
-        evaluation, "send_thesis_break_alert",
+        evaluation, "send_lt_decision_alert",
         lambda *a, **k: sent.append(1),
     )
 
     df = _df(_open_trade(Ticker="AAPL", Entry=100, Stop_Loss=95, Take_Profit=200,
                          Titan_Score_Entry=80, F_Score_Entry="7/9"))
     evaluation.evaluate_trades(df)
-    assert sent == [], "INTACT ne doit pas alerter"
+    assert sent == [], "INTACT (sans drawdown) ne doit pas alerter"
 
 
 def test_thesis_break_respects_cooldown(monkeypatch, _isolate: Path):
-    """Cooldown 24h : alerte envoyée hier → on ne renvoie pas aujourd'hui."""
+    """Cooldown 24h sur EXIT_THESIS : alerte envoyée il y a 2h → on ne renvoie pas."""
     recent = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
     (_isolate / "alert_cooldown.json").write_text(json.dumps({
-        "thesis_break": {"AAPL": recent},
+        "lt_decision": {"EXIT_THESIS": {"AAPL": recent}},
     }))
     monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
     fake_scored = {"AAPL": {
@@ -314,14 +323,14 @@ def test_thesis_break_respects_cooldown(monkeypatch, _isolate: Path):
 
     sent: list = []
     monkeypatch.setattr(
-        evaluation, "send_thesis_break_alert",
+        evaluation, "send_lt_decision_alert",
         lambda *a, **k: sent.append(1),
     )
 
     df = _df(_open_trade(Ticker="AAPL", Entry=100, Stop_Loss=95, Take_Profit=200,
                          Titan_Score_Entry=85))
     evaluation.evaluate_trades(df)
-    assert sent == [], "Cooldown 24h doit bloquer la 2e alerte"
+    assert sent == [], "Cooldown 24h sur EXIT_THESIS doit bloquer la 2e alerte"
 
 
 def test_can_send_thesis_alert_past_cooldown(_isolate: Path):

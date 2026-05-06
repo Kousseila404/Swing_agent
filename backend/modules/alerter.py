@@ -149,6 +149,61 @@ def send_thesis_break_alert(
         return False
 
 
+def send_lt_decision_alert(
+    ticker: str,
+    action: str,                      # ADD_ON | TRIM | EXIT_THESIS | EXIT_VALUATION | EXIT_CATASTROPHE
+    direction: str,
+    entry_price: float,
+    current_price: float,
+    pct_gain: float,
+    reasons: list[str],
+) -> bool:
+    """Alerte Telegram pour une décision LT actionnable (refonte 2026-04-29).
+
+    Couvre les 4 actions issues de lt_exit_policy.decide. Le tracker NE FERME
+    PAS la position : décision manuelle après lecture (philosophie LT Buffett).
+    Cooldown anti-spam géré par l'appelant.
+    """
+    icons = {
+        "ADD_ON":            ("📈", "RENFORT SUGGÉRÉ"),
+        "TRIM":              ("✂️", "ALLÈGEMENT SUGGÉRÉ"),
+        "EXIT_THESIS":       ("🧠", "THÈSE CASSÉE"),
+        "EXIT_VALUATION":    ("💎", "SURVALORISATION EXTRÊME"),
+        "EXIT_CATASTROPHE":  ("🚨", "CATASTROPHE FLOOR"),
+    }
+    icon, label = icons.get(action, ("⚠️", action))
+    bullets = "\n".join(f"  • {r}" for r in (reasons or [])[:5]) or "  • —"
+    pl_arrow = "✅" if pct_gain >= 0 else "❌"
+    if action == "ADD_ON":
+        cta = "💡 Buffett-style averaging down — vérifier sizing avant action."
+    elif action == "TRIM":
+        cta = "✂️ Réduire la position (~30-50 %) — la conviction est entamée."
+    elif action == "EXIT_CATASTROPHE":
+        cta = "🚨 Floor catastrophe — sortie immédiate recommandée."
+    else:
+        cta = "⚠️ Décision LT manuelle — le tracker ne ferme pas."
+
+    msg = (
+        f"{icon} <b>{label} — {ticker}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{'📈' if direction == 'LONG' else '📉'} {direction}  |  "
+        f"Entrée : <b>${entry_price:.2f}</b> → ${current_price:.2f}  "
+        f"({pl_arrow} {pct_gain:+.1f}%)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Raisons :</b>\n{bullets}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{cta}\n"
+        f"⏰ {datetime.now().strftime('%H:%M:%S')}  |  SwingQuant TITAN"
+    )
+    try:
+        _send_telegram_message(msg)
+        logger.info(f"[{ticker}] Alerte LT-decision {action} envoyée ✅")
+        return True
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Échec alerte LT-decision {action} : {exc}")
+        return False
+
+
 def send_health_check() -> bool:
     """
     Envoie un message Telegram de santé du bot chaque matin.
