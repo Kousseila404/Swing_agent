@@ -25,13 +25,12 @@ import pandas as pd
 from filelock import FileLock
 
 import config
+from modules import lt_exit_policy
 from modules.alerter import (
     send_close_alert,
     send_lt_decision_alert,
     send_price_alert_fired,
-    send_thesis_break_alert,
 )
-from modules import lt_exit_policy
 from modules.data_confidence import compute_confidence
 from modules.fundamentals_levels import compute_fundamental_levels
 from modules.portfolio._sizing_buffett import _tilt_factor

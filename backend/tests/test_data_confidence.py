@@ -112,8 +112,9 @@ def test_internal_contradiction_quality_vs_fscore():
 # ─── Tiers ────────────────────────────────────────────────────
 def test_tier_thresholds():
     """Couvre les 4 tiers via différentes coverage."""
-    info = lambda dq: {"data_quality": dq, "fundamentals_age_days": 10,
-                       "quality_score": 70, "f_score": 7}
+    def info(dq):
+        return {"data_quality": dq, "fundamentals_age_days": 10,
+                "quality_score": 70, "f_score": 7}
     assert compute_confidence(info(1.0))["tier"] in ("high",)
     assert compute_confidence(info(0.7))["tier"] in ("medium", "high")
     assert compute_confidence(info(0.5))["tier"] in ("low", "medium")
