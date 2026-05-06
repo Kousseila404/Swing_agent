@@ -23,14 +23,16 @@ def test_is_market_hours_returns_bool():
 
 
 def test_is_market_hours_fallbacks_to_false_on_error(monkeypatch):
-    """Si pytz indisponible / autre exception → False (conservateur)."""
-    def _broken_import(*a, **k):
-        raise ImportError("pytz missing")
+    """Si zoneinfo + pytz indisponibles + Alpaca KO → False (conservateur).
+    Phase 7 audit : utilise zoneinfo (3.9+) avec pytz fallback ; le test
+    doit casser les deux + Alpaca."""
     import builtins
     real_import = builtins.__import__
     def _mock_import(name, *a, **k):
-        if name == "pytz":
-            raise ImportError("pytz missing")
+        if name in ("pytz", "zoneinfo"):
+            raise ImportError(f"{name} missing")
+        if "broker_gateway" in name or "AlpacaBroker" in name:
+            raise ImportError(f"{name} missing")
         return real_import(name, *a, **k)
     monkeypatch.setattr(builtins, "__import__", _mock_import)
     assert market.is_market_hours() is False

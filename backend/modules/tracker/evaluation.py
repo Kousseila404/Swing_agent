@@ -578,9 +578,10 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 get_broker().close_position(ticker, current_price, status, direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Timeout: {e}")
-            df.at[idx, "Status"]     = status
-            df.at[idx, "Exit_Price"] = round(current_price, 6)
-            df.at[idx, "Exit_Date"]  = now_str
+            df.at[idx, "Status"]      = status
+            df.at[idx, "Exit_Price"]  = round(current_price, 6)
+            df.at[idx, "Exit_Date"]   = now_str
+            df.at[idx, "Close_Reason"] = "TIMEOUT"
             logger.info(
                 f"⏰ [{ticker}] FERMETURE TEMPS ({days_held}j ≥ {max_holding_days}j) | "
                 f"Exit={current_price:.4f} | P&L={pct_gain:+.2f}% → {status}"
@@ -701,9 +702,10 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 get_broker().close_position(ticker, current_price, "WIN", direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Win Close: {e}")
-            df.at[idx, "Status"]     = "WIN"
-            df.at[idx, "Exit_Price"] = round(current_price, 6)
-            df.at[idx, "Exit_Date"]  = now_str
+            df.at[idx, "Status"]      = "WIN"
+            df.at[idx, "Exit_Price"]  = round(current_price, 6)
+            df.at[idx, "Exit_Date"]   = now_str
+            df.at[idx, "Close_Reason"] = "TP_HIT"
             _log_close(ticker, "WIN", current_price, tp, entry, direction)
             closed_count += 1
 
@@ -751,9 +753,16 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 get_broker().close_position(ticker, current_price, sl_status, direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Loss Close: {e}")
-            df.at[idx, "Status"]     = sl_status
-            df.at[idx, "Exit_Price"] = round(current_price, 6)
-            df.at[idx, "Exit_Date"]  = now_str
+            df.at[idx, "Status"]      = sl_status
+            df.at[idx, "Exit_Price"]  = round(current_price, 6)
+            df.at[idx, "Exit_Date"]   = now_str
+            # Phase 7 audit — distingue SL technique d'un trailing stop. On
+            # tag SL_HIT par défaut ; un futur module trailing-aware pourra
+            # raffiner via Last_TS_Mode pour TRAILING_STOP.
+            ts_mode = str(row.get("Last_TS_Mode", "") or "").strip()
+            df.at[idx, "Close_Reason"] = (
+                "TRAILING_STOP" if ts_mode in ("ATR", "PCT") else "SL_HIT"
+            )
             _log_close(ticker, sl_status, current_price, sl, entry, direction)
             closed_count += 1
 

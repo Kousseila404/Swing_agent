@@ -382,8 +382,10 @@ def emergency_liquidate_all(df: pd.DataFrame) -> pd.DataFrame:
         except Exception as exc:
             logger.error(f"[NUCLEAR STOP] Erreur broker: {exc}")
 
-        df.loc[open_mask, "Status"]    = "EMERGENCY_CLOSED"
-        df.loc[open_mask, "Exit_Date"] = now_str
+        df.loc[open_mask, "Status"]      = "EMERGENCY_CLOSED"
+        df.loc[open_mask, "Exit_Date"]   = now_str
+        # Phase 7 audit — granularité de la raison de fermeture pour analyse perf.
+        df.loc[open_mask, "Close_Reason"] = "EMERGENCY_DD"
         logger.critical(f"[NUCLEAR STOP] {count} position(s) fermée(s) en urgence.")
 
     # Phase 2 audit — capture le peak equity au moment du stop pour l'hysteresis

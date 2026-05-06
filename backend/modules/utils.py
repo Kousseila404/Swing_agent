@@ -112,6 +112,13 @@ CSV_SCHEMA = [
     # entre entrée et état courant : si on a acheté à 90 et qu'on est à 40
     # aujourd'hui, c'est que les data sources se sont dégradées sur ce name.
     "Confidence_Entry",  # 0-100 ex: "85"
+    # Phase 7 audit (2026-05-06) — granularité de la raison de clôture pour
+    # l'analyse de performance attribution. Status seul (WIN/LOSS/EMERGENCY_CLOSED)
+    # ne distingue pas une bonne sortie (TP touché, thèse ok) d'une sortie
+    # paniquée (catastrophe, valuation overshoot, thèse cassée).
+    # Valeurs : SL_HIT | TP_HIT | TIMEOUT | THESIS_BREAK | EXIT_VALUATION |
+    # EXIT_CATASTROPHE | EMERGENCY_DD | TRAILING_STOP | MANUAL | "" (legacy).
+    "Close_Reason",
 ]
 
 

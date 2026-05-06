@@ -66,6 +66,8 @@ _COLUMN_TYPES: dict[str, str] = {
     "F_Score_Entry":     "VARCHAR",  # "8/9" format
     "Tilt_Flags_Entry":  "VARCHAR",  # CSV ex "qarp,consistent"
     "Confidence_Entry":  "DOUBLE",   # 0-100 (data_confidence à l'entrée)
+    # Phase 7 audit (2026-05-06) — granularité de la raison de clôture.
+    "Close_Reason":      "VARCHAR",
 }
 
 # Sécurise l'accès multi-thread (FastAPI peut appeler depuis plusieurs workers).
@@ -137,17 +139,28 @@ def _coerce(col: str, raw: Any) -> Any:
 # ─────────────────────────────────────────────────────────────────
 
 def shadow_insert(row: dict[str, Any], db_path: Path | str = DUCKDB_PATH) -> bool:
-    """Insère un trade dans DuckDB. Retourne True si OK, False sinon (fail-open)."""
+    """Insère un trade dans DuckDB. Retourne True si OK, False sinon (fail-open).
+
+    Phase 7 audit (2026-05-06) — BEGIN/COMMIT explicites pour garantir
+    l'atomicité même si un autre thread/process accède au fichier entre
+    l'INSERT et le flush WAL.
+    """
     try:
         ensure_schema(db_path)
         values = [_coerce(col, row.get(col)) for col in CSV_SCHEMA]
         placeholders = ", ".join(["?"] * len(CSV_SCHEMA))
         cols = ", ".join(f'"{c}"' for c in CSV_SCHEMA)
         with _LOCK, get_conn(db_path) as conn:
-            conn.execute(
-                f'INSERT INTO trade_journal ({cols}) VALUES ({placeholders})',
-                values,
-            )
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                conn.execute(
+                    f'INSERT INTO trade_journal ({cols}) VALUES ({placeholders})',
+                    values,
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
         return True
     except Exception:
         return False
@@ -160,23 +173,32 @@ def shadow_update_status(
     exit_date: str,
     db_path: Path | str = DUCKDB_PATH,
 ) -> bool:
-    """Met à jour la dernière position OPEN d'un ticker. Fail-open."""
+    """Met à jour la dernière position OPEN d'un ticker. Fail-open.
+
+    Phase 7 audit — BEGIN/COMMIT explicites (cf. shadow_insert).
+    """
     try:
         ensure_schema(db_path)
         with _LOCK, get_conn(db_path) as conn:
-            # Cible la ligne OPEN la plus récente (ROW_NUMBER sur Date desc)
-            conn.execute(
-                '''
-                UPDATE trade_journal
-                SET "Status" = ?, "Exit_Price" = ?, "Exit_Date" = ?
-                WHERE rowid = (
-                    SELECT rowid FROM trade_journal
-                    WHERE "Ticker" = ? AND "Status" = 'OPEN'
-                    ORDER BY "Date" DESC LIMIT 1
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                # Cible la ligne OPEN la plus récente (ROW_NUMBER sur Date desc)
+                conn.execute(
+                    '''
+                    UPDATE trade_journal
+                    SET "Status" = ?, "Exit_Price" = ?, "Exit_Date" = ?
+                    WHERE rowid = (
+                        SELECT rowid FROM trade_journal
+                        WHERE "Ticker" = ? AND "Status" = 'OPEN'
+                        ORDER BY "Date" DESC LIMIT 1
+                    )
+                    ''',
+                    [status, float(exit_price), exit_date, ticker.upper()],
                 )
-                ''',
-                [status, float(exit_price), exit_date, ticker.upper()],
-            )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
         return True
     except Exception:
         return False

@@ -13,8 +13,10 @@
 ╚══════════════════════════════════════════════════════════════════╝
 """
 import atexit
+import json
 import time
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -26,6 +28,97 @@ from modules.log import logger
 # ~100-200 ms de handshake par message. Le Client httpx est thread-safe.
 _TELEGRAM_CLIENT = httpx.Client(timeout=15.0)
 atexit.register(_TELEGRAM_CLIENT.close)
+
+# Phase 7 audit (2026-05-06) — queue persistante. Si Telegram échoue après les
+# 3 retries (réseau down, rate limit prolongé), on persiste le message dans un
+# JSONL local au lieu de le perdre. Au prochain envoi, on draine la queue
+# d'abord. Cap : 200 messages stockés (au-delà, on drop le plus ancien).
+_TELEGRAM_QUEUE_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "telegram_queue.jsonl"
+)
+_TELEGRAM_QUEUE_MAX = 200
+_TELEGRAM_QUEUE_TTL_HOURS = 24  # Drop messages > 24h old (probably stale)
+
+
+def _enqueue_failed_message(text: str) -> None:
+    """Persiste un message échoué pour retry au prochain cycle."""
+    try:
+        _TELEGRAM_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # Lire l'existant (cap = 200)
+        existing: list[dict] = []
+        if _TELEGRAM_QUEUE_PATH.exists():
+            try:
+                with open(_TELEGRAM_QUEUE_PATH, encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if line:
+                            try:
+                                existing.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                pass
+            except OSError:
+                pass
+        existing.append({"text": text, "ts": time.time()})
+        # Cap : keep the most recent _TELEGRAM_QUEUE_MAX
+        existing = existing[-_TELEGRAM_QUEUE_MAX:]
+        # Atomic write
+        tmp = _TELEGRAM_QUEUE_PATH.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            for m in existing:
+                fh.write(json.dumps(m, ensure_ascii=False) + "\n")
+        tmp.replace(_TELEGRAM_QUEUE_PATH)
+        logger.info(
+            f"[Telegram] Message enqueued ({len(existing)} pending in queue)"
+        )
+    except Exception as exc:
+        logger.warning(f"[Telegram] Échec enqueue : {exc}")
+
+
+def _drain_queue() -> None:
+    """Tente de renvoyer les messages en attente. Best-effort, fail-silent."""
+    if not _TELEGRAM_QUEUE_PATH.exists():
+        return
+    try:
+        with open(_TELEGRAM_QUEUE_PATH, encoding="utf-8") as fh:
+            messages = [json.loads(line) for line in fh if line.strip()]
+    except (OSError, json.JSONDecodeError):
+        return
+    if not messages:
+        return
+
+    cutoff = time.time() - (_TELEGRAM_QUEUE_TTL_HOURS * 3600)
+    sent = 0
+    remaining: list[dict] = []
+    for m in messages:
+        if m.get("ts", 0) < cutoff:
+            continue  # message trop vieux, drop silencieux
+        try:
+            _send_telegram_message_raw(m["text"])
+            sent += 1
+        except Exception:
+            # Toujours down → on garde dans la queue et on arrête le drain
+            # (pas la peine de retry les autres si Telegram est down).
+            remaining = messages[messages.index(m):]
+            break
+
+    # Réécrit la queue avec ce qui reste
+    try:
+        if remaining:
+            tmp = _TELEGRAM_QUEUE_PATH.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                for m in remaining:
+                    fh.write(json.dumps(m, ensure_ascii=False) + "\n")
+            tmp.replace(_TELEGRAM_QUEUE_PATH)
+        else:
+            _TELEGRAM_QUEUE_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    if sent > 0:
+        logger.info(
+            f"[Telegram] {sent} message(s) en queue renvoyés "
+            f"({len(remaining)} restants)"
+        )
 
 
 def send_close_alert(
@@ -378,6 +471,10 @@ def _send_telegram_message(text: str, max_retries: int = 3, retry_delay: float =
     """
     Envoie un message via l'API Telegram Bot avec retry et gestion du rate-limit.
 
+    Phase 7 audit (2026-05-06) — drain la queue persistante avant tout envoi
+    (best-effort). Si l'envoi du message courant échoue après tous les retries,
+    on l'enqueue au lieu de le perdre.
+
     Comportements :
     - Troncature automatique à 4096 caractères (limite Telegram).
     - 429 (rate limit) : backoff immédiat, pas retenté à l'infini.
@@ -387,6 +484,26 @@ def _send_telegram_message(text: str, max_retries: int = 3, retry_delay: float =
     Raises:
         RuntimeError: Si toutes les tentatives échouent ou erreur 4xx non-récupérable.
     """
+    # Drain best-effort la queue avant le nouvel envoi.
+    _drain_queue()
+
+    try:
+        _send_telegram_message_raw(text, max_retries=max_retries,
+                                   retry_delay=retry_delay)
+    except Exception as exc:
+        # Phase 7 — enqueue plutôt que perdre le message
+        logger.warning(
+            f"[Telegram] Envoi échoué après {max_retries} retries — "
+            f"enqueue pour retry au prochain cycle. Cause : {exc}"
+        )
+        _enqueue_failed_message(text)
+        raise
+
+
+def _send_telegram_message_raw(
+    text: str, max_retries: int = 3, retry_delay: float = 5.0,
+) -> None:
+    """Envoi brut (sans queue) — utilisé par _drain_queue et _send_telegram_message."""
     if len(text) > _TELEGRAM_MAX_LEN:
         logger.warning(
             f"[Telegram] Message tronqué : {len(text)} → {_TELEGRAM_MAX_LEN} caractères"
