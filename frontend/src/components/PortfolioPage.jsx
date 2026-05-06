@@ -15,6 +15,7 @@ import {
 import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio } from '../api/client';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
+import { POLL } from '../config/api';
 import ApiErrorBanner from './common/ApiErrorBanner';
 import { PageSkeleton } from './common/Skeleton';
 import PositionCard from './portfolio/PositionCard';
@@ -140,8 +141,8 @@ function ThesisBadge({ thesis }) {
 export default function PortfolioPage() {
   const qc = useQueryClient();
 
-  const portfolioQ = useQuery({ queryKey: ['portfolio'], queryFn: fetchPortfolio, refetchInterval: 15_000 });
-  const curveQ     = useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, refetchInterval: 15_000 });
+  const portfolioQ = useQuery({ queryKey: ['portfolio'],     queryFn: fetchPortfolio,    refetchInterval: POLL.PORTFOLIO });
+  const curveQ     = useQuery({ queryKey: ['equity_curve'],  queryFn: fetchEquityCurve,  refetchInterval: POLL.PORTFOLIO });
   const benchQ     = useSectorBenchmarkPortfolio();
   const ltQ        = useQuery({ queryKey: ['lt_decision'],   queryFn: fetchLtDecision,   refetchInterval: 5 * 60_000 });
 
