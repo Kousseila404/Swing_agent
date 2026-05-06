@@ -30,6 +30,70 @@
   --nav-py: 0.8rem;
   --nav-fs: 0.95rem;
   --card-pad: 1.25rem;
+
+  /* ── Design system tokens (Phase UI v2) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  --fs-xxs: 0.66rem;
+  --fs-xs: 0.72rem;
+  --fs-sm: 0.82rem;
+  --fs-md: 0.92rem;
+  --fs-lg: 1.05rem;
+  --fs-xl: 1.4rem;
+  --fs-xxl: 1.8rem;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.18);
+  --shadow-2: 0 4px 14px rgba(0,0,0,0.24);
+  --shadow-3: 0 10px 32px rgba(0,0,0,0.36);
+  --shadow-glow: 0 0 0 3px rgba(59,130,246,0.30);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+
+  /* Tailles de l'app shell — utilisés par sidebar/header sticky. */
+  --sidebar-w: 260px;
+  --sidebar-w-collapsed: 76px;
+  --header-h: 76px;
+  --statusbar-h: 28px;
+  --z-sticky: 50;
+  --z-overlay: 1500;
+  --z-modal: 2000;
+  --z-toast: 9999;
+}
+
+/* ── Reduced motion — respecte la préférence système. ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Auto-detect du thème système (1er load, override par localStorage). */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) { color-scheme: light; }
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) { color-scheme: dark; }
 }
 
 /* ── THEME LIGHT ── */
@@ -1184,4 +1248,613 @@ body {
   display: flex; flex-direction: column; gap: 0.5rem; pointer-events: none;
 }
 .toast-stack .api-toast { pointer-events: auto; }
+
+/* ═══════════════════════════════════════════════════════════════
+   APP SHELL v2 — sticky header, skip-link, sidebar collapsible,
+   focus-visible global, status bar, micro-interactions.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Focus-visible : anneau bleu accessible, identique partout. ── */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  box-shadow: var(--shadow-glow);
+}
+
+/* ── Skip-link : invisible jusqu'au focus clavier. ── */
+.skip-link {
+  position: absolute; top: -100px; left: 12px;
+  background: var(--accent-primary); color: #fff;
+  padding: 0.5rem 0.85rem; border-radius: var(--radius-sm);
+  font-weight: 600; font-size: 0.85rem; z-index: 9999;
+  transition: top var(--motion-fast) var(--ease-out);
+}
+.skip-link:focus-visible {
+  top: 12px;
+  box-shadow: var(--shadow-3);
+}
+
+/* ── Sidebar collapsible (toggle utilisateur ou breakpoint mobile). ── */
+.sidebar { transition: width var(--motion-base) var(--ease-out),
+                       min-width var(--motion-base) var(--ease-out); }
+.app-container[data-sidebar="collapsed"] .sidebar {
+  width: var(--sidebar-w-collapsed);
+  min-width: var(--sidebar-w-collapsed);
+  padding-left: 0.5rem; padding-right: 0.5rem;
+}
+.app-container[data-sidebar="collapsed"] .sidebar .nav-item {
+  justify-content: center;
+  padding-left: 0.5rem; padding-right: 0.5rem;
+  gap: 0;
+}
+.app-container[data-sidebar="collapsed"] .sidebar .nav-item > :not(:first-child),
+.app-container[data-sidebar="collapsed"] .sidebar .brand > div:not(.brand-icon),
+.app-container[data-sidebar="collapsed"] .sidebar .nav-section-label,
+.app-container[data-sidebar="collapsed"] .sidebar .sidebar-account,
+.app-container[data-sidebar="collapsed"] .sidebar .live-badge,
+.app-container[data-sidebar="collapsed"] .sidebar .market-clock,
+.app-container[data-sidebar="collapsed"] .sidebar .palette-launch-text,
+.app-container[data-sidebar="collapsed"] .sidebar .prefs-toggle-text {
+  display: none;
+}
+.app-container[data-sidebar="collapsed"] .sidebar .nav-item.active {
+  border-left: none;
+  background: rgba(59,130,246,0.18);
+}
+
+.sidebar-collapse-btn {
+  position: absolute; top: 22px; right: -12px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--panel-bg); border: 1px solid var(--panel-border);
+  color: var(--text-muted); cursor: pointer;
+  display: none; align-items: center; justify-content: center;
+  font-size: 0.7rem; font-family: monospace;
+  box-shadow: var(--shadow-2); z-index: 11;
+  transition: all var(--motion-fast) var(--ease-out);
+}
+@media (min-width: 1024px) {
+  .sidebar { position: relative; }
+  .sidebar-collapse-btn { display: flex; }
+}
+.sidebar-collapse-btn:hover {
+  color: var(--text-main); border-color: var(--accent-primary);
+  transform: scale(1.08);
+}
+
+/* ── Section label (extrait de App.jsx pour garder cohérence). ── */
+.nav-section-label {
+  font-size: 0.62rem; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-muted); opacity: 0.6;
+  padding: 0.25rem 1rem 0.4rem;
+}
+
+/* ── Sticky top header (always visible during scroll). ── */
+.top-header {
+  position: sticky; top: 0; z-index: var(--z-sticky);
+  background: linear-gradient(to bottom,
+    var(--bg-dark) 0%,
+    var(--bg-dark) 75%,
+    rgba(8,12,20,0));
+  backdrop-filter: blur(8px);
+  margin: -2rem -2.5rem 2rem;
+  padding: 1.4rem 2.5rem 1rem;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--motion-base) var(--ease-out);
+}
+.top-header.scrolled {
+  border-bottom-color: var(--panel-border);
+}
+[data-theme="light"] .top-header {
+  background: linear-gradient(to bottom,
+    var(--bg-dark) 0%,
+    var(--bg-dark) 75%,
+    rgba(245,247,251,0));
+}
+
+/* ── Breadcrumb / context strip dans le header. ── */
+.header-context {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.72rem; color: var(--text-muted);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.header-context .crumb-sep { opacity: 0.4; }
+.header-context .crumb-page {
+  color: var(--text-main); font-weight: 600; letter-spacing: 0.06em;
+}
+
+/* ── Market clock / régime micro-statut. ── */
+.market-clock {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.45rem 0.7rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  font-size: 0.74rem;
+  margin-bottom: 0.6rem;
+}
+.market-clock-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.market-clock-dot.open  {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+  animation: pulseDot 2.4s ease-in-out infinite;
+}
+.market-clock-dot.closed { background: var(--text-muted); opacity: 0.5; }
+.market-clock-dot.pre, .market-clock-dot.post { background: var(--warning); }
+@keyframes pulseDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
+  50%      { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+}
+.market-clock-info { flex: 1; min-width: 0; line-height: 1.25; }
+.market-clock-label { font-weight: 700; color: var(--text-main); font-size: 0.74rem; }
+.market-clock-sub   { color: var(--text-muted); font-size: 0.68rem; font-family: monospace; }
+
+/* Slot dans le header pour info marché compacte. */
+.header-pill-row {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.header-pill {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.32rem 0.65rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem; color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  transition: all var(--motion-fast) var(--ease-out);
+}
+.header-pill strong { color: var(--text-main); font-weight: 700; }
+.header-pill[data-tone="success"] { color: var(--success); border-color: rgba(16,185,129,0.3); }
+.header-pill[data-tone="warning"] { color: var(--warning); border-color: rgba(245,158,11,0.3); }
+.header-pill[data-tone="danger"]  { color: var(--danger);  border-color: rgba(239,68,68,0.3); }
+.header-pill[data-tone="info"]    { color: var(--accent-primary); border-color: rgba(59,130,246,0.3); }
+.header-pill button.pill-link {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font: inherit; padding: 0;
+}
+.header-pill button.pill-link:hover { text-decoration: underline; }
+
+/* ── Btn primitive (à utiliser en remplacement d'inline styles). ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--panel-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-main);
+  font-family: inherit; font-size: 0.85rem; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out),
+              border-color var(--motion-fast) var(--ease-out),
+              transform var(--motion-fast) var(--ease-out);
+  text-decoration: none;
+  user-select: none;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.18);
+}
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  border-color: transparent; color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 4px 16px rgba(59,130,246,0.35);
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-main);
+}
+.btn-danger {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.3);
+  color: var(--danger);
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(239,68,68,0.18);
+}
+.btn-success {
+  background: rgba(16,185,129,0.1);
+  border-color: rgba(16,185,129,0.3);
+  color: var(--success);
+}
+.btn-success:hover:not(:disabled) {
+  background: rgba(16,185,129,0.18);
+}
+.btn-sm { padding: 0.32rem 0.65rem; font-size: 0.78rem; }
+.btn-icon { padding: 0.4rem; aspect-ratio: 1; }
+
+/* ── Kbd : raccourci clavier inline. ── */
+kbd, .kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.68rem; font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--panel-border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  line-height: 1;
+  vertical-align: 1px;
+}
+
+/* ── Tag / Pill primitifs. ── */
+.tag {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.7rem; font-weight: 600;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--panel-border);
+  color: var(--text-muted);
+}
+.tag[data-tone="success"] { background: rgba(16,185,129,0.10); color: var(--success); border-color: rgba(16,185,129,0.25); }
+.tag[data-tone="danger"]  { background: rgba(239,68,68,0.10);  color: var(--danger);  border-color: rgba(239,68,68,0.25); }
+.tag[data-tone="warning"] { background: rgba(245,158,11,0.10); color: var(--warning); border-color: rgba(245,158,11,0.25); }
+.tag[data-tone="info"]    { background: rgba(59,130,246,0.10); color: var(--accent-primary); border-color: rgba(59,130,246,0.25); }
+
+/* ── Skeleton loaders (shimmer). ── */
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.03) 0%,
+    rgba(255,255,255,0.07) 50%,
+    rgba(255,255,255,0.03) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-sm);
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+[data-theme="light"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(15,23,42,0.04) 0%,
+    rgba(15,23,42,0.10) 50%,
+    rgba(15,23,42,0.04) 100%
+  );
+  background-size: 200% 100%;
+}
+@keyframes skeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-line { height: 12px; margin-bottom: 8px; }
+.skeleton-line.lg { height: 18px; }
+.skeleton-line.sm { height: 8px; }
+.skeleton-block  { height: 120px; border-radius: var(--radius-lg); }
+.skeleton-circle { border-radius: 50%; }
+
+.skeleton-page {
+  padding: 1.5rem 0; display: flex; flex-direction: column; gap: 1rem;
+}
+.skeleton-page .skeleton-row {
+  display: flex; gap: 0.75rem; align-items: center;
+}
+
+/* ── EmptyState primitive. ── */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 0.5rem;
+  padding: 3rem 2rem; text-align: center;
+  color: var(--text-muted);
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius-lg);
+  background: rgba(255,255,255,0.015);
+}
+.empty-state-icon {
+  font-size: 2.4rem; opacity: 0.6; line-height: 1;
+}
+.empty-state-title {
+  font-size: 1rem; font-weight: 700; color: var(--text-main);
+}
+.empty-state-desc {
+  font-size: 0.85rem; max-width: 420px; line-height: 1.5;
+}
+.empty-state-cta { margin-top: 0.5rem; }
+
+/* ── Tooltip light-weight (data-tooltip="..." ; pas pour modales). ── */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%; transform: translateX(-50%) translateY(4px);
+  background: rgba(0,0,0,0.92);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out),
+              transform var(--motion-fast) var(--ease-out);
+  z-index: var(--z-overlay);
+}
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── Sidebar palette launcher : ajout d'une enveloppe. ── */
+.palette-launch-btn {
+  width: 100%; padding: 0.55rem 0.7rem; margin-bottom: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.78rem; font-weight: 500;
+  font-family: inherit;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  transition: all var(--motion-fast) var(--ease-out);
+}
+.palette-launch-btn:hover {
+  background: rgba(255,255,255,0.07);
+  color: var(--text-main);
+  border-color: rgba(59,130,246,0.4);
+}
+
+/* ── Toast variants enrichis. ── */
+.api-toast.info {
+  background: rgba(59,130,246,0.12);
+  border-color: rgba(59,130,246,0.35);
+  color: var(--accent-primary);
+}
+.api-toast.warn {
+  background: rgba(245,158,11,0.12);
+  border-color: rgba(245,158,11,0.35);
+  color: var(--warning);
+}
+.api-toast {
+  display: flex; align-items: center; gap: 0.6rem;
+  min-width: 240px; max-width: 360px;
+}
+.api-toast .toast-action {
+  margin-left: auto;
+  background: none; border: none; color: inherit;
+  cursor: pointer; font-weight: 700;
+  text-decoration: underline; opacity: 0.85;
+  font-family: inherit; font-size: 0.78rem;
+}
+.api-toast .toast-action:hover { opacity: 1; }
+.api-toast .toast-close {
+  background: none; border: none; color: inherit;
+  cursor: pointer; opacity: 0.6; padding: 0; font-size: 0.95rem;
+}
+.api-toast .toast-close:hover { opacity: 1; }
+
+/* ── Fade-up subtil pour cartes nouvellement insérées. ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fadeUp 0.32s var(--ease-out) both; }
+
+/* ── ErrorBoundary v2 — wrapper joli. ── */
+.error-boundary-card {
+  margin: 1.5rem;
+  padding: 1.75rem 2rem;
+  background: var(--panel-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-3);
+  display: flex; flex-direction: column; gap: 1rem;
+}
+.error-boundary-head {
+  display: flex; align-items: center; gap: 0.75rem;
+}
+.error-boundary-icon {
+  font-size: 1.6rem;
+  width: 44px; height: 44px;
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.25);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+}
+.error-boundary-title { font-size: 1.1rem; font-weight: 700; }
+.error-boundary-trace {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  color: var(--text-muted);
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  overflow: auto; max-height: 240px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.error-boundary-actions { display: flex; gap: 0.5rem; }
+
+/* ── Page fallback skeleton (smooth, pas de flash spinner brutal). ── */
+.page-skeleton {
+  display: flex; flex-direction: column; gap: 1.25rem;
+  padding: 0.5rem 0;
+}
+.page-skeleton-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+.page-skeleton-tile {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  min-height: 92px;
+}
+
+/* ── Sidebar : zone scrollable nav (header + footer fixes). ── */
+.nav-menu { overflow-y: auto; padding-right: 4px; max-height: calc(100vh - 360px); }
+.nav-menu::-webkit-scrollbar { width: 4px; }
+
+/* ── Mobile : sidebar drawer. ── */
+@media (max-width: 1023px) {
+  :root { --sidebar-w: 240px; }
+  .app-container[data-sidebar="hidden"] .sidebar {
+    transform: translateX(-100%);
+  }
+  .sidebar {
+    position: fixed; inset: 0 auto 0 0; height: 100vh;
+    transform: translateX(0);
+    box-shadow: var(--shadow-3);
+    z-index: 100;
+  }
+  .main-content { padding: 1rem 1rem; }
+  .top-header { margin: -1rem -1rem 1rem; padding: 1rem 1rem 0.6rem; }
+  .sidebar-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55); z-index: 90;
+    backdrop-filter: blur(2px);
+    display: block;
+  }
+  .app-container[data-sidebar="hidden"] .sidebar-overlay { display: none; }
+}
+@media (min-width: 1024px) {
+  .sidebar-overlay { display: none; }
+  .mobile-menu-btn { display: none !important; }
+}
+
+.mobile-menu-btn {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text-main);
+  width: 36px; height: 36px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+}
+
+/* ── Section divider : trait fin avec label. ── */
+.section-divider {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 1.25rem 0 0.5rem; color: var(--text-muted);
+  font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.section-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--panel-border);
+}
+
+/* ── Command palette v2 — visual polish. ── */
+.cmdk-root {
+  width: 100%; max-width: 680px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.55);
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  display: flex; flex-direction: column;
+  max-height: 70vh;
+}
+.cmdk-input-row {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--panel-border);
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.cmdk-input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text-main); font-family: inherit; font-size: 0.95rem;
+}
+.cmdk-list {
+  flex: 1; overflow-y: auto;
+  padding: 4px 0;
+}
+.cmdk-section {
+  display: block;
+}
+.cmdk-section-label {
+  padding: 0.5rem 1rem 0.25rem;
+  font-size: 0.62rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--text-muted); opacity: 0.65;
+  position: sticky; top: 0;
+  background: var(--panel-bg);
+  z-index: 1;
+}
+.cmdk-item {
+  padding: 0.5rem 1rem;
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+  background: transparent;
+  border-left: 3px solid transparent;
+  font-size: 0.85rem;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.cmdk-item.active {
+  background: rgba(59,130,246,0.10);
+  border-left-color: var(--accent-primary);
+}
+.cmdk-item-icon { font-size: 1.05rem; opacity: 0.9; flex-shrink: 0; }
+.cmdk-item-body { flex: 1; min-width: 0; }
+.cmdk-item-label {
+  font-weight: 600; color: var(--text-main);
+  text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+}
+.cmdk-item-hint {
+  font-size: 0.7rem; color: var(--text-muted);
+  text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+}
+.cmdk-item-tag {
+  font-size: 0.6rem; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.cmdk-empty {
+  padding: 2.5rem 1rem; text-align: center;
+  color: var(--text-muted); font-size: 0.88rem;
+}
+.cmdk-footer {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--panel-border);
+  font-size: 0.66rem; color: var(--text-muted);
+  display: flex; gap: 14px; justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.cmdk-footer .cmdk-footer-keys { display: flex; gap: 14px; }
+
+/* ── Backdrop unifié pour modales/palette. ── */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+  z-index: var(--z-modal);
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 12vh 1rem 1rem;
+  animation: fadeIn 0.18s var(--ease-out) both;
+}
 

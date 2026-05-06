@@ -1,11 +1,14 @@
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import CommandPalette from './components/CommandPalette';
 import TableKeyNav from './components/common/TableKeyNav';
 import TickerContextMenu from './components/common/TickerContextMenu';
 import ToastBell from './components/common/ToastBell';
 import DataHealthBanner from './components/common/DataHealthBanner';
+import MarketClock from './components/common/MarketClock';
+import { PageSkeleton } from './components/common/Skeleton';
 import TickerAnalysisModal from './components/TickerAnalysisModal';
 import { useStatus } from './hooks/useApi';
+import { useIsDesktop } from './hooks/useMediaQuery';
 import { useHashRoute, usePreferences } from './utils/preferences';
 
 // Code-splitting par page — Vite génère un chunk séparé par lazy() au build,
@@ -28,33 +31,59 @@ const RiskMonitorPage     = lazy(() => import('./components/RiskMonitorPage'));
 const MacroCalendarPage   = lazy(() => import('./components/MacroCalendarPage'));
 const AuditPage           = lazy(() => import('./components/AuditPage'));
 
+// Skeleton fallback : remplace l'ancien spinner brutal pour éviter le
+// flash entre changements de page (fait paraître l'app plus rapide).
 function PageFallback() {
   return (
-    <div className="loading-pulse" style={{ padding: '3rem', textAlign: 'center' }}>
-      <div className="spinner" />
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.75rem' }}>
-        Chargement du module…
-      </p>
+    <div role="status" aria-live="polite" style={{ padding: '0.5rem 0' }}>
+      <span className="sr-only" style={{
+        position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+        overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+      }}>Chargement du module…</span>
+      <PageSkeleton tiles={4} blockHeight={280} rows={4} />
     </div>
   );
 }
 
 class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  constructor(props) { super(props); this.state = { hasError: false, error: null, showStack: false }; }
   static getDerivedStateFromError(error) { return { hasError: true, error }; }
-  componentDidCatch(error, info) { console.error('ErrorBoundary caught:', error, info); }
+  componentDidCatch(error, info) {
+    console.error('ErrorBoundary caught:', error, info);
+  }
+  reset = () => this.setState({ hasError: false, error: null, showStack: false });
+  toggleStack = () => this.setState((s) => ({ showStack: !s.showStack }));
   render() {
     if (this.state.hasError) {
+      const err = this.state.error;
       return (
-        <div style={{ padding: '2rem', color: '#ef4444', fontFamily: 'monospace', background: '#0d0d1a', borderRadius: '12px', margin: '1rem' }}>
-          <h2>⚠️ Erreur composant</h2>
-          <pre style={{ fontSize: '0.8rem', color: '#a6adc8', whiteSpace: 'pre-wrap' }}>{this.state.error?.toString()}</pre>
-          <button
-            onClick={() => this.setState({ hasError: false, error: null })}
-            style={{ marginTop: '1rem', padding: '0.5rem 1rem', background: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer' }}
-          >
-            Réessayer
-          </button>
+        <div className="error-boundary-card" role="alert">
+          <div className="error-boundary-head">
+            <div className="error-boundary-icon" aria-hidden="true">⚠️</div>
+            <div>
+              <div className="error-boundary-title">Une erreur est survenue dans ce module</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                Le reste de l'application reste utilisable. Tu peux réessayer ou recharger.
+              </div>
+            </div>
+          </div>
+          {this.state.showStack && err && (
+            <div className="error-boundary-trace">
+              {err.toString()}
+              {err.stack ? `\n\n${err.stack}` : ''}
+            </div>
+          )}
+          <div className="error-boundary-actions">
+            <button type="button" className="btn btn-primary" onClick={this.reset}>
+              Réessayer
+            </button>
+            <button type="button" className="btn" onClick={() => window.location.reload()}>
+              Recharger la page
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={this.toggleStack}>
+              {this.state.showStack ? 'Masquer la trace' : 'Voir la trace'}
+            </button>
+          </div>
         </div>
       );
     }
@@ -107,6 +136,9 @@ const NAV_SECTIONS = [
 ];
 
 const NAV_ITEMS = NAV_SECTIONS.flatMap(s => s.items);
+const SECTION_BY_PAGE = Object.fromEntries(
+  NAV_SECTIONS.flatMap(sec => sec.items.map(it => [it.id, sec.label]))
+);
 
 const PAGE_META = {
   briefing:    { title: 'Briefing du jour',              subtitle: 'Régime · Macro · Action requise · Positions à surveiller' },
@@ -129,14 +161,60 @@ const PAGE_META = {
 
 const VALID_PAGES = NAV_ITEMS.map(n => n.id);
 
+const SIDEBAR_PREF_KEY = 'pref_sidebar';
+
+function readSidebarPref() {
+  try {
+    return localStorage.getItem(SIDEBAR_PREF_KEY) || 'expanded';
+  } catch { return 'expanded'; }
+}
+
+function writeSidebarPref(v) {
+  try { localStorage.setItem(SIDEBAR_PREF_KEY, v); } catch { /* private mode */ }
+}
+
 export default function App() {
   const [activePage, setActivePage] = useHashRoute('briefing', VALID_PAGES);
   const { theme, density, toggleTheme, toggleDensity } = usePreferences();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteTicker, setPaletteTicker] = useState(null);
-  const meta = PAGE_META[activePage] || { title: 'SwingQuant', subtitle: '' };
+  const isDesktop = useIsDesktop();
 
-  // Cmd+K / Ctrl+K — ouvre la palette globale, sauf dans les inputs.
+  // Mode sidebar : 'expanded' | 'collapsed' (desktop) ; 'visible' | 'hidden' (mobile)
+  const [sidebarDesktop, setSidebarDesktop] = useState(readSidebarPref); // expanded|collapsed
+  const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false);
+
+  // Header sticky : ombre subtile quand on scrolle (Intersection observer
+  // serait plus propre mais scroll-listener léger suffit ici).
+  const mainRef = useRef(null);
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const onScroll = () => setScrolled(el.scrollTop > 4);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Reset scroll quand on change de page (sinon Universe → Briefing garde
+  // le scroll d'Universe et on rate le KPI du haut).
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }, [activePage]);
+
+  // Ferme le drawer mobile quand on change de page.
+  useEffect(() => { setSidebarMobileOpen(false); }, [activePage]);
+
+  // Quand on bascule sur desktop, le drawer mobile n'a plus de sens.
+  // On dérive `effectiveMobileOpen` plutôt que de muter le state dans
+  // un effet (évite un cascading render).
+  const effectiveMobileOpen = isDesktop ? false : sidebarMobileOpen;
+
+  const meta = PAGE_META[activePage] || { title: 'SwingQuant', subtitle: '' };
+  const sectionLabel = SECTION_BY_PAGE[activePage] || '';
+
+  // Cmd+K / Ctrl+K — palette globale, sauf dans les inputs.
+  // Cmd+B — toggle sidebar (collapse/expand) — convention IDE.
   useEffect(() => {
     const onKey = (e) => {
       const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(
@@ -145,6 +223,17 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setPaletteOpen(true);
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        if (isDesktop) {
+          setSidebarDesktop((s) => {
+            const next = s === 'collapsed' ? 'expanded' : 'collapsed';
+            writeSidebarPref(next);
+            return next;
+          });
+        } else {
+          setSidebarMobileOpen((s) => !s);
+        }
       } else if (e.key === '/' && !isInput && !paletteOpen) {
         e.preventDefault();
         setPaletteOpen(true);
@@ -152,41 +241,68 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen]);
+  }, [paletteOpen, isDesktop]);
+
+  // data-sidebar : pilote le CSS (collapsed/hidden).
+  const sidebarAttr = !isDesktop
+    ? (effectiveMobileOpen ? 'mobile-open' : 'hidden')
+    : sidebarDesktop;
 
   return (
     <ErrorBoundary>
-      <div className="app-container">
+      <a href="#main" className="skip-link">Aller au contenu principal</a>
+      <div className="app-container" data-sidebar={sidebarAttr}>
+        {/* Overlay mobile (clic ferme le drawer). */}
+        <div
+          className="sidebar-overlay"
+          onClick={() => setSidebarMobileOpen(false)}
+          aria-hidden="true"
+        />
+
         {/* ── SIDEBAR ── */}
-        <aside className="sidebar">
+        <aside className="sidebar" aria-label="Navigation principale">
+          {/* Bouton collapse (desktop). */}
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={() => {
+              setSidebarDesktop((s) => {
+                const next = s === 'collapsed' ? 'expanded' : 'collapsed';
+                writeSidebarPref(next);
+                return next;
+              });
+            }}
+            data-tooltip={sidebarDesktop === 'collapsed' ? 'Étendre (Cmd+B)' : 'Replier (Cmd+B)'}
+            aria-label="Replier ou étendre la barre latérale"
+          >
+            {sidebarDesktop === 'collapsed' ? '›' : '‹'}
+          </button>
+
           <div className="brand">
-            <div className="brand-icon">⚡</div>
+            <div className="brand-icon" aria-hidden="true">⚡</div>
             <div>
               <div style={{ fontSize: '1.1rem' }}>SwingQuant</div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 400, letterSpacing: '2px' }}>V5 · TITAN</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 400, letterSpacing: '2px' }}>
+                V5 · TITAN
+              </div>
             </div>
           </div>
 
-          <nav className="nav-menu">
+          <nav className="nav-menu" aria-label="Pages">
             {NAV_SECTIONS.map((section, si) => (
-              <div key={section.label}
-                   style={{ marginTop: si === 0 ? 0 : '0.85rem' }}>
-                <div style={{
-                  fontSize: '0.62rem', fontWeight: 700,
-                  letterSpacing: '0.12em', textTransform: 'uppercase',
-                  color: 'var(--text-muted)', opacity: 0.6,
-                  padding: '0.25rem 1rem 0.4rem',
-                }}>
-                  {section.label}
-                </div>
+              <div key={section.label} style={{ marginTop: si === 0 ? 0 : '0.85rem' }}>
+                <div className="nav-section-label">{section.label}</div>
                 {section.items.map(n => (
                   <button
                     key={n.id}
                     id={`nav-${n.id}`}
+                    type="button"
                     className={`nav-item ${activePage === n.id ? 'active' : ''}`}
                     onClick={() => setActivePage(n.id)}
+                    aria-current={activePage === n.id ? 'page' : undefined}
+                    title={sidebarDesktop === 'collapsed' ? n.label : undefined}
                   >
-                    <span style={{ fontSize: '1.25rem' }}>{n.icon}</span>
+                    <span style={{ fontSize: '1.25rem' }} aria-hidden="true">{n.icon}</span>
                     {n.label}
                   </button>
                 ))}
@@ -197,30 +313,22 @@ export default function App() {
           <div style={{ marginTop: 'auto' }}>
             <button
               type="button"
+              className="palette-launch-btn"
               onClick={() => setPaletteOpen(true)}
-              style={{
-                width: '100%', padding: '0.5rem 0.7rem', marginBottom: 8,
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid var(--panel-border)',
-                borderRadius: 8, color: 'var(--text-muted)',
-                cursor: 'pointer', fontSize: '0.78rem', fontWeight: 500,
-                fontFamily: 'inherit', display: 'flex',
-                alignItems: 'center', justifyContent: 'space-between', gap: 6,
-              }}
               title="Palette globale (Cmd+K, Ctrl+K, ou /)"
             >
-              <span>🔍 Recherche…</span>
-              <span style={{
-                fontSize: '0.65rem', fontFamily: 'monospace',
-                border: '1px solid var(--panel-border)',
-                padding: '1px 5px', borderRadius: 3,
-              }}>⌘K</span>
+              <span className="palette-launch-text">🔍 Recherche…</span>
+              <kbd>⌘K</kbd>
             </button>
+
             <PrefsToggles
               theme={theme} density={density}
               onToggleTheme={toggleTheme} onToggleDensity={toggleDensity}
             />
+
+            <MarketClock />
             <LiveStatusBadge />
+
             <div className="sidebar-account">
               <div className="sa-label">SwingQuant TITAN</div>
               <div className="sa-value">Quantamental</div>
@@ -234,15 +342,36 @@ export default function App() {
         </aside>
 
         {/* ── MAIN ── */}
-        <main className="main-content">
-          <header className="top-header">
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <h1 className="page-title">{meta.title}</h1>
+        <main className="main-content" id="main" ref={mainRef} tabIndex={-1}>
+          <header className={`top-header ${scrolled ? 'scrolled' : ''}`}>
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+              <div className="header-context">
+                {!isDesktop && (
+                  <button
+                    type="button"
+                    className="mobile-menu-btn"
+                    onClick={() => setSidebarMobileOpen(true)}
+                    aria-label="Ouvrir le menu"
+                    style={{ marginRight: 8 }}
+                  >☰</button>
+                )}
+                {sectionLabel && (
+                  <>
+                    <span>{sectionLabel}</span>
+                    <span className="crumb-sep">›</span>
+                  </>
+                )}
+                <span className="crumb-page">{meta.title}</span>
+              </div>
+              <h1 className="page-title" style={{ marginTop: 0 }}>{meta.title}</h1>
               <span className="page-subtitle">{meta.subtitle}</span>
+              <div className="header-pill-row" style={{ marginTop: 8 }}>
+                <MarketClock variant="pill" />
+                <VixPill onOpenMacro={() => setActivePage('macro')} />
+              </div>
             </div>
-            <div className="user-profile" style={{ display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: 12 }}>
+
+            <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <ToastBell />
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontWeight: 600 }}>Prop Trader</div>
@@ -281,6 +410,9 @@ export default function App() {
           onClose={() => setPaletteOpen(false)}
           onNavigate={(id) => setActivePage(id)}
           onOpenTicker={(t) => setPaletteTicker(t)}
+          onAction={(actionId) => handleGlobalAction(actionId, {
+            toggleTheme, toggleDensity, setActivePage,
+          })}
         />
         <TickerContextMenu
           onOpenTicker={(t) => setPaletteTicker(t)}
@@ -298,45 +430,42 @@ export default function App() {
   );
 }
 
+// Actions globales déclenchables depuis la palette (Cmd+K).
+function handleGlobalAction(id, ctx) {
+  switch (id) {
+    case 'toggle-theme':   ctx.toggleTheme();   break;
+    case 'toggle-density': ctx.toggleDensity(); break;
+    case 'goto-settings':  ctx.setActivePage('settings'); break;
+    case 'goto-briefing':  ctx.setActivePage('briefing'); break;
+    case 'goto-proposals': ctx.setActivePage('proposals'); break;
+    default: break;
+  }
+}
+
 function PrefsToggles({ theme, density, onToggleTheme, onToggleDensity }) {
-  const btnStyle = {
-    flex: 1,
-    padding: '0.45rem 0.5rem',
-    background: 'rgba(255,255,255,0.04)',
-    border: '1px solid var(--panel-border)',
-    borderRadius: 8,
-    color: 'var(--text-muted)',
-    cursor: 'pointer',
-    fontSize: '0.72rem',
-    fontWeight: 600,
-    fontFamily: 'inherit',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    transition: 'all 0.15s',
-  };
   return (
     <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
       <button
         type="button"
+        className="btn btn-sm"
         onClick={onToggleTheme}
-        style={btnStyle}
+        style={{ flex: 1 }}
         title={`Thème : ${theme} (cliquer pour basculer)`}
         aria-label="Basculer thème clair/sombre"
       >
-        <span>{theme === 'light' ? '☀️' : '🌙'}</span>
-        <span style={{ textTransform: 'capitalize' }}>{theme}</span>
+        <span aria-hidden="true">{theme === 'light' ? '☀️' : '🌙'}</span>
+        <span className="prefs-toggle-text" style={{ textTransform: 'capitalize' }}>{theme}</span>
       </button>
       <button
         type="button"
+        className="btn btn-sm"
         onClick={onToggleDensity}
-        style={btnStyle}
+        style={{ flex: 1 }}
         title={`Densité : ${density} (cliquer pour basculer)`}
         aria-label="Basculer densité compact/confortable"
       >
-        <span>{density === 'compact' ? '▤' : '▦'}</span>
-        <span>{density === 'compact' ? 'Compact' : 'Cosy'}</span>
+        <span aria-hidden="true">{density === 'compact' ? '▤' : '▦'}</span>
+        <span className="prefs-toggle-text">{density === 'compact' ? 'Compact' : 'Cosy'}</span>
       </button>
     </div>
   );
@@ -363,5 +492,21 @@ function LiveStatusBadge() {
         VIX {status.vix ?? '—'}
       </span>
     </div>
+  );
+}
+
+// Pill VIX dans le header — couleur dynamique + click pour aller voir Macro.
+function VixPill({ onOpenMacro }) {
+  const { data: status } = useStatus({ refetchInterval: 30_000 });
+  const vix = status?.vix;
+  if (vix == null) return null;
+  const tone = vix >= 30 ? 'danger' : vix >= 20 ? 'warning' : 'success';
+  return (
+    <span className="header-pill" data-tone={tone} title="VIX (cliquer pour voir Macro)">
+      <strong>VIX</strong>
+      <button type="button" className="pill-link" onClick={onOpenMacro}>
+        {vix.toFixed(1)}
+      </button>
+    </span>
   );
 }
