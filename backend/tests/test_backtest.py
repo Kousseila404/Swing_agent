@@ -205,29 +205,36 @@ def test_compute_period_turnover_zero_when_unchanged():
 
 
 def test_compute_period_slippage_proportional_to_turnover():
-    """Slippage en bps × turnover one-way → cost_pct cohérent.
+    """Slippage en bps × turnover_two_way → cost_pct cohérent.
 
-    1 ticker, weights AAPL=1.0, prev=0 → turnover 0.5, slippage 100bps
-    → coût = 0.01 × 0.5 = 0.005.
+    Phase 3 audit (2026-05-06) — fix : on charge turnover_two_way
+    (entrées + sorties) au lieu de one-way (qui sous-estimait ×2).
+
+    1 ticker, weights AAPL=1.0, prev=0 → turnover_two_way=1.0, slippage 100bps
+    → coût = 0.01 × 1.0 = 0.01. (Avant fix : 0.005.)
     """
     snap_t, snap_t1 = _two_snaps_simple_return()
     p = bt._compute_period(snap_t, snap_t1, top_n=10,
-                           slippage_bps=100.0, prev_weights=None)
-    assert p.cost_pct == pytest.approx(0.005)
-    # Net = gross − cost.
-    assert p.portfolio_return == pytest.approx(p.portfolio_return_gross - 0.005)
+                           slippage_bps=100.0, prev_weights=None,
+                           risk_free_rate_annual=0.0)
+    assert p.cost_pct == pytest.approx(0.01)
+    # Net = gross − cost (risk_free=0 → pas de cash drag yield).
+    assert p.portfolio_return == pytest.approx(p.portfolio_return_gross - 0.01)
 
 
 def test_compute_period_commission_uses_avg_price():
-    """commission $/sh → translation en bps via prix moyen.
+    """commission $/sh → translation en bps via prix moyen × turnover_two_way.
+
+    Phase 3 audit fix : turnover_two_way au lieu de one-way.
 
     1 ticker à 100 $, commission 0.05 $/sh → 0.05/100 = 5 bps,
-    × turnover 0.5 → 2.5 bps = 0.00025.
+    × turnover_two_way=1.0 → 5 bps = 0.0005. (Avant fix : 0.00025.)
     """
     snap_t, snap_t1 = _two_snaps_simple_return()
     p = bt._compute_period(snap_t, snap_t1, top_n=10,
-                           commission_per_share=0.05, prev_weights=None)
-    assert p.cost_pct == pytest.approx(0.00025)
+                           commission_per_share=0.05, prev_weights=None,
+                           risk_free_rate_annual=0.0)
+    assert p.cost_pct == pytest.approx(0.0005)
 
 
 def test_compute_period_skipped_when_no_price_t():
