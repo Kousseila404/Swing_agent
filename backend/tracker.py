@@ -21,7 +21,6 @@ import argparse
 import os
 import sys
 import time
-import json  # CI gate test — import inutilisé volontaire (sera retiré)
 from datetime import datetime
 
 import config
