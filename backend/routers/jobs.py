@@ -36,6 +36,8 @@ def get_job(job_id: str):
 @router.post("/job/{job_id}/kill", response_model=GenericOkResponse)
 def kill_job(job_id: str, _auth: None = Security(api_core.require_auth)):
     """Envoie SIGTERM au groupe de process du job puis reap si zombie."""
+    if not api_core.JOB_ID_RE.match(job_id or ""):
+        raise HTTPException(400, "job_id invalide")
     meta_path = api_core.JOBS_DIR / f"{job_id}.json"
     if not meta_path.exists():
         raise HTTPException(404, "Job introuvable")

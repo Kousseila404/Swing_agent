@@ -73,7 +73,8 @@ def get_macro_calendar(horizon_days: int = 60):
                 "blackout":   -1 <= delta <= 0,
                 "upcoming":   0 < delta <= 7,
             })
-        except Exception:
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.warning(f"[macro_calendar] event ignoré (parse): {ev!r} — {exc}")
             continue
     events.sort(key=lambda x: x["date"])
     in_blackout = any(e["blackout"] for e in events)

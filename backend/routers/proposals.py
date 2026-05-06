@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Security
@@ -227,7 +227,7 @@ def refresh_proposals(
     # sans re-run (l'audit reste dispo même si l'utilisateur recharge la page).
     _save_last_refresh({
         **payload,
-        "ran_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "ran_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "requested_params": req.dict(exclude_none=True),
     })
     return payload
@@ -450,7 +450,7 @@ def regenerate_proposals(
     payload.setdefault("diagnostics", {})["n_expired"] = n_expired
     _save_last_refresh({
         **payload,
-        "ran_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "ran_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "requested_params": {**req.dict(exclude_none=True), "regenerate": True},
     })
     return payload
