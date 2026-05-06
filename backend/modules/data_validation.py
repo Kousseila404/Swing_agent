@@ -45,7 +45,12 @@ _BOUNDS: dict[str, Bound] = {
 
     # Ratios en décimal : ROE/ROA/margins/yield.
     "return_on_equity":   Bound(-2.0, 5.0),     # -200 % à +500 % (REIT mortgage, spinoffs)
-    "return_on_assets":   Bound(-1.0, 1.0),     # ROA > 100 % = data bug quasi-certain
+    # Phase 6 audit (2026-05-06) — ROA bound élargi à 1.5 (était 1.0). Les
+    # REITs/Utilities peuvent légitimement spike à 100-150% sur un trimestre
+    # (distributions spéciales, asset sales) ; rejeter à 1.0 perdait du signal
+    # réel. Override sector-aware ci-dessous (_SECTOR_OVERRIDES) pousse à 3.0
+    # pour Real Estate.
+    "return_on_assets":   Bound(-1.0, 1.5),
     "operating_margin":   Bound(-2.0, 1.0),     # certains SaaS early-stage à -150 %
     "profit_margin":      Bound(-5.0, 1.0),     # net margin peut être très négative
     "gross_margin":       Bound(-1.0, 1.0),
@@ -82,10 +87,42 @@ _BOUNDS: dict[str, Bound] = {
 _MCAP_TOLERANCE = 0.05   # 5 %
 
 
-def _out_of_bounds(field: str, value: float | None) -> bool:
-    """True si la valeur dépasse les bornes. None = pas out-of-bounds."""
+# Phase 6 audit (2026-05-06) — overrides sector-specific. Pour les secteurs
+# avec des distributions structurellement atypiques, on relâche les bornes
+# afin de ne PAS rejeter du signal légitime (ex: REIT ROA 1.2 sur quarter
+# avec asset sale).
+_SECTOR_OVERRIDES: dict[str, dict[str, Bound]] = {
+    "Real Estate": {
+        "return_on_assets":   Bound(-1.5, 3.0),    # REIT spikes legitimate
+        "return_on_equity":   Bound(-3.0, 8.0),
+        "debt_to_equity":     Bound(-50.0, 100.0), # leverage structurel REIT
+    },
+    "Utilities": {
+        "return_on_assets":   Bound(-1.0, 2.0),
+        "debt_to_equity":     Bound(-20.0, 80.0),  # leverage structurel
+    },
+    "Financial Services": {
+        # Banks ont des bilans avec leverage 8-12× = legit
+        "debt_to_equity":     Bound(-50.0, 100.0),
+        "return_on_assets":   Bound(-1.0, 2.0),
+    },
+}
+
+
+def _out_of_bounds(
+    field: str, value: float | None, sector: str | None = None,
+) -> bool:
+    """True si la valeur dépasse les bornes. None = pas out-of-bounds.
+
+    Phase 6 audit — sector-aware : si le secteur a un override, on l'utilise
+    en priorité au lieu de la borne globale.
+    """
     if value is None:
         return False
+    if sector and sector in _SECTOR_OVERRIDES:
+        b = _SECTOR_OVERRIDES[sector].get(field)
+        if b is not None:
+            return value < b.low or value > b.high
     b = _BOUNDS.get(field)
     if b is None:
         return False
@@ -121,10 +158,11 @@ def sanitize_ratios(r: FinancialRatios) -> tuple[FinancialRatios, list[str]]:
     """
     flags: list[str] = []
     updates: dict[str, float | None] = {}
+    sector = getattr(r, "sector", None)
 
     for field, _bound in _BOUNDS.items():
         val = getattr(r, field, None)
-        if _out_of_bounds(field, val):
+        if _out_of_bounds(field, val, sector=sector):
             flags.append(f"out_of_bounds:{field}")
             updates[field] = None
 

@@ -131,6 +131,13 @@ def _cache_path(ticker: str) -> Path:
     return _CACHE_DIR / f"{ticker.upper()}.json"
 
 
+# Phase 6 audit (2026-05-06) — version du schéma cache. À chaque ajout de
+# champ dans FinnhubData, incrémenter cette constante : les caches d'une
+# version antérieure seront ignorés (et re-fetchés) au lieu d'être désérialisés
+# en silence avec des champs manquants.
+_CACHE_SCHEMA_VERSION = 1
+
+
 def _read_cache(ticker: str) -> dict[str, Any] | None:
     p = _cache_path(ticker)
     if not p.exists():
@@ -144,12 +151,24 @@ def _read_cache(ticker: str) -> dict[str, Any] | None:
         return None
     if time.time() - cached_at > _CACHE_TTL_SECONDS:
         return None
+    # Phase 6 — refuse les caches d'une version de schéma antérieure.
+    if payload.get("_schema_version") != _CACHE_SCHEMA_VERSION:
+        logger.info(
+            f"[finnhub] {ticker} cache schema obsolète "
+            f"(v={payload.get('_schema_version')}, attendu v{_CACHE_SCHEMA_VERSION}) "
+            f"— re-fetch."
+        )
+        return None
     return payload
 
 
 def _write_cache(ticker: str, payload: dict[str, Any]) -> None:
     p = _cache_path(ticker)
-    payload = {**payload, "_cached_at": time.time()}
+    payload = {
+        **payload,
+        "_cached_at": time.time(),
+        "_schema_version": _CACHE_SCHEMA_VERSION,
+    }
     try:
         tmp = p.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -194,6 +213,7 @@ class FinnhubProvider:
             cached = _read_cache(ticker)
             if cached is not None:
                 cached.pop("_cached_at", None)
+                cached.pop("_schema_version", None)
                 try:
                     return FinnhubData(**cached)
                 except TypeError:

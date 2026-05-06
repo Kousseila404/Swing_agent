@@ -189,6 +189,17 @@ def compute_confidence(
         age = _safe_float(info.get("fundamentals_age_days"))
     fresh_factor, fresh_label = _freshness_factor(age)
 
+    # Phase 6 audit (2026-05-06) — propage le flag "stale" depuis le cache.
+    # Si `source_provider` contient "/stale" (cf. fundamentals_cache._stale_or_raise)
+    # ou "stale_fallback", on multiplie freshness par 0.5 — le scoring restera
+    # actif mais la confidence chute, ce qui inhibe ADD_ON et EXIT_VALUATION
+    # via lt_exit_policy. Avant : un cache 3j-stale après échec live n'avait
+    # AUCUN impact sur la confidence (silent).
+    src = (info.get("source_provider") or "").lower()
+    if "stale" in src or "/stale" in src:
+        fresh_factor *= 0.5
+        fresh_label += " | STALE provider-fallback (×0.50)"
+
     sanity_factor_v, sanity_notes = _sanity_factor(
         quality_score=_safe_float(info.get("quality_score")),
         f_score=_safe_float(info.get("f_score")),

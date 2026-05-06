@@ -57,6 +57,7 @@ def apply_sector_cap(
 
     capped_history: dict[str, dict[str, float]] = {}
     iterations = 0
+    converged = False
     for iteration in range(_SECTOR_CAP_MAX_ITERATIONS):
         iterations = iteration + 1
         sector_totals = {s: sum(w[t] for t in ts) for s, ts in sectors.items()}
@@ -65,6 +66,7 @@ def apply_sector_cap(
             if tot > cap + _SECTOR_CAP_EPSILON
         ]
         if not over_list:
+            converged = True
             break
         over_list.sort(key=lambda x: -x[1])
         s_over, total = over_list[0]
@@ -89,6 +91,19 @@ def apply_sector_cap(
         else:
             break
 
+    # Phase 5 audit (2026-05-06) — log si convergence non atteinte (souvent
+    # signe d'une situation pathologique : 2 secteurs > cap mutually
+    # impossible). Le rebal final renormalise mais le portefeuille n'est pas
+    # vraiment "capped".
+    if not converged and capped_history:
+        logger.warning(
+            f"[SectorCap] Non-convergence après {iterations} itérations "
+            f"(cap={cap:.0%}, secteurs cappés : {list(capped_history.keys())}). "
+            f"Sectors finaux : "
+            + ", ".join(f"{s}={round(sum(w[t] for t in ts), 3)}"
+                        for s, ts in sectors.items())
+        )
+
     # Renormalisation pour gommer la dérive numérique.
     total_w = sum(w.values())
     if total_w > 0:
@@ -99,5 +114,6 @@ def apply_sector_cap(
         "cap":              cap,
         "capped_sectors":   capped_history,
         "iterations":       iterations,
+        "converged":        converged,
         "sectors_count":    n_sectors,
     }

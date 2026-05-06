@@ -214,7 +214,14 @@ def _percentile_rank(
 # qu'un rank global avec ties. n=8 donne au minimum 8 buckets (12.5 % de
 # résolution) — pas idéal mais signal moins bruité sur les petits secteurs
 # (Real Estate, Utilities tournent autour de 10-15 tickers dans l'univers).
-_MIN_SECTOR_SIZE_FOR_RELATIVE = 8
+#
+# Phase 4 audit (2026-05-06) — relevé à 12. À n=8 la résolution était encore
+# 12.5% avec ties écrasants sur Utilities (≈12 tickers SP500), Materials,
+# REITs. n=12 donne ~8.3% (~12 buckets), proche du seuil académique standard
+# (AQR/Fama-French utilisent ≥ 10 unique values). Pour les secteurs
+# au-dessous (rares, ex: Communication Services minoritaire), le fallback
+# global reste actif.
+_MIN_SECTOR_SIZE_FOR_RELATIVE = 12
 
 
 def _percentile_rank_by_sector(
@@ -423,6 +430,7 @@ def _piotroski_f_score_absolute(
 def _piotroski_score_pillar(
     row: dict[str, Any],
     *,
+    ticker: str | None = None,
     as_of: date | None = None,
     publication_lag_days: int = _FUNDAMENTAL_PUBLICATION_LAG_DAYS,
 ) -> tuple[float, dict[str, Any]]:
@@ -436,7 +444,8 @@ def _piotroski_score_pillar(
     d'universe_history. Fallback sur `_lookup_yoy_snapshot` si les champs Y-1
     sont absents (ex: IPO < 1 an, scraping annuels KO).
     """
-    ticker = row.get("ticker")
+    if ticker is None:
+        ticker = row.get("ticker")
 
     # Préférence : champs scrappés au niveau du row (disponibles immédiatement).
     prev_fields = (
@@ -451,57 +460,49 @@ def _piotroski_score_pillar(
         # `fundamentals_period_end_y1`. Si la période fiscale Y-1 + LAG
         # n'était pas encore publiée à `as_of` (cas backtest), on refuse
         # ce Y-1 — sinon look-ahead silencieux.
-        if as_of is not None and publication_lag_days > 0:
-            from datetime import date as _date
-            from datetime import timedelta as _td
+        # Phase 1 audit (2026-05-06) — gate strict : as_of=None → today() pour
+        # que la prod live valide toujours (filet anti-cache corrompu).
+        from datetime import date as _date
+        from datetime import timedelta as _td
+        as_of_eff = as_of if as_of is not None else _date.today()
+        prev_year_yoy_row = {
+            "return_on_assets":   row.get("return_on_assets_prev_year"),
+            "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+            "current_ratio":      row.get("current_ratio_prev_year"),
+            "shares_outstanding": row.get("shares_outstanding_prev_year"),
+            "gross_margin":       row.get("gross_margin_prev_year"),
+        }
+        if publication_lag_days > 0:
             period_end_y1 = row.get("fundamentals_period_end_y1")
             if isinstance(period_end_y1, str):
                 try:
                     pe = _date.fromisoformat(period_end_y1[:10])
                     publish_date = pe + _td(days=publication_lag_days)
-                    if publish_date > as_of:
+                    if publish_date > as_of_eff:
                         # Y-1 pas encore publiable → fallback sur lookup snapshot
-                        # (qui peut lui-même retourner None si la fenêtre est
-                        # fermée).
+                        # (peut retourner None ; dans ce cas Y/Y simplement non
+                        # évalué — pas de fuite via prev_year fields).
                         yoy_row = (
                             _lookup_yoy_snapshot(
-                                ticker, as_of=as_of,
+                                ticker, as_of=as_of_eff,
                                 publication_lag_days=publication_lag_days,
                             ) if ticker else None
                         )
                     else:
-                        yoy_row = {
-                            "return_on_assets":   row.get("return_on_assets_prev_year"),
-                            "debt_to_equity":     row.get("debt_to_equity_prev_year"),
-                            "current_ratio":      row.get("current_ratio_prev_year"),
-                            "shares_outstanding": row.get("shares_outstanding_prev_year"),
-                            "gross_margin":       row.get("gross_margin_prev_year"),
-                        }
+                        yoy_row = prev_year_yoy_row
                 except ValueError:
-                    yoy_row = {
-                        "return_on_assets":   row.get("return_on_assets_prev_year"),
-                        "debt_to_equity":     row.get("debt_to_equity_prev_year"),
-                        "current_ratio":      row.get("current_ratio_prev_year"),
-                        "shares_outstanding": row.get("shares_outstanding_prev_year"),
-                        "gross_margin":       row.get("gross_margin_prev_year"),
-                    }
+                    # Date corrompue → on refuse plutôt que d'accepter en aveugle.
+                    yoy_row = (
+                        _lookup_yoy_snapshot(
+                            ticker, as_of=as_of_eff,
+                            publication_lag_days=publication_lag_days,
+                        ) if ticker else None
+                    )
             else:
                 # Pas de date fiscale → comportement legacy (accept).
-                yoy_row = {
-                    "return_on_assets":   row.get("return_on_assets_prev_year"),
-                    "debt_to_equity":     row.get("debt_to_equity_prev_year"),
-                    "current_ratio":      row.get("current_ratio_prev_year"),
-                    "shares_outstanding": row.get("shares_outstanding_prev_year"),
-                    "gross_margin":       row.get("gross_margin_prev_year"),
-                }
+                yoy_row = prev_year_yoy_row
         else:
-            yoy_row = {
-                "return_on_assets":   row.get("return_on_assets_prev_year"),
-                "debt_to_equity":     row.get("debt_to_equity_prev_year"),
-                "current_ratio":      row.get("current_ratio_prev_year"),
-                "shares_outstanding": row.get("shares_outstanding_prev_year"),
-                "gross_margin":       row.get("gross_margin_prev_year"),
-            }
+            yoy_row = prev_year_yoy_row
     else:
         # Fallback legacy : snapshot universe_history Y-1 (anti-lookahead).
         yoy_row = (
@@ -514,17 +515,24 @@ def _piotroski_score_pillar(
         )
 
     n_passed, n_evaluated, breakdown = _piotroski_f_score_absolute(row, yoy_row)
-    if n_evaluated == 0:
+    # Phase 4 audit (2026-05-06) — F-Score dénominateur fixe 9 (Piotroski 2000
+    # original) : avant, 1/4 et 5/9 retournaient ~25% et ~55% sans qu'on
+    # puisse distinguer le ticker IPO data-pauvre du mature data-riche. Avec
+    # dénominateur fixe, 1/9 = 11% (vrai pessimisme) vs 5/9 = 55%.
+    # Garde-fou : si moins de 4 critères évaluables (IPO < 1 an, scraping KO),
+    # on retourne le neutral 50 plutôt que de pénaliser à tort.
+    if n_evaluated == 0 or n_evaluated < 4:
         return _NEUTRAL_SCORE, {
-            "f_score":         None,
-            "f_score_max":     0,
-            "f_score_evaluated": 0,
+            "f_score":           None,
+            "f_score_max":       9,
+            "f_score_evaluated": n_evaluated,
             "f_score_breakdown": breakdown,
+            "f_score_neutral":   True,  # diagnostic : signal absent, pas mauvais
         }
-    score = (n_passed / n_evaluated) * 100.0
+    score = (n_passed / 9.0) * 100.0
     return score, {
         "f_score":           n_passed,
-        "f_score_max":       n_evaluated,
+        "f_score_max":       9,
         "f_score_evaluated": n_evaluated,
         "f_score_breakdown": breakdown,
     }
@@ -595,10 +603,20 @@ def _weighted_mean_scores(tickers: list[dict[str, Any]]) -> dict[str, float]:
     return out
 
 
-def _score_universe(tickers_map: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _score_universe(
+    tickers_map: dict[str, dict[str, Any]],
+    *,
+    as_of: date | None = None,
+) -> dict[str, dict[str, Any]]:
     """Calcule les sous-scores TITAN (0-100) par ticker via percentile-ranking
     cross-universe sur chaque métrique brute, puis agrégation en 4 piliers
     pondérés pour produire le `titan_composite_score`.
+
+    Args:
+        tickers_map : {ticker: row brut} en entrée.
+        as_of       : date de contexte pour les gates anti-lookahead Y/Y
+                      (Piotroski, snapshot Y-1). Défaut today() en live ;
+                      bootstrap rétroactif passe la date du snapshot.
 
     Filtrage data quality : tickers avec data_quality < _MIN_DATA_QUALITY (0.6)
     EXCLUS du résultat — trop de trous fondamentaux pour un ranking fiable.
@@ -810,8 +828,9 @@ def _score_universe(tickers_map: dict[str, dict[str, Any]]) -> dict[str, dict[st
         m = _pillar_score([mom_ret_r[k], mom_ra_r[k], mom_52wh_r[k]])
 
         # PIOTROSKI — F-Score 4 critères absolus (Lot 8). Les 5 Y/Y attendent
-        # ≥ 2 ans d'historique Lot 6.
-        p, p_diag = _piotroski_score_pillar(t_base)
+        # ≥ 2 ans d'historique Lot 6. Phase 1 audit : as_of propagé pour gate
+        # anti-lookahead Y-1 strict (refuse Y-1 si publish_date > as_of).
+        p, p_diag = _piotroski_score_pillar(t_base, ticker=k, as_of=as_of)
 
         # GROWTH — Revenue CAGR + Earnings CAGR (Lot 12, Novy-Marx/AQR).
         g = _pillar_score([rev_r[k], eps_r[k]])
@@ -824,8 +843,19 @@ def _score_universe(tickers_map: dict[str, dict[str, Any]]) -> dict[str, dict[st
         # INSIDER — Lot 17. Pilier C-level/director smart money (poids 8 %).
         # Lit `insider_score` directement depuis le row si déjà enrichi par
         # `enrich_universe_with_insider()`. Sinon neutre 50.
+        # Phase 4 audit (2026-05-06) — clamp [0, 100] + log explicite si
+        # out-of-range (proxy: enrich corrompu, mauvais format upstream).
         ins_raw = _safe_float(t_base.get("insider_score"))
-        ins = ins_raw if ins_raw is not None else _NEUTRAL_SCORE
+        if ins_raw is None:
+            ins = _NEUTRAL_SCORE
+        elif 0 <= ins_raw <= 100:
+            ins = ins_raw
+        else:
+            logger.warning(
+                f"[Scoring] {k} insider_score={ins_raw} hors [0,100] — "
+                f"clamp à neutre 50 (vérifier enrich_universe_with_insider)."
+            )
+            ins = _NEUTRAL_SCORE
 
         if sentiment_available:
             s = _pillar_score([reco_r[k], upside_r[k]])

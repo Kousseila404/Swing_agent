@@ -25,13 +25,12 @@ import pandas as pd
 from filelock import FileLock
 
 import config
+from modules import lt_exit_policy
 from modules.alerter import (
     send_close_alert,
     send_lt_decision_alert,
     send_price_alert_fired,
-    send_thesis_break_alert,
 )
-from modules import lt_exit_policy
 from modules.data_confidence import compute_confidence
 from modules.fundamentals_levels import compute_fundamental_levels
 from modules.portfolio._sizing_buffett import _tilt_factor
@@ -397,6 +396,8 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
         except Exception as exc:
             logger.debug(f"[thesis_stop] Préfetch scored_universe échoué : {exc}")
 
+    n_stale_prices = 0
+    stale_tickers: list[str] = []
     for idx, row in open_trades.iterrows():
         ticker    = str(row["Ticker"]).strip().upper()
         entry     = float(row["Entry"])
@@ -413,6 +414,16 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
 
         current_price, df_hist = market_data.get(ticker, (None, None))
         if current_price is None:
+            # Phase 2 audit (2026-05-06) — stale price hard-warning : on ne
+            # peut PAS évaluer SL/TP avec un prix manquant. Avant, le `continue`
+            # était silencieux → la position passait le cycle sans contrôle.
+            # Maintenant on log + on track le ticker pour escalade.
+            n_stale_prices += 1
+            stale_tickers.append(ticker)
+            logger.warning(
+                f"[{ticker}] STALE PRICE — provider down ou ticker inconnu. "
+                f"SL/TP NON évalués ce cycle. Position laissée OPEN."
+            )
             continue
 
         # P&L du trade (positif = en profit, quelle que soit la direction)
@@ -566,9 +577,10 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 get_broker().close_position(ticker, current_price, status, direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Timeout: {e}")
-            df.at[idx, "Status"]     = status
-            df.at[idx, "Exit_Price"] = round(current_price, 6)
-            df.at[idx, "Exit_Date"]  = now_str
+            df.at[idx, "Status"]      = status
+            df.at[idx, "Exit_Price"]  = round(current_price, 6)
+            df.at[idx, "Exit_Date"]   = now_str
+            df.at[idx, "Close_Reason"] = "TIMEOUT"
             logger.info(
                 f"⏰ [{ticker}] FERMETURE TEMPS ({days_held}j ≥ {max_holding_days}j) | "
                 f"Exit={current_price:.4f} | P&L={pct_gain:+.2f}% → {status}"
@@ -689,9 +701,10 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 get_broker().close_position(ticker, current_price, "WIN", direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Win Close: {e}")
-            df.at[idx, "Status"]     = "WIN"
-            df.at[idx, "Exit_Price"] = round(current_price, 6)
-            df.at[idx, "Exit_Date"]  = now_str
+            df.at[idx, "Status"]      = "WIN"
+            df.at[idx, "Exit_Price"]  = round(current_price, 6)
+            df.at[idx, "Exit_Date"]   = now_str
+            df.at[idx, "Close_Reason"] = "TP_HIT"
             _log_close(ticker, "WIN", current_price, tp, entry, direction)
             closed_count += 1
 
@@ -739,9 +752,16 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 get_broker().close_position(ticker, current_price, sl_status, direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Loss Close: {e}")
-            df.at[idx, "Status"]     = sl_status
-            df.at[idx, "Exit_Price"] = round(current_price, 6)
-            df.at[idx, "Exit_Date"]  = now_str
+            df.at[idx, "Status"]      = sl_status
+            df.at[idx, "Exit_Price"]  = round(current_price, 6)
+            df.at[idx, "Exit_Date"]   = now_str
+            # Phase 7 audit — distingue SL technique d'un trailing stop. On
+            # tag SL_HIT par défaut ; un futur module trailing-aware pourra
+            # raffiner via Last_TS_Mode pour TRAILING_STOP.
+            ts_mode = str(row.get("Last_TS_Mode", "") or "").strip()
+            df.at[idx, "Close_Reason"] = (
+                "TRAILING_STOP" if ts_mode in ("ATR", "PCT") else "SL_HIT"
+            )
             _log_close(ticker, sl_status, current_price, sl, entry, direction)
             closed_count += 1
 
@@ -782,5 +802,23 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             mark_price_alerts_check_run()
         except Exception as exc:
             logger.debug(f"[price_alerts] check intraday échoué : {exc}")
+
+    # Phase 2 audit — escalade prix stale : si plus de la moitié des positions
+    # n'ont pas de prix, c'est un problème provider global et non un ticker
+    # individuel ; alerte CRITICAL pour qu'un opérateur regarde immédiatement.
+    if n_stale_prices > 0:
+        n_open = len(open_trades)
+        ratio = n_stale_prices / max(1, n_open)
+        if ratio >= 0.5:
+            logger.critical(
+                f"[STALE PRICES] {n_stale_prices}/{n_open} positions sans prix "
+                f"({ratio*100:.0f}%) — provider down probable. Tickers: "
+                f"{','.join(stale_tickers[:10])}"
+            )
+        else:
+            logger.warning(
+                f"[STALE PRICES] {n_stale_prices}/{n_open} positions sans prix "
+                f"ce cycle — tickers : {','.join(stale_tickers[:10])}"
+            )
 
     return df, closed_count, modified_count

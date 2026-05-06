@@ -53,8 +53,17 @@ def get_starting_equity(current_equity: float) -> float:
 def is_trading_allowed() -> bool:
     """Vérifie si le trading est autorisé.
 
-    Le blocage est automatiquement levé si la date stockée dans trading_state.json
-    est antérieure à aujourd'hui (reset quotidien à minuit).
+    Le blocage est automatiquement levé si :
+      1. La date stockée dans trading_state.json est antérieure à aujourd'hui ;
+      2. ET (Phase 2 audit — hysteresis) l'equity courante est revenue à ≥
+         `KILLSWITCH_RELIFT_RECOVERY_PCT` de l'equity peak (défaut 96 %, soit
+         ≤ 4 % drawdown vs peak). Si on n'a pas encore récupéré, on garde le
+         killswitch fermé pour un jour de plus — sinon le filet auto-relevait
+         minuit suivant un crash sans confirmer la reprise.
+
+    En cas d'erreur de lecture de l'equity (broker down, fichier manquant), on
+    relève quand même le killswitch (fail-open : ne pas bloquer indéfiniment
+    pour un problème d'observabilité).
     """
     if not TRADING_STATE_PATH.exists():
         return True
@@ -68,24 +77,100 @@ def is_trading_allowed() -> bool:
         return True
 
     blocked_date = state.get("date", "")
-    if blocked_date != date.today().isoformat():
-        logger.info(
-            "[Killswitch] Nouveau jour détecté — blocage levé automatiquement."
+    if blocked_date == date.today().isoformat():
+        return False
+
+    # Nouveau jour : appliquer l'hysteresis avant de relever.
+    if not _has_equity_recovered(state):
+        logger.warning(
+            "[Killswitch] Nouveau jour mais drawdown vs peak NON résorbé — "
+            "blocage maintenu 1 jour de plus (hysteresis)."
         )
-        _set_trading_blocked(False)
+        # Roll la date à aujourd'hui pour ne pas re-évaluer chaque cycle ; le
+        # blocage tiendra jusqu'à demain prochain test.
+        _set_trading_blocked(True)
+        return False
+
+    logger.info(
+        "[Killswitch] Nouveau jour + equity recovery confirmé — blocage levé."
+    )
+    _set_trading_blocked(False)
+    return True
+
+
+def _has_equity_recovered(state: dict) -> bool:
+    """Hysteresis : equity courante ≥ recovery_pct × peak avant de relever.
+
+    Sources de référence (par ordre de priorité) :
+      1. `state["peak_equity"]` posé au moment du nuclear stop.
+      2. circuit_breaker_state.json `peak_equity` (si dispo).
+      3. equity_state.json `starting_equity` (fallback rough).
+
+    Returns True si reprise OK, False si encore en drawdown profond. Fail-open
+    si on ne peut pas lire l'équity courante (broker down, etc.).
+    """
+    recovery_pct = float(getattr(config, "KILLSWITCH_RELIFT_RECOVERY_PCT", 0.96))
+    peak = 0.0
+    try:
+        peak = float(state.get("peak_equity", 0) or 0)
+    except (TypeError, ValueError):
+        peak = 0.0
+    if peak <= 0:
+        try:
+            from .state import CB_STATE_PATH
+            if CB_STATE_PATH.exists():
+                with open(CB_STATE_PATH, encoding="utf-8") as fh:
+                    cb = json.load(fh)
+                peak = float(cb.get("peak_equity", 0) or 0)
+        except Exception:
+            pass
+    if peak <= 0:
+        # Pas de référence fiable → fail-open.
         return True
 
-    return False
+    # Lit l'equity courante via broker (Alpaca) ou fallback ACCOUNT_SIZE.
+    try:
+        broker_mode = str(getattr(config, "BROKER_MODE", "paper")).lower().strip()
+        if broker_mode == "alpaca":
+            from modules.broker_gateway import get_broker
+            current = float(get_broker().get_account_equity())
+        else:
+            current = float(getattr(config, "ACCOUNT_SIZE", 100_000))
+    except Exception as exc:
+        logger.warning(
+            f"[Killswitch] hysteresis : equity courante illisible ({exc}) → "
+            f"fail-open (relèvement permis)."
+        )
+        return True
+
+    return current >= recovery_pct * peak
 
 
-def _set_trading_blocked(blocked: bool) -> None:
-    """Écrit l'état de blocage dans trading_state.json."""
+def _set_trading_blocked(blocked: bool, *, peak_equity: float | None = None) -> None:
+    """Écrit l'état de blocage dans trading_state.json.
+
+    Phase 2 audit — ajoute optionnellement `peak_equity` au moment du nuclear
+    stop pour permettre l'hysteresis à `is_trading_allowed()` (refus de
+    relever tant que l'equity courante < 96 % du peak).
+    """
     TRADING_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    state = {
+    state: dict = {
         "blocked": blocked,
         "date": date.today().isoformat(),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+    # Préserve le peak existant (si re-écriture sans nouveau peak fourni) pour
+    # ne pas perdre la référence d'hysteresis sur des appels successifs.
+    if peak_equity is not None and peak_equity > 0:
+        state["peak_equity"] = float(peak_equity)
+    elif TRADING_STATE_PATH.exists():
+        try:
+            with open(TRADING_STATE_PATH, encoding="utf-8") as fh:
+                old = json.load(fh)
+            if isinstance(old.get("peak_equity"), (int, float)):
+                state["peak_equity"] = float(old["peak_equity"])
+        except Exception:
+            pass
     with open(TRADING_STATE_PATH, "w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2)
 
@@ -297,14 +382,23 @@ def emergency_liquidate_all(df: pd.DataFrame) -> pd.DataFrame:
         except Exception as exc:
             logger.error(f"[NUCLEAR STOP] Erreur broker: {exc}")
 
-        df.loc[open_mask, "Status"]    = "EMERGENCY_CLOSED"
-        df.loc[open_mask, "Exit_Date"] = now_str
+        df.loc[open_mask, "Status"]      = "EMERGENCY_CLOSED"
+        df.loc[open_mask, "Exit_Date"]   = now_str
+        # Phase 7 audit — granularité de la raison de fermeture pour analyse perf.
+        df.loc[open_mask, "Close_Reason"] = "EMERGENCY_DD"
         logger.critical(f"[NUCLEAR STOP] {count} position(s) fermée(s) en urgence.")
 
-    _set_trading_blocked(True)
+    # Phase 2 audit — capture le peak equity au moment du stop pour l'hysteresis
+    # de relevage (cf. _has_equity_recovered).
+    try:
+        peak = estimate_portfolio_equity(df)
+    except Exception:
+        peak = None
+    _set_trading_blocked(True, peak_equity=peak)
     logger.critical(
         "[NUCLEAR STOP] TRADING_BLOCKED = True. "
-        "Le bot ne prendra aucun nouveau trade jusqu'à demain 00h00."
+        "Le bot ne prendra aucun nouveau trade jusqu'à demain 00h00 "
+        "(et tant que l'equity n'est pas revenue à ≥ 96 % du peak)."
     )
     return df
 

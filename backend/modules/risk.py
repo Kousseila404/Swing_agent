@@ -16,6 +16,8 @@ Philosophie Prop Firm :
 """
 from __future__ import annotations
 
+from modules.log import logger
+
 # ─────────────────────────────────────────────────────────────────
 # POSITION SIZING DYNAMIQUE
 # ─────────────────────────────────────────────────────────────────
@@ -186,6 +188,13 @@ class DrawdownCircuitBreaker:
     -3% → taille réduite à 50%
     -4% → pause totale 5 jours de trading
 
+    Phase 2 audit (2026-05-06) — peak_equity = max sur les `rolling_window`
+    dernières lectures (buffer FIFO), pas le pic absolu de l'historique. Sans
+    ça, un fat-finger 1-min ou un gap overnight anormal cale le peak à un
+    niveau aberrant et provoque ensuite un faux drawdown sur du trading
+    normal. Avec rolling_window=20, le pic est aged-out après ~20 cycles
+    (≈ 100 min en cron 5-min, ou 20 jours en cycle daily).
+
     Utilisation :
         cb = DrawdownCircuitBreaker(peak_equity)
         multiplier = cb.get_size_multiplier(current_equity)
@@ -193,15 +202,45 @@ class DrawdownCircuitBreaker:
             # skip new entries
     """
 
-    def __init__(self, peak_equity: float, pause_days: int = 5):
-        self.peak_equity = peak_equity
+    def __init__(
+        self,
+        peak_equity: float,
+        pause_days: int = 5,
+        rolling_window: int = 20,
+        equity_history: list[float] | None = None,
+    ):
         self.pause_days = pause_days
         self._pause_remaining = 0   # jours de pause restants
+        # Buffer FIFO pour le calcul du peak rolling. On seed avec peak_equity
+        # pour rétro-compatibilité (le caller passe historiquement le pic).
+        self._rolling_window = max(1, int(rolling_window))
+        if equity_history:
+            self._equity_history = [float(v) for v in equity_history if v and v > 0]
+        else:
+            self._equity_history = [float(peak_equity)] if peak_equity > 0 else []
+        # Trim au rolling_window au cas où on charge un historique plus long.
+        if len(self._equity_history) > self._rolling_window:
+            self._equity_history = self._equity_history[-self._rolling_window:]
+
+    @property
+    def peak_equity(self) -> float:
+        """Peak rolling sur les `_rolling_window` dernières lectures."""
+        if not self._equity_history:
+            return 0.0
+        return max(self._equity_history)
+
+    @peak_equity.setter
+    def peak_equity(self, value: float) -> None:
+        """Préserve l'API legacy : assigner peak_equity = X seed le buffer."""
+        if value and value > 0:
+            self._equity_history = [float(value)]
 
     def update(self, current_equity: float) -> None:
-        """Met à jour le peak et décrémente le compteur de pause."""
-        if current_equity > self.peak_equity:
-            self.peak_equity = current_equity
+        """Pousse l'equity courante dans le buffer rolling, décrémente pause."""
+        if current_equity is not None and current_equity > 0:
+            self._equity_history.append(float(current_equity))
+            if len(self._equity_history) > self._rolling_window:
+                self._equity_history.pop(0)
         if self._pause_remaining > 0:
             self._pause_remaining -= 1
 
@@ -273,6 +312,7 @@ def kelly_rolling(
     n_last: int = 30,
     fraction: float = 0.25,
     min_trades: int = 10,
+    losing_streak_threshold: int = 4,
 ) -> float:
     """
     Calcule la fraction Kelly sur les N derniers trades clôturés.
@@ -280,11 +320,18 @@ def kelly_rolling(
     Kelly = (WR * RR - (1 - WR)) / RR   (version simplifiée)
     Fraction Kelly = Kelly × fraction  (quarter-Kelly par défaut = conservateur)
 
+    Phase 5 audit (2026-05-06) — losing-streak guard : si les `losing_streak_threshold`
+    derniers trades sont TOUS des LOSS, on divise par 2 supplémentaire (anti-ruin
+    sur run adverse). Avant : un edge récent dégradé sortait quand-même un
+    kelly_frac max 1 % → exposition explosive.
+
     Args:
         trades_df:  DataFrame du journal (colonnes Status, Entry, Exit_Price, Direction).
         n_last:     Nombre de derniers trades à considérer (défaut 30).
         fraction:   Facteur de fractionnement Kelly (défaut 0.25 = quart-Kelly).
-        min_trades: Nombre minimum de trades pour un calcul fiable (retourne 0.25% si insuffisant).
+        min_trades: Nombre minimum de trades pour un calcul fiable (retourne RISK_PER_TRADE si insuffisant).
+        losing_streak_threshold: nombre de losses consécutives qui déclenche
+            la réduction supplémentaire ×0.5. Défaut 4.
 
     Returns:
         Fraction du capital à risquer par trade (entre 0.001 et 0.01).
@@ -300,6 +347,15 @@ def kelly_rolling(
 
         wins   = closed[closed["Status"] == "WIN"]
         losses = closed[closed["Status"] == "LOSS"]
+
+        # Phase 5 audit — détection losing-streak avant tout calcul.
+        # On regarde les `threshold` derniers trades par ordre chronologique.
+        recent = closed.tail(losing_streak_threshold)
+        on_losing_streak = (
+            len(recent) >= losing_streak_threshold
+            and (recent["Status"] == "LOSS").all()
+        )
+
         if len(losses) == 0:
             return min(default * 2, 0.005)   # Tout WIN — légèrement plus agressif
 
@@ -325,6 +381,12 @@ def kelly_rolling(
             return max(default * 0.5, 0.001)   # Edge négatif → réduire
 
         kelly_frac = kelly_full * fraction
+        if on_losing_streak:
+            kelly_frac *= 0.5
+            logger.warning(
+                f"[Kelly] Losing-streak {losing_streak_threshold}× LOSS détectée "
+                f"→ kelly_frac réduit ×0.5 ({kelly_frac:.4f})"
+            )
         # Bornes de sécurité : min 0.1% / max 1%
         return float(max(0.001, min(kelly_frac, 0.01)))
 

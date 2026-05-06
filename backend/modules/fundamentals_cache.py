@@ -227,6 +227,11 @@ class CachedFundamentalProvider(FundamentalProviderBase):
                 f"[FundamentalsCache] {ticker} sanitize flags: {','.join(flags)}"
             )
 
+        # Phase 1 audit (2026-05-06) — PIT consistency check : period_end ne
+        # peut pas être dans le futur. Détecte un cache corrompu, un provider
+        # qui retourne une date erronée, ou un fuseau horaire bogué.
+        _validate_period_end_not_future(ticker, fresh)
+
         # Fresh OK → cache + return. On NE cache PAS les payloads "vraiment vides"
         # (error set + tous les champs critiques None) — sinon on bloquerait un
         # ticker légitime sur une mauvaise réponse à 24h.
@@ -272,6 +277,37 @@ def _is_empty_payload(r: FinancialRatios) -> bool:
         "recommendation_mean", "price_target_mean",
     )
     return all(getattr(r, f) is None for f in critical)
+
+
+def _validate_period_end_not_future(ticker: str, r: FinancialRatios) -> None:
+    """Filet PIT : si `fundamentals_period_end[_y1]` est dans le futur, on
+    annule ces dates (le scoring fallbackera sur le snapshot Y-1) et on log un
+    WARNING — c'est typiquement un cache corrompu, un provider buggé ou un
+    fuseau horaire mal géré. On ne supprime PAS les ratios eux-mêmes (ils
+    peuvent être valides côté provider même si la date métadonnée déraille)
+    mais on coupe le levier de Y-1 pour éviter un look-ahead silencieux.
+    """
+    from datetime import date as _date
+    today = _date.today()
+    for field_name in ("fundamentals_period_end", "fundamentals_period_end_y1"):
+        val = getattr(r, field_name, None)
+        if not isinstance(val, str):
+            continue
+        try:
+            pe = _date.fromisoformat(val[:10])
+        except ValueError:
+            logger.warning(
+                f"[FundamentalsCache] {ticker} {field_name}={val!r} unparseable, "
+                f"clearing"
+            )
+            setattr(r, field_name, None)
+            continue
+        if pe > today:
+            logger.warning(
+                f"[FundamentalsCache] {ticker} {field_name}={val} is FUTURE "
+                f"(today={today.isoformat()}) — clearing to prevent lookahead"
+            )
+            setattr(r, field_name, None)
 
 
 # ─────────────────────────────────────────────────────────────────

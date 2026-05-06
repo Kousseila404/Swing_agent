@@ -297,7 +297,7 @@ def run_walk_forward(
     train_days: int = 60,
     test_days: int = 20,
     *,
-    publication_lag_days: int = 0,
+    publication_lag_days: int = 5,
 ) -> WfoResult:
     """Walk-forward : roule (train, test) sur les snapshots disponibles.
 
@@ -305,9 +305,10 @@ def run_walk_forward(
         train_days : taille de la fenêtre TRAIN en jours calendaires.
         test_days  : taille TEST.
         publication_lag_days : décale le snapshot scoring de N jours pour
-            éviter le lookahead fondamentaux (défaut 0). Recommandé 90 j en
-            production. Une paire est skippée si aucun snapshot suffisamment
-            ancien n'est disponible avant la date d'entrée.
+            éviter le lookahead fondamentaux (défaut 5 = lag FMP/yfinance T+2 à
+            T+5 minimum). 90 j = lag 10-K production-grade. Une paire est
+            skippée si aucun snapshot suffisamment ancien n'est disponible
+            avant la date d'entrée.
 
     Le fold avance de `test_days` à chaque étape (non-overlapping test).
     """
@@ -478,10 +479,11 @@ def _main() -> int:
                    help="Taille fenêtre TEST en jours (défaut 20)")
     p.add_argument("--json", action="store_true",
                    help="Sortie JSON sur stdout (sinon : tableau)")
-    p.add_argument("--publication-lag-days", type=int, default=0,
+    p.add_argument("--publication-lag-days", type=int, default=5,
                    help="Décalage du snapshot scoring (anti-lookahead "
-                        "fondamentaux). 0 = pas de lag. 90 = recommandé "
-                        "production (lag 10-K).")
+                        "fondamentaux). Défaut 5 j = lag FMP/yf minimum. "
+                        "0 = pas de lag (legacy, lookahead). "
+                        "90 = production-grade (lag 10-K).")
     p.add_argument("--no-persist", action="store_true",
                    help="Ne pas écrire data/wfo_weights.json")
     args = p.parse_args()

@@ -150,7 +150,7 @@ def _winsorize_by_sector(
     *,
     lower_pct: float = 1.0,
     upper_pct: float = 99.0,
-    min_sector_size: int = 8,
+    min_sector_size: int = 12,  # Phase 4 audit : 8 → 12 (alignement scoring)
 ) -> dict[str, float | None]:
     """Winsorize INTRA-SECTEUR. Les bornes p1/p99 sont calculées groupe par
     groupe ; fallback global si un secteur a < `min_sector_size` valides.

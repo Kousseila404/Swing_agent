@@ -43,6 +43,11 @@ backend/data/sector_benchmark_cache/
 backend/.archive/
 backend/.pytest_cache/
 
+# Coverage outputs (générés par pytest --cov)
+backend/coverage.xml
+backend/.coverage
+backend/htmlcov/
+
 # Snapshots locaux (archives pre-purge, non versionnés)
 .snapshots/
 

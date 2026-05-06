@@ -305,8 +305,10 @@ def test_piotroski_rejects_yoy_inside_lag_window(monkeypatch):
     score, diag = _scoring._piotroski_score_pillar(
         row, as_of=date(2025, 2, 15), publication_lag_days=90,
     )
-    # Y-1 refusé → seuls les 4 critères absolus (F1, F2, F4, F7).
-    assert diag["f_score_max"] == 4
+    # Phase 4 audit — f_score_max est désormais 9 fixe ; on vérifie le nombre
+    # effectivement évalué via f_score_evaluated.
+    assert diag["f_score_max"] == 9
+    assert diag["f_score_evaluated"] == 4  # Y-1 refusé → 4 absolus seulement
 
 
 def test_piotroski_no_lag_uses_yoy_unconditionally():
@@ -316,8 +318,9 @@ def test_piotroski_no_lag_uses_yoy_unconditionally():
     score, diag = _scoring._piotroski_score_pillar(
         row, as_of=date(2025, 6, 1), publication_lag_days=0,
     )
-    # lag=0 → pas de gate → Y-1 utilisé → 9 critères.
+    # lag=0 → pas de gate → Y-1 utilisé → 9 critères évalués (max=9 fixe).
     assert diag["f_score_max"] == 9
+    assert diag["f_score_evaluated"] == 9
 
 
 def test_piotroski_falls_back_when_period_end_missing(monkeypatch):
@@ -328,15 +331,23 @@ def test_piotroski_falls_back_when_period_end_missing(monkeypatch):
     score, diag = _scoring._piotroski_score_pillar(
         row, as_of=date(2025, 6, 1), publication_lag_days=90,
     )
-    # Pas de date → Y-1 accepté par défaut.
+    # Pas de date → Y-1 accepté par défaut → 9 critères évalués.
     assert diag["f_score_max"] == 9
+    assert diag["f_score_evaluated"] == 9
 
 
 def test_piotroski_handles_corrupted_period_end_string(monkeypatch):
     """`fundamentals_period_end_y1` invalide (string non-ISO) → ne crash pas,
-    fallback sur le comportement legacy (utilise Y-1)."""
+    et REFUSE les Y-1 (Phase 1 audit : on ne peut pas vérifier la
+    publishability d'une date corrompue ⇒ fallback sur snapshot lookup,
+    qui retourne None faute d'historique)."""
+    # Patch _lookup_yoy_snapshot pour qu'il retourne None (pas d'historique).
+    monkeypatch.setattr(_scoring, "_lookup_yoy_snapshot", lambda *a, **kw: None)
     row = _row_with_yoy_fields("not-a-date")
     score, diag = _scoring._piotroski_score_pillar(
         row, as_of=date(2025, 6, 1), publication_lag_days=90,
     )
+    # Date corrompue → Y-1 refusé → seuls les 4 critères absolus évalués
+    # (f_score_max=9 fixe, on lit f_score_evaluated pour le compte effectif).
     assert diag["f_score_max"] == 9
+    assert diag["f_score_evaluated"] == 4
