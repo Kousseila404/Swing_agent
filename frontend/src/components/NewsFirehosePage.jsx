@@ -6,6 +6,8 @@
 import { useMemo, useState } from 'react';
 import { useNewsFirehose } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import EmptyState from './common/EmptyState';
+import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
 
 const HORIZONS = [3, 7, 14, 30];
@@ -56,15 +58,9 @@ export default function NewsFirehosePage() {
   }, [items, scopeFilter, tickerFilter]);
 
   if (newsQ.isLoading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Chargement du firehose news…</p>
-        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          (1er chargement ~{(scope.n_tickers || 0) * 1.5}s si cache vide)
-        </p>
-      </div>
-    );
+    // 1er chargement peut prendre plusieurs secondes (le backend rebuild
+    // le cache 1h par ticker) — skeleton en attendant.
+    return <PageSkeleton tiles={3} blockHeight={120} rows={6} />;
   }
 
   if (newsQ.isError) {
@@ -184,9 +180,11 @@ export default function NewsFirehosePage() {
 
         {/* List */}
         {filtered.length === 0 ? (
-          <div className="as-empty" style={{ padding: '3rem' }}>
-            📭 Aucun article — vérifie ta watchlist + positions ouvertes.
-          </div>
+          <EmptyState
+            icon="📰"
+            title="Aucun article"
+            desc="Pas de news pour ces filtres. Élargis l'horizon, retire le filtre ticker, ou vérifie que ta watchlist + positions ouvertes ne sont pas vides."
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {filtered.map(a => (

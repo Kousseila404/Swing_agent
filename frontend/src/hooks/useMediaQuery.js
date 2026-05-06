@@ -1,37 +1,37 @@
 // useMediaQuery — hook minimaliste pour réagir aux breakpoints CSS depuis JS.
 //
-// Ex: const isDesktop = useMediaQuery('(min-width: 1024px)');
+// Implémenté avec useSyncExternalStore (React 18+), qui est exactement
+// l'API faite pour s'abonner à un store externe sans cascading render et
+// sans warning du lint react-hooks/set-state-in-effect.
 //
-// SSR-safe (renvoie false si window indispo). Utilise addEventListener
-// (déprécié addListener) pour les MediaQueryList modernes.
+// Ex: const isDesktop = useMediaQuery('(min-width: 1024px)');
+// SSR-safe : renvoie false côté serveur (snapshot serveur).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+
+function subscribeMql(query, callback) {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+  const mql = window.matchMedia(query);
+  if (mql.addEventListener) {
+    mql.addEventListener('change', callback);
+    return () => mql.removeEventListener('change', callback);
+  }
+  // Safari < 14 fallback
+  mql.addListener(callback);
+  return () => mql.removeListener(callback);
+}
+
+function getSnapshot(query) {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia(query).matches;
+}
 
 export function useMediaQuery(query) {
-  const get = () => {
-    if (typeof window === 'undefined' || !window.matchMedia) return false;
-    return window.matchMedia(query).matches;
-  };
-  const [match, setMatch] = useState(get);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-    const mql = window.matchMedia(query);
-    const onChange = (e) => setMatch(e.matches);
-    // Si la valeur a changé entre le lazy initializer et le mount (HMR,
-    // hydratation tardive), on resync via la MQL — mais sans cascading
-    // render injustifié si elle est identique.
-    setMatch((prev) => (prev === mql.matches ? prev : mql.matches));
-    if (mql.addEventListener) {
-      mql.addEventListener('change', onChange);
-      return () => mql.removeEventListener('change', onChange);
-    }
-    // Safari < 14
-    mql.addListener(onChange);
-    return () => mql.removeListener(onChange);
-  }, [query]);
-
-  return match;
+  return useSyncExternalStore(
+    (cb) => subscribeMql(query, cb),
+    () => getSnapshot(query),
+    () => false,  // server snapshot
+  );
 }
 
 // Helpers usuels.
@@ -39,3 +39,20 @@ export const useIsDesktop = () => useMediaQuery('(min-width: 1024px)');
 export const useIsMobile  = () => useMediaQuery('(max-width: 767px)');
 export const useReducedMotion = () =>
   useMediaQuery('(prefers-reduced-motion: reduce)');
+
+// useDebouncedValue — retarde la propagation d'une valeur (ex: input
+// search). Évite de spam la query côté React Query / l'algorithme de
+// fuzzy match à chaque keystroke.
+//
+// Ex: const debounced = useDebouncedValue(query, 200);
+//     useEffect(() => fetch(debounced), [debounced]);
+export function useDebouncedValue(value, delayMs = 200) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    if (delayMs <= 0) return undefined;
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  // Cas dégénéré delayMs <= 0 : pass-through direct, pas de state cascade.
+  return delayMs <= 0 ? value : debounced;
+}

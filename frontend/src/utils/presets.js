@@ -36,7 +36,7 @@ export function deletePreset(scope, name) {
   const list = listPresets(scope).filter(p => p.name !== name);
   _write(KEY(scope), list);
   if (loadLastApplied(scope) === name) {
-    try { localStorage.removeItem(LAST(scope)); } catch {}
+    try { localStorage.removeItem(LAST(scope)); } catch { /* private mode */ }
   }
   return list;
 }

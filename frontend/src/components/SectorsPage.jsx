@@ -6,6 +6,7 @@ import { factorColor } from '../utils/colors';
 import { fmtNum, fmtSignedPct as fmtPct, fmtMarketCap } from '../utils/format';
 import Pagination from './Pagination';
 import PresetBar from './common/PresetBar';
+import { PageSkeleton } from './common/Skeleton';
 
 // SectorsPage — Rotation sectorielle : grille SectorCard + drill-down tickers.
 // Consomme /api/sectors (agrégats GICS + momentum 6M) + /api/sectors/{name}.
@@ -102,12 +103,7 @@ export default function SectorsPage() {
   const handleRefreshMomentum = () => refreshMomentum();
 
   if (loading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Chargement du dashboard sectoriel…</p>
-      </div>
-    );
+    return <PageSkeleton tiles={4} blockHeight={300} rows={4} />;
   }
 
   if (error) {

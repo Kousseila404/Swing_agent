@@ -29,7 +29,7 @@ export function pushToast(text, type = 'ok') {
   const history = _readHistory();
   history.push(item);
   _writeHistory(history);
-  _listeners.forEach(fn => { try { fn(item); } catch {} });
+  _listeners.forEach(fn => { try { fn(item); } catch { /* listener fault — ignored */ } });
   return item;
 }
 
@@ -39,7 +39,7 @@ export function getHistory() {
 
 export function clearHistory() {
   _writeHistory([]);
-  _listeners.forEach(fn => { try { fn(null); } catch {} });
+  _listeners.forEach(fn => { try { fn(null); } catch { /* listener fault — ignored */ } });
 }
 
 export function subscribe(fn) {

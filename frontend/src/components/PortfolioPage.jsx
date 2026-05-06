@@ -16,6 +16,7 @@ import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import { PageSkeleton } from './common/Skeleton';
 import PositionCard from './portfolio/PositionCard';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
@@ -328,7 +329,7 @@ export default function PortfolioPage() {
     return { wins: wins.length, losses: losses.length, opens: livePositions.length, pf, sumWin, sumLoss };
   }, [closedTrades, livePositions]);
 
-  if (portfolioQ.isLoading) return <div className="loading-pulse"><div className="spinner" /><p>Chargement du portfolio…</p></div>;
+  if (portfolioQ.isLoading) return <PageSkeleton tiles={6} blockHeight={260} rows={5} />;
   if (portfolioQ.isError || !data) return <ApiErrorBanner msg={portfolioQ.error?.message || 'API indisponible — vérifiez que FastAPI tourne sur :8000'} onRetry={() => portfolioQ.refetch()} />;
 
   const { equity, stats } = data;

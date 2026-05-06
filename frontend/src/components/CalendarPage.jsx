@@ -6,6 +6,8 @@
 import { useMemo, useState } from 'react';
 import { useCatalystCalendar } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import EmptyState from './common/EmptyState';
+import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
 
 const HORIZONS = [7, 14, 30, 60, 90];
@@ -90,12 +92,7 @@ export default function CalendarPage() {
   }, [calQ.data]);
 
   if (calQ.isLoading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Chargement du calendrier…</p>
-      </div>
-    );
+    return <PageSkeleton tiles={4} blockHeight={220} rows={4} />;
   }
 
   if (calQ.isError) {
@@ -171,9 +168,11 @@ export default function CalendarPage() {
         </div>
 
         {days.length === 0 ? (
-          <div className="as-empty" style={{ padding: '3rem' }}>
-            📭 Aucun catalyseur sur les {horizon} prochains jours.
-          </div>
+          <EmptyState
+            icon="🗓"
+            title="Aucun catalyseur"
+            desc={`Pas d'earnings ni d'événement macro sur les ${horizon} prochains jours dans ton univers (positions ouvertes + watchlist).`}
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {days.map(day => (

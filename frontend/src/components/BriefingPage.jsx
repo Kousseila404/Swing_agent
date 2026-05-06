@@ -15,6 +15,7 @@ import {
   useStatus,
 } from '../hooks/useApi';
 import { fmtNum, fmtPctRaw, fmtPrice, fmtSignedPct } from '../utils/format';
+import { PageSkeleton } from './common/Skeleton';
 import TickerSpark from './common/TickerSpark';
 
 const REGIME_STYLES = {
@@ -155,12 +156,7 @@ export default function BriefingPage({ onNavigate }) {
 
   const isLoading = statusQ.isLoading || macroQ.isLoading || portfolioQ.isLoading;
   if (isLoading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Préparation du briefing…</p>
-      </div>
-    );
+    return <PageSkeleton tiles={6} blockHeight={160} rows={5} />;
   }
 
   const nPending = proposalsData.n_pending ?? 0;

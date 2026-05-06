@@ -10,6 +10,7 @@
 import { useMemo } from 'react';
 import { useAttribution } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import { PageSkeleton } from './common/Skeleton';
 
 const TILT_PALETTE = {
   qarp:          { bg: 'rgba(34,197,94,0.18)',  fg: '#22c55e' },
@@ -209,12 +210,7 @@ export default function AttributionPage() {
   }, [data]);
 
   if (attrQ.isLoading) {
-    return (
-      <div className="loading-pulse">
-        <div className="spinner" />
-        <p>Calcul attribution…</p>
-      </div>
-    );
+    return <PageSkeleton tiles={4} blockHeight={260} rows={3} />;
   }
 
   if (attrQ.isError || !data?.ok) {
