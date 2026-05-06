@@ -56,3 +56,5 @@ backend/htmlcov/
 
 # Backups locaux (générés par scripts/backup_journal.sh)
 backups/
+
+# auto-pull cron test marker 19:57:32
