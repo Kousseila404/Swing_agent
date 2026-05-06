@@ -52,10 +52,63 @@ def _needs_backfill(r: FinancialRatios) -> bool:
     return all(getattr(r, f) is None for f in _CRITICAL_FIELDS)
 
 
+# Phase 6 audit (2026-05-06) — champs critiques pour la détection de
+# divergence entre providers. Si primary ET fallback ont une valeur sur ces
+# champs et que la différence relative est > _DIVERGENCE_TOLERANCE, on log
+# un WARNING (proxy data quality, signal d'incohérence upstream).
+_DIVERGENCE_CHECK_FIELDS: tuple[str, ...] = (
+    "trailing_pe", "forward_pe", "ev_to_ebitda",
+    "return_on_equity", "operating_margin", "debt_to_equity",
+    "market_cap", "current_price",
+)
+_DIVERGENCE_TOLERANCE = 0.05  # 5%
+
+
+def _check_divergence(
+    primary: FinancialRatios,
+    fallback: FinancialRatios,
+    ticker: str,
+) -> list[str]:
+    """Compare valeurs non-None entre primary et fallback ; retourne la liste
+    des champs avec divergence > 5%. Log WARNING si non-vide."""
+    divergent: list[str] = []
+    for name in _DIVERGENCE_CHECK_FIELDS:
+        p_val = getattr(primary, name, None)
+        f_val = getattr(fallback, name, None)
+        if p_val is None or f_val is None:
+            continue
+        try:
+            p_f = float(p_val)
+            f_f = float(f_val)
+        except (TypeError, ValueError):
+            continue
+        if p_f == 0 or f_f == 0:
+            continue
+        denom = max(abs(p_f), abs(f_f))
+        if denom > 0 and abs(p_f - f_f) / denom > _DIVERGENCE_TOLERANCE:
+            divergent.append(f"{name}={p_f}/{f_f}")
+    if divergent:
+        logger.warning(
+            f"[Reconciliation] {ticker} divergence > {_DIVERGENCE_TOLERANCE:.0%} "
+            f"entre {primary.source_provider}/{fallback.source_provider} : "
+            f"{', '.join(divergent[:6])}"
+        )
+    return divergent
+
+
 def _merge(primary: FinancialRatios, fallback: FinancialRatios) -> FinancialRatios:
     """primary gagne, fallback comble les None. Retourne un nouveau FinancialRatios
     avec source_provider="primary+fallback" et backfill_fields listant ce qui a
-    été comblé."""
+    été comblé.
+
+    Phase 6 audit — détection de divergence entre primary et fallback sur les
+    champs où les deux ont une valeur (cf. _check_divergence). Le primary garde
+    la priorité (politique inchangée) mais on logge l'incohérence pour audit.
+    """
+    # Reconciliation : log si divergence > 5% sur champs critiques.
+    ticker = getattr(primary, "ticker", "?")
+    _check_divergence(primary, fallback, ticker)
+
     filled: list[str] = []
     merged_kwargs: dict = {}
     for f in fields(primary):
