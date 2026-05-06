@@ -924,3 +924,162 @@ def test_phase6_consistency_tilt_fires_on_balanced_excellence():
     import statistics as _stat
     mean_p = _stat.fmean(pillars)
     assert mean_p > 70, f"T_TOP mean(Q,V,R,M,G) = {mean_p} doit être > 70"
+
+
+# ─────────────────────────────────────────────────────────────────
+# PHASE 7 — quick_ratio + sector composite rank + fundamentals age
+# ─────────────────────────────────────────────────────────────────
+
+def test_phase7_quick_ratio_extends_risk_pillar():
+    """Phase 7 : un ticker fournissant `quick_ratio` doit avoir
+    risk_count = 3 (D/E + Current Ratio + Quick Ratio). Sans QR, fallback à 2.
+    """
+    with_qr = _mk_ticker("WITH_QR", "Technology")
+    with_qr["quick_ratio"] = 1.5
+    universe = {
+        "WITH_QR": with_qr,
+        "T1": _mk_ticker("T1", "Technology"),  # quick_ratio=None par défaut
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    assert scored["WITH_QR"]["pillars_data_count"]["risk"] == 3, (
+        f"WITH_QR risk_count = {scored['WITH_QR']['pillars_data_count']['risk']}, "
+        f"attendu 3"
+    )
+    assert scored["T1"]["pillars_data_count"]["risk"] == 2, (
+        f"T1 (sans quick_ratio) risk_count = "
+        f"{scored['T1']['pillars_data_count']['risk']}, attendu 2"
+    )
+
+
+def test_phase7_quick_ratio_high_boosts_risk_score():
+    """Un ticker avec quick_ratio très élevé (excellent liquidité immédiate)
+    doit avoir risk_score > son clone à QR bas, toutes choses égales par
+    ailleurs.
+    """
+    universe = _build_universe([
+        # SOLID : QR 3.0 (excellente liquidité)
+        ("SOLID", "Technology", {}),
+        # WEAK : QR 0.4 (liquidité tendue)
+        ("WEAK",  "Technology", {}),
+        # Bruits identiques en sector ≥ 12
+        *[(f"N{i}", "Technology", {}) for i in range(11)],
+    ])
+    universe["SOLID"]["quick_ratio"] = 3.0
+    universe["WEAK"]["quick_ratio"] = 0.4
+    for i in range(11):
+        universe[f"N{i}"]["quick_ratio"] = 1.0  # médiane
+    scored = _score_universe(universe)
+    assert scored["SOLID"]["risk_score"] > scored["WEAK"]["risk_score"], (
+        f"SOLID risk={scored['SOLID']['risk_score']} doit battre "
+        f"WEAK risk={scored['WEAK']['risk_score']}"
+    )
+
+
+def test_phase7_sector_composite_rank_exposed():
+    """Le payload doit exposer titan_composite_sector_pct, sector_z, sector_n."""
+    universe = _build_universe([
+        ("T1", "Technology", {"roe": 0.10}),
+        ("T2", "Technology", {"roe": 0.20}),
+        ("T3", "Technology", {"roe": 0.30}),
+        ("U1", "Utilities",  {"roe": 0.05}),
+        ("U2", "Utilities",  {"roe": 0.10}),
+        ("U3", "Utilities",  {"roe": 0.15}),
+    ])
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert "titan_composite_sector_pct" in r
+        assert "titan_composite_sector_z" in r
+        assert "titan_composite_sector_n" in r
+    # Tech sector : 3 tickers
+    assert scored["T1"]["titan_composite_sector_n"] == 3
+    # Utilities sector : 3 tickers
+    assert scored["U1"]["titan_composite_sector_n"] == 3
+
+
+def test_phase7_sector_rank_independent_per_sector():
+    """Le top de chaque secteur doit avoir un sector_pct ~100 — même si en
+    composite global le top Tech écrase le top Utilities."""
+    universe = _build_universe([
+        # Tech avec composites élevés (ROE haut, etc.)
+        ("T_TOP",  "Technology", {"roe": 0.70, "operating_margin": 0.50}),
+        ("T_MID",  "Technology", {"roe": 0.40, "operating_margin": 0.30}),
+        ("T_LOW",  "Technology", {"roe": 0.10, "operating_margin": 0.10}),
+        # Utilities avec composites moindres
+        ("U_TOP",  "Utilities",  {"roe": 0.15, "operating_margin": 0.20}),
+        ("U_MID",  "Utilities",  {"roe": 0.10, "operating_margin": 0.15}),
+        ("U_LOW",  "Utilities",  {"roe": 0.05, "operating_margin": 0.10}),
+    ])
+    scored = _score_universe(universe)
+    # Le top de chaque secteur a sector_pct ≈ max
+    assert scored["T_TOP"]["titan_composite_sector_pct"] > 50, (
+        f"T_TOP sector_pct = {scored['T_TOP']['titan_composite_sector_pct']}"
+    )
+    assert scored["U_TOP"]["titan_composite_sector_pct"] > 50, (
+        f"U_TOP sector_pct = {scored['U_TOP']['titan_composite_sector_pct']}"
+    )
+    # Les deux tops sont en haut de leur secteur même si T_TOP ≫ U_TOP en absolu.
+    assert scored["T_TOP"]["titan_composite_sector_pct"] == scored["U_TOP"]["titan_composite_sector_pct"], (
+        "T_TOP et U_TOP devraient avoir le même rank intra-secteur (n=3, top → 83.33)"
+    )
+
+
+def test_phase7_sector_z_zero_on_single_ticker_sector():
+    """Si un secteur a 1 ticker, son z-score sectoriel = 0 (pas de pairs
+    pour comparer). Pas de div/0."""
+    universe = _build_universe([
+        ("E1", "Energy", {}),
+        ("T1", "Technology", {}),
+        ("T2", "Technology", {}),
+        ("T3", "Technology", {}),
+        ("T4", "Technology", {}),
+        ("T5", "Technology", {}),
+    ])
+    scored = _score_universe(universe)
+    # E1 seul dans son secteur
+    assert scored["E1"]["titan_composite_sector_n"] == 1
+    assert scored["E1"]["titan_composite_sector_z"] == 0.0
+
+
+def test_phase7_fundamentals_age_days_parsed():
+    """fetched_at ISO → fundamentals_age_days en jours, arrondi à 1 décimale."""
+    from datetime import UTC, datetime, timedelta
+    # Ticker fetched il y a 12.5 jours
+    past = (datetime.now(UTC) - timedelta(days=12, hours=12)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    fresh = _mk_ticker("FRESH", "Technology")
+    fresh["fetched_at"] = past
+    universe = {
+        "FRESH": fresh,
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    age = scored["FRESH"]["fundamentals_age_days"]
+    assert age is not None, "fundamentals_age_days devrait être calculé"
+    # Tolérance : 12.0 ≤ age ≤ 13.0 (1 décimale + petit délai d'exécution)
+    assert 12.0 <= age <= 13.0, f"age = {age}, attendu ≈ 12.5"
+
+
+def test_phase7_fundamentals_age_none_on_missing_or_bad_format():
+    """Si fetched_at est absent / malformé / non-string → age = None."""
+    from modules.sector_metrics._scoring import _parse_fetched_at_age_days
+    assert _parse_fetched_at_age_days(None) is None
+    assert _parse_fetched_at_age_days("") is None
+    assert _parse_fetched_at_age_days("not-a-date") is None
+    assert _parse_fetched_at_age_days(12345) is None  # int non-string
+
+
+def test_phase7_fundamentals_age_negative_clamped_to_zero():
+    """fetched_at dans le futur (clock skew) → age = 0 (pas de négatif)."""
+    from datetime import UTC, datetime, timedelta
+
+    from modules.sector_metrics._scoring import _parse_fetched_at_age_days
+    future = (datetime.now(UTC) + timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    age = _parse_fetched_at_age_days(future)
+    assert age == 0.0, f"age = {age}, attendu 0.0 (futur clampé)"

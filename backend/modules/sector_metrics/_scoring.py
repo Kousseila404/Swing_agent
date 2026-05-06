@@ -18,13 +18,49 @@ from __future__ import annotations
 import math
 import statistics
 from bisect import bisect_left, bisect_right
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from modules.log import logger
 from modules.revisions_score import compute_revisions_pillar
 
 from ._utils import _safe_float, _upside_pct, _winsorize, _winsorize_by_sector
+
+
+def _parse_fetched_at_age_days(
+    fetched_at: Any,
+    *,
+    as_of: date | None = None,
+) -> float | None:
+    """Calcule l'âge (en jours) du `fetched_at` ISO d'un ticker vs `as_of`
+    (ou today si None). Retourne None si parsing impossible.
+
+    Format attendu : "YYYY-MM-DDTHH:MM:SSZ" (UTC). Tolère le suffixe ±HH:MM
+    via `datetime.fromisoformat` après normalisation du Z.
+
+    Garde-fous :
+      • Négatif (clock skew, fetched_at dans le futur) → 0.0.
+      • Round à 1 décimale (12.3 jours suffit, 12.345 est faux signal).
+    """
+    if not isinstance(fetched_at, str) or not fetched_at:
+        return None
+    try:
+        # ISO normalisation : "Z" → "+00:00" pour fromisoformat.
+        clean = fetched_at.replace("Z", "+00:00")
+        dt_fetched = datetime.fromisoformat(clean)
+        # Référentiel : on compare en UTC. Si as_of est une date, on la
+        # convertit en datetime UTC (00:00:00) ; sinon now(UTC).
+        if as_of is None:
+            now_dt = datetime.now(UTC)
+        else:
+            now_dt = datetime(
+                as_of.year, as_of.month, as_of.day, tzinfo=UTC,
+            )
+        delta_seconds = (now_dt - dt_fetched).total_seconds()
+        age_days = max(0.0, delta_seconds / 86400.0)
+        return round(age_days, 1)
+    except (ValueError, TypeError):
+        return None
 
 # Score neutre quand toutes les composantes d'un pilier sont absentes.
 # Pas 0 pour éviter de pénaliser injustement un trou d'API.
@@ -783,6 +819,14 @@ def _score_universe(
 
     d2e        = {k: _safe_float(tickers_map[k].get("debt_to_equity")) for k in keys}
     curr_ratio = {k: _safe_float(tickers_map[k].get("current_ratio")) for k in keys}
+    # Phase 7 audit (2026-05-06) — quick_ratio ajouté en composante Risk.
+    # Plus conservateur que current_ratio (exclut l'inventaire ≈ pas-cash),
+    # standard académique pour la liquidité court terme. Déjà collecté par
+    # yfinance (info.quickRatio) mais inutilisé jusqu'ici. Optionnel : NON
+    # ajouté au DQ gate pour ne pas exclure les tickers où yfinance ne le
+    # remplit pas — le Risk pillar dégrade gracieusement à 2 composantes
+    # (D/E + Current Ratio) quand QR absent.
+    qr         = {k: _safe_float(tickers_map[k].get("quick_ratio")) for k in keys}
 
     reco   = {k: _safe_float(tickers_map[k].get("recommendation_mean")) for k in keys}
     upside = {k: _upside_pct(tickers_map[k]) for k in keys}
@@ -832,6 +876,7 @@ def _score_universe(
     earnings_yield = _winsorize_by_sector(earnings_yield, sectors_raw)
     d2e            = _winsorize_by_sector(d2e,            sectors_raw)
     curr_ratio     = _winsorize_by_sector(curr_ratio,     sectors_raw)
+    qr             = _winsorize_by_sector(qr,             sectors_raw)
     rev_growth     = _winsorize_by_sector(rev_growth,     sectors_raw)
     eps_growth     = _winsorize_by_sector(eps_growth,     sectors_raw)
     # Risk-adjusted momentum : winsorisé GLOBAL car le momentum est une anomalie
@@ -860,6 +905,7 @@ def _score_universe(
     ey_r       = _percentile_rank_by_sector(earnings_yield, sectors_map, higher_is_better=True)
     d2e_r      = _percentile_rank_by_sector(d2e,       sectors_map, higher_is_better=False)
     curr_r     = _percentile_rank_by_sector(curr_ratio, sectors_map, higher_is_better=True)
+    qr_r       = _percentile_rank_by_sector(qr,        sectors_map, higher_is_better=True)
     reco_r     = _percentile_rank(reco,      higher_is_better=False)  # GLOBAL
     upside_r   = _percentile_rank(upside,    higher_is_better=True)   # GLOBAL
 
@@ -902,7 +948,10 @@ def _score_universe(
         )
 
         # RISK — bilan sain (low leverage, bonne liquidité). Higher = SAFER.
-        r, r_count = _pillar_score_with_count([d2e_r[k], curr_r[k]])
+        # Phase 7 audit : ajout quick_ratio (3e composante). QR exclut l'inventaire
+        # → meilleur proxy de la liquidité immédiate qu'un current_ratio gonflé
+        # par du stock invendable. Le pilier dégrade à 2 composantes si QR absent.
+        r, r_count = _pillar_score_with_count([d2e_r[k], curr_r[k], qr_r[k]])
 
         # SENTIMENT — consensus analyste + upside sur target.
         # Si les DEUX sources brutes sont absentes (typique FMP stable), on
@@ -1083,6 +1132,11 @@ def _score_universe(
         n_pillars_neutral = sum(1 for c in pillars_data_count.values() if c == 0)
         low_signal = n_pillars_neutral >= _LOW_SIGNAL_NEUTRAL_PILLAR_THRESHOLD
 
+        # Phase 7 audit — âge des fundamentaux par ticker. Permet à l'aval
+        # de filtrer les tickers à data stale (cache > 30j → Quality/Value
+        # reposent sur du périmé). Calculé vs `as_of` en backtest.
+        age_days = _parse_fetched_at_age_days(t_base.get("fetched_at"), as_of=as_of)
+
         scored[k] = {
             **t_base,
             "quality_score":            round(q, 2),
@@ -1112,6 +1166,8 @@ def _score_universe(
             "pillars_data_count":       pillars_data_count,
             "n_pillars_neutral":        n_pillars_neutral,
             "low_signal":               low_signal,
+            # Phase 7 audit — fraîcheur des fundamentaux.
+            "fundamentals_age_days":    age_days,
         }
 
     # ── Phase 6 audit — Composite z-score (universe-relative) ───────────
@@ -1137,5 +1193,48 @@ def _score_universe(
     else:
         for r in scored.values():
             r["titan_composite_z"] = 0.0
+
+    # ── Phase 7 audit — Sector-relative composite metrics ────────────────
+    # Pour la construction de portefeuille diversifié : ranker un ticker contre
+    # ses pairs sectoriels plutôt que contre l'univers entier. Un Tech à 65 et
+    # un Utility à 65 ne signifient pas la même chose — le composite est
+    # mécaniquement plus haut sur les secteurs structurellement bien notés.
+    #
+    # Calcule par secteur :
+    #   • titan_composite_sector_pct  → percentile rank intra-secteur (0-100)
+    #   • titan_composite_sector_z    → z-score intra-secteur
+    #   • titan_composite_sector_n    → taille du secteur (pour interpréter)
+    #
+    # Permet à l'auto_proposer / portfolio_engine de faire "top-1 par secteur"
+    # de manière équitable — pas dominé par les Tech qui ont des composites
+    # globalement plus élevés.
+    by_sector_scored: dict[str, list[tuple[str, float]]] = {}
+    for k_, r in scored.items():
+        sec = r.get("sector") or "Unknown"
+        by_sector_scored.setdefault(sec, []).append((k_, r["titan_composite_score"]))
+
+    for items in by_sector_scored.values():
+        n_sec = len(items)
+        scores_sec = [v for _, v in items]
+        # Percentile rank intra-secteur via _percentile_rank.
+        rank_input = {k_: v for k_, v in items}
+        sec_pct = _percentile_rank(rank_input, higher_is_better=True)
+        # z-score intra-secteur (μ_sector, σ_sector).
+        if n_sec >= 2:
+            mu_sec = statistics.fmean(scores_sec)
+            sig_sec = statistics.pstdev(scores_sec)
+        else:
+            mu_sec, sig_sec = 0.0, 0.0
+        for k_, score in items:
+            scored[k_]["titan_composite_sector_pct"] = (
+                round(sec_pct[k_], 2) if sec_pct[k_] is not None else None
+            )
+            if sig_sec > 0:
+                scored[k_]["titan_composite_sector_z"] = round(
+                    (score - mu_sec) / sig_sec, 3
+                )
+            else:
+                scored[k_]["titan_composite_sector_z"] = 0.0
+            scored[k_]["titan_composite_sector_n"] = n_sec
 
     return scored
