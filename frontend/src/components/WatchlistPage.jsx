@@ -34,13 +34,15 @@ export default function WatchlistPage() {
   });
   const [error, setError] = useState(null);
 
-  const items = watchQ.data?.items || [];
-
+  // On lit `items` à l'intérieur du useMemo pour ne pas dépendre d'une
+  // référence (`||  []` crée un nouvel array à chaque render).
   const sortedItems = useMemo(() => {
-    return [...items].sort((a, b) =>
+    const list = watchQ.data?.items || [];
+    return [...list].sort((a, b) =>
       (b.added_at || '').localeCompare(a.added_at || '')
     );
-  }, [items]);
+  }, [watchQ.data]);
+  const items = watchQ.data?.items || [];
 
   const handleAdd = (ev) => {
     ev.preventDefault();

@@ -238,7 +238,7 @@ export default function SettingsPage() {
     if (!window.confirm('Réinitialiser toutes les préférences UI ?')) return;
     [
       KEYS.capital, KEYS.maxHoldings, KEYS.topNMode, KEYS.fractional,
-    ].forEach(k => { try { localStorage.removeItem(k); } catch {} });
+    ].forEach(k => { try { localStorage.removeItem(k); } catch { /* private mode */ } });
     setCapital(DEFAULTS.capital);
     setMaxHoldings(DEFAULTS.maxHoldings);
     setTopNMode(DEFAULTS.topNMode);

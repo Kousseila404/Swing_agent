@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio, fetchThesisStatus } from '../api/client';
+import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio } from '../api/client';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
@@ -142,22 +142,7 @@ export default function PortfolioPage() {
   const portfolioQ = useQuery({ queryKey: ['portfolio'], queryFn: fetchPortfolio, refetchInterval: 15_000 });
   const curveQ     = useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, refetchInterval: 15_000 });
   const benchQ     = useSectorBenchmarkPortfolio();
-  const thesisQ    = useQuery({ queryKey: ['thesis_status'], queryFn: fetchThesisStatus, refetchInterval: 5 * 60_000 });
   const ltQ        = useQuery({ queryKey: ['lt_decision'],   queryFn: fetchLtDecision,   refetchInterval: 5 * 60_000 });
-
-  const thesisByTicker = useMemo(() => {
-    const idx = {};
-    for (const it of thesisQ.data?.items || []) {
-      const t = String(it.ticker || '').toUpperCase();
-      // En cas de doublon (multiple OPEN même ticker), garde le pire status.
-      const order = { BROKEN: 3, WARN: 2, INTACT: 1, NO_DATA: 0 };
-      const prev = idx[t];
-      if (!prev || (order[it.status] ?? 0) > (order[prev.status] ?? 0)) {
-        idx[t] = it;
-      }
-    }
-    return idx;
-  }, [thesisQ.data]);
 
   const ltByTicker = useMemo(() => {
     const idx = {};
@@ -173,7 +158,6 @@ export default function PortfolioPage() {
   }, [ltQ.data]);
 
   const ltSummary = ltQ.data?.summary;
-  const addOnTickers = ltSummary?.tickers_by_action?.ADD_ON || [];
 
   const [tab, setTab]                     = useState('open');
   // Refonte UI 2026-04-29 — vue cartes par défaut (4-15 positions),
@@ -184,7 +168,7 @@ export default function PortfolioPage() {
   });
   const setViewModePersisted = (m) => {
     setViewMode(m);
-    try { localStorage.setItem('portfolio_view_mode', m); } catch {}
+    try { localStorage.setItem('portfolio_view_mode', m); } catch { /* private mode */ }
   };
   const [closingTicker, setClosingTicker] = useState('');
   // Ticker pour modal d'analyse (clic sur ticker dans la carte ou le tableau).

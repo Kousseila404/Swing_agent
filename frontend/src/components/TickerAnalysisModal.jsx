@@ -8,6 +8,7 @@
  * 100 % données existantes (no IA, no API externe). Endpoint /api/ticker_analysis/{ticker}.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { addPriceAlert, fetchTickerAnalysis } from '../api/client.js';
 import {
@@ -493,11 +494,6 @@ function pctToneSigned(v) {
   return v >= 0 ? 'var(--success)' : 'var(--danger)';
 }
 
-function pctToneFromGoodness(v, goodHigh = true) {
-  if (v == null || !Number.isFinite(v)) return 'var(--text-muted)';
-  return goodHigh ? (v >= 0 ? '#4ade80' : '#f87171') : (v <= 0 ? '#4ade80' : '#f87171');
-}
-
 // Form palette pour les filings SEC.
 const FORM_TONE = {
   '10-K':   { bg: 'rgba(34,197,94,0.18)',  fg: '#4ade80', icon: '📘' },
@@ -518,21 +514,17 @@ function SecFilingsSection({ ticker }) {
   const [formFilter, setFormFilter] = useState('all');
   const filingsQ = useSecFilings(ticker, 50);
   const data = filingsQ.data || {};
-  const filings = data.filings || [];
 
+  // On lit `filings` à l'intérieur du useMemo : `data.filings || []` créerait
+  // une nouvelle ref à chaque render et invaliderait le memo.
   const filtered = useMemo(() => {
-    if (formFilter === 'all') return filings;
-    if (formFilter === 'reports') {
-      return filings.filter(f => /^10-[KQ]/.test(f.form));
-    }
-    if (formFilter === 'events') {
-      return filings.filter(f => /^8-K/.test(f.form));
-    }
-    if (formFilter === 'insider') {
-      return filings.filter(f => /^4/.test(f.form));
-    }
-    return filings;
-  }, [filings, formFilter]);
+    const list = filingsQ.data?.filings || [];
+    if (formFilter === 'all') return list;
+    if (formFilter === 'reports') return list.filter(f => /^10-[KQ]/.test(f.form));
+    if (formFilter === 'events')  return list.filter(f => /^8-K/.test(f.form));
+    if (formFilter === 'insider') return list.filter(f => /^4/.test(f.form));
+    return list;
+  }, [filingsQ.data, formFilter]);
 
   return (
     <Section title={`📂 Filings SEC EDGAR (${data.n_filings ?? 0})`}>
@@ -991,19 +983,28 @@ function TabButton({ tab, active, onClick }) {
 }
 
 export default function TickerAnalysisModal({ ticker, onClose }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Hack idiomatique : on stocke le ticker précédent dans un state, et on
+  // détecte le changement *pendant le render* pour reset le tab — sans
+  // useEffect (évite cascading render). Pattern recommandé par la doc React.
   const [tab, setTab] = useState('overview');
+  const [prevTicker, setPrevTicker] = useState(ticker);
+  if (prevTicker !== ticker) {
+    setPrevTicker(ticker);
+    setTab('overview');
+  }
   const [chartMode, setChartMode] = useState('compact'); // 'compact' | 'tradingview'
 
-  useEffect(() => {
-    if (!ticker) return;
-    setLoading(true); setError(null); setData(null); setTab('overview');
-    fetchTickerAnalysis(ticker)
-      .then(d => { setData(d); setLoading(false); })
-      .catch(e => { setError(e?.message || String(e)); setLoading(false); });
-  }, [ticker]);
+  // Migration vers React Query : annule le fetch précédent au changement de
+  // ticker, pas de cascade setState dans useEffect.
+  const analysisQ = useQuery({
+    queryKey: ['ticker_analysis', ticker],
+    queryFn: () => fetchTickerAnalysis(ticker),
+    enabled: !!ticker,
+    staleTime: 60_000,
+  });
+  const data = analysisQ.data;
+  const loading = analysisQ.isLoading;
+  const error = analysisQ.isError ? (analysisQ.error?.message || String(analysisQ.error)) : null;
 
   // ESC pour fermer
   useEffect(() => {

@@ -18,10 +18,49 @@ import { pushToast } from '../../utils/toastBus';
 
 const MENU_W = 220;
 
-export default function TickerContextMenu({ onOpenTicker, onNavigate }) {
+// Item / Divider sont des sous-composants stables, hoistés hors de
+// TickerContextMenu pour ne pas être recréés à chaque render (sinon
+// React Compiler signale "Cannot create components during render").
+function MenuItem({ icon, label, action, kbd, onAction }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onAction(action)}
+      style={{
+        width: '100%', textAlign: 'left',
+        background: 'none', border: 'none',
+        padding: '0.45rem 0.75rem',
+        color: 'var(--text-main)', fontFamily: 'inherit',
+        cursor: 'pointer', fontSize: '0.82rem',
+        display: 'flex', alignItems: 'center', gap: 10,
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(59,130,246,0.10)'}
+      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+    >
+      <span style={{ width: 18, fontSize: '0.95rem' }}>{icon}</span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {kbd && (
+        <span style={{
+          fontSize: '0.65rem', color: 'var(--text-muted)',
+          fontFamily: 'monospace',
+          border: '1px solid var(--panel-border)', padding: '0 5px',
+          borderRadius: 3,
+        }}>{kbd}</span>
+      )}
+    </button>
+  );
+}
+
+function MenuDivider() {
+  return <div style={{ height: 1, background: 'var(--panel-border)', margin: '4px 0' }} />;
+}
+
+export default function TickerContextMenu({ onOpenTicker }) {
   const [state, setState] = useState({ open: false, x: 0, y: 0, ticker: '' });
   const [toast, setToast] = useState(null);
   const menuRef = useRef(null);
+  const toastIdRef = useRef(0);
 
   // Listener global contextmenu : on intercepte UNIQUEMENT si l'élément
   // sous le curseur (ou un ancêtre) porte data-ticker.
@@ -63,7 +102,8 @@ export default function TickerContextMenu({ onOpenTicker, onNavigate }) {
   const close = () => setState(s => ({ ...s, open: false }));
 
   const flash = (text, type = 'ok') => {
-    setToast({ text, type, id: Date.now() });
+    toastIdRef.current += 1;
+    setToast({ text, type, id: toastIdRef.current });
     setTimeout(() => setToast(null), 2200);
   };
 
@@ -114,40 +154,6 @@ export default function TickerContextMenu({ onOpenTicker, onNavigate }) {
     }
   };
 
-  const Item = ({ icon, label, action, kbd }) => (
-    <button
-      type="button"
-      onClick={() => exec(action)}
-      style={{
-        width: '100%', textAlign: 'left',
-        background: 'none', border: 'none',
-        padding: '0.45rem 0.75rem',
-        color: 'var(--text-main)', fontFamily: 'inherit',
-        cursor: 'pointer', fontSize: '0.82rem',
-        display: 'flex', alignItems: 'center', gap: 10,
-        transition: 'background 0.1s',
-      }}
-      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(59,130,246,0.10)'}
-      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-    >
-      <span style={{ width: 18, fontSize: '0.95rem' }}>{icon}</span>
-      <span style={{ flex: 1 }}>{label}</span>
-      {kbd && (
-        <span style={{
-          fontSize: '0.65rem', color: 'var(--text-muted)',
-          fontFamily: 'monospace',
-          border: '1px solid var(--panel-border)', padding: '0 5px',
-          borderRadius: 3,
-        }}>{kbd}</span>
-      )}
-    </button>
-  );
-
-  const Divider = () => (
-    <div style={{ height: 1, background: 'var(--panel-border)',
-                  margin: '4px 0' }} />
-  );
-
   return (
     <>
       {state.open && (
@@ -174,14 +180,14 @@ export default function TickerContextMenu({ onOpenTicker, onNavigate }) {
           }}>
             {state.ticker}
           </div>
-          <Item icon="🎯" label="Ouvrir factsheet"     action="open" />
-          <Item icon="👁"  label="Ajouter à watchlist"  action="watch" />
-          <Divider />
-          <Item icon="📈" label="TradingView"          action="tradingview" />
-          <Item icon="🏛️" label="SEC EDGAR"             action="sec" />
-          <Item icon="📊" label="Finviz"               action="finviz" />
-          <Divider />
-          <Item icon="📋" label="Copier le ticker"     action="copy" />
+          <MenuItem icon="🎯" label="Ouvrir factsheet"     action="open"        onAction={exec} />
+          <MenuItem icon="👁"  label="Ajouter à watchlist"  action="watch"       onAction={exec} />
+          <MenuDivider />
+          <MenuItem icon="📈" label="TradingView"          action="tradingview" onAction={exec} />
+          <MenuItem icon="🏛️" label="SEC EDGAR"             action="sec"         onAction={exec} />
+          <MenuItem icon="📊" label="Finviz"               action="finviz"      onAction={exec} />
+          <MenuDivider />
+          <MenuItem icon="📋" label="Copier le ticker"     action="copy"        onAction={exec} />
         </div>
       )}
       {toast && (

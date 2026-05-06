@@ -174,7 +174,7 @@ function writeSidebarPref(v) {
 }
 
 export default function App() {
-  const [activePage, setActivePage] = useHashRoute('briefing', VALID_PAGES);
+  const [activePage, setActivePageRaw] = useHashRoute('briefing', VALID_PAGES);
   const { theme, density, toggleTheme, toggleDensity } = usePreferences();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteTicker, setPaletteTicker] = useState(null);
@@ -183,6 +183,13 @@ export default function App() {
   // Mode sidebar : 'expanded' | 'collapsed' (desktop) ; 'visible' | 'hidden' (mobile)
   const [sidebarDesktop, setSidebarDesktop] = useState(readSidebarPref); // expanded|collapsed
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false);
+
+  // Wrapper navigation : ferme le drawer mobile dans le même tick qu'un
+  // changement de page (évite un setState dans un useEffect → cascade render).
+  const setActivePage = (id) => {
+    setSidebarMobileOpen(false);
+    setActivePageRaw(id);
+  };
 
   // Header sticky : ombre subtile quand on scrolle (Intersection observer
   // serait plus propre mais scroll-listener léger suffit ici).
@@ -201,9 +208,6 @@ export default function App() {
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = 0;
   }, [activePage]);
-
-  // Ferme le drawer mobile quand on change de page.
-  useEffect(() => { setSidebarMobileOpen(false); }, [activePage]);
 
   // Quand on bascule sur desktop, le drawer mobile n'a plus de sens.
   // On dérive `effectiveMobileOpen` plutôt que de muter le state dans
@@ -416,7 +420,6 @@ export default function App() {
         />
         <TickerContextMenu
           onOpenTicker={(t) => setPaletteTicker(t)}
-          onNavigate={setActivePage}
         />
         <TableKeyNav onOpen={(t) => setPaletteTicker(t)} />
         {paletteTicker && (

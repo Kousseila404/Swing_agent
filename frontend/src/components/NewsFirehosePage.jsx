@@ -39,23 +39,26 @@ export default function NewsFirehosePage() {
 
   const newsQ = useNewsFirehose(days, 5);
   const data = newsQ.data || {};
-  const items = data.items || [];
   const errors = data.errors || [];
   const scope = data.scope || {};
 
-  const tickers = useMemo(
-    () => [...new Set(items.map(i => i.ticker))].sort(),
-    [items],
-  );
+  // `items` est dérivé de newsQ.data — on ne le sort PAS d'un useMemo car
+  // un `|| []` produirait une nouvelle référence à chaque render. On lit
+  // newsQ.data?.items à l'intérieur des memos qui en dépendent.
+  const tickers = useMemo(() => {
+    const list = newsQ.data?.items || [];
+    return [...new Set(list.map(i => i.ticker))].sort();
+  }, [newsQ.data]);
 
   const filtered = useMemo(() => {
-    return items.filter(it => {
+    const list = newsQ.data?.items || [];
+    return list.filter(it => {
       if (scopeFilter === 'position'  && !it.scope?.includes('position'))  return false;
       if (scopeFilter === 'watchlist' && !it.scope?.includes('watchlist')) return false;
       if (tickerFilter && it.ticker !== tickerFilter) return false;
       return true;
     });
-  }, [items, scopeFilter, tickerFilter]);
+  }, [newsQ.data, scopeFilter, tickerFilter]);
 
   if (newsQ.isLoading) {
     // 1er chargement peut prendre plusieurs secondes (le backend rebuild
@@ -78,7 +81,7 @@ export default function NewsFirehosePage() {
       <div className="cp-status-bar">
         <div className="status-chip">
           <span className="sc-lbl">Articles</span>
-          <span className="sc-val">{items.length}</span>
+          <span className="sc-val">{(data.items || []).length}</span>
           <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
             sur {data.n_tickers || 0} tickers
           </span>

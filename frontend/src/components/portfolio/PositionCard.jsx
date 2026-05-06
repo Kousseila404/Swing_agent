@@ -9,7 +9,7 @@
  *   5. Detail  — repliable Buffett breakdown
  *   6. Actions — Renforcer / Clôturer
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 const ACTION_PALETTE = {
   HOLD:              { label: 'CONSERVER',     border: 'rgba(148,163,184,0.35)', bg: 'rgba(148,163,184,0.06)', accent: '#94a3b8', cta: 'Position stable, rien à faire pour l\'instant.' },
@@ -35,6 +35,29 @@ const CATEGORY_LABEL = {
 const fmtPct = (n) => (n == null || !Number.isFinite(n)) ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 const fmtUsd = (n) => (n == null || !Number.isFinite(n)) ? '—' : `$${n.toFixed(2)}`;
 
+// Sous-composant hoisté hors de PositionCard pour éviter d'être recréé
+// à chaque render (React Compiler refuse les composants définis dans le
+// corps d'un autre composant).
+function PriceRow({ icon, label, value, pctVs, color }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'baseline', gap: 6, lineHeight: 1.3,
+      whiteSpace: 'nowrap',
+    }}>
+      <span style={{ color, fontSize: '0.66rem', flexShrink: 0 }}>{icon}</span>
+      <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem', flexShrink: 0 }}>{label}</span>
+      <span style={{ color, fontSize: '0.74rem', fontWeight: 600, marginLeft: 'auto' }}>
+        {fmtUsd(value)}
+      </span>
+      {Number.isFinite(pctVs) && (
+        <span style={{ color, fontSize: '0.66rem', minWidth: 42, textAlign: 'right' }}>
+          {fmtPct(pctVs)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── Matrice de prix : 3 colonnes propres, zéro chevauchement ─
 function PriceMatrix({ entry, current, sl, tp, buffett_sl, buffett_tp, let_it_ride }) {
   if (!entry) return null;
@@ -52,24 +75,6 @@ function PriceMatrix({ entry, current, sl, tp, buffett_sl, buffett_tp, let_it_ri
   const currentTone = currentVsEntry == null
     ? '#cbd5e1'
     : currentVsEntry >= 0 ? '#34d399' : '#f87171';
-
-  const Row = ({ icon, label, value, pctVs, color }) => (
-    <div style={{
-      display: 'flex', alignItems: 'baseline', gap: 6, lineHeight: 1.3,
-      whiteSpace: 'nowrap',
-    }}>
-      <span style={{ color, fontSize: '0.66rem', flexShrink: 0 }}>{icon}</span>
-      <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem', flexShrink: 0 }}>{label}</span>
-      <span style={{ color, fontSize: '0.74rem', fontWeight: 600, marginLeft: 'auto' }}>
-        {fmtUsd(value)}
-      </span>
-      {Number.isFinite(pctVs) && (
-        <span style={{ color, fontSize: '0.66rem', minWidth: 42, textAlign: 'right' }}>
-          {fmtPct(pctVs)}
-        </span>
-      )}
-    </div>
-  );
 
   return (
     <div style={{
@@ -93,10 +98,10 @@ function PriceMatrix({ entry, current, sl, tp, buffett_sl, buffett_tp, let_it_ri
             marginBottom: 4,
           }}>Downside</div>
           {Number.isFinite(sl) && sl > 0 && (
-            <Row icon="↓" label="SL broker"  value={sl} pctVs={(sl/entry-1)*100} color="#f87171" />
+            <PriceRow icon="↓" label="SL broker"  value={sl} pctVs={(sl/entry-1)*100} color="#f87171" />
           )}
           {Number.isFinite(buffett_sl) && buffett_sl > 0 && (
-            <Row icon="↓" label="Buffett SL" value={buffett_sl} pctVs={(buffett_sl/entry-1)*100} color="#fb7185" />
+            <PriceRow icon="↓" label="Buffett SL" value={buffett_sl} pctVs={(buffett_sl/entry-1)*100} color="#fb7185" />
           )}
         </div>
 
@@ -140,11 +145,11 @@ function PriceMatrix({ entry, current, sl, tp, buffett_sl, buffett_tp, let_it_ri
             </div>
           ) : (
             Number.isFinite(buffett_tp) && buffett_tp > 0 && (
-              <Row icon="↑" label="Buffett TP" value={buffett_tp} pctVs={(buffett_tp/entry-1)*100} color="#86efac" />
+              <PriceRow icon="↑" label="Buffett TP" value={buffett_tp} pctVs={(buffett_tp/entry-1)*100} color="#86efac" />
             )
           )}
           {Number.isFinite(tp) && tp > 0 && (
-            <Row icon="↑" label="TP broker" value={tp} pctVs={(tp/entry-1)*100} color="#22c55e" />
+            <PriceRow icon="↑" label="TP broker" value={tp} pctVs={(tp/entry-1)*100} color="#22c55e" />
           )}
         </div>
       </div>
@@ -232,11 +237,23 @@ export default function PositionCard({ position, lt, onClickClose, onClickAdd, o
   const tp     = parseFloat(position.Take_Profit) || null;
   const upnl   = position.unrealized_pnl;
   const pnlPct = position.pct_from_entry;
-  const days   = position.Date ? Math.floor((Date.now() - new Date(position.Date).getTime()) / 86_400_000) : null;
 
-  const q = lt?.buffett_breakdown?.[0]?.match(/Q-score (\d+)/)?.[1];
-  const f = lt?.buffett_breakdown?.[0]?.match(/Piotroski (\d+)\/9/)?.[1];
-  const v = lt?.buffett_breakdown?.[1]?.match(/V-score (\d+)/)?.[1];
+  // "Days held" : Date.now() est impur côté React Compiler. On le calcule
+  // au mount uniquement (lazy init), suffisant pour un compteur quotidien
+  // qui ne change pas pendant une session de quelques heures.
+  const [days] = useState(() =>
+    position.Date
+      ? Math.floor((Date.now() - new Date(position.Date).getTime()) / 86_400_000)
+      : null,
+  );
+
+  // Les regex match() retournent un nouvel array à chaque appel — on
+  // mémoïse pour éviter de re-parser à chaque render.
+  const { q, f, v } = useMemo(() => ({
+    q: lt?.buffett_breakdown?.[0]?.match(/Q-score (\d+)/)?.[1],
+    f: lt?.buffett_breakdown?.[0]?.match(/Piotroski (\d+)\/9/)?.[1],
+    v: lt?.buffett_breakdown?.[1]?.match(/V-score (\d+)/)?.[1],
+  }), [lt]);
 
   const pnlTone = (upnl ?? 0) >= 0 ? '#34d399' : '#f87171';
 

@@ -3,7 +3,7 @@
 // Lecture des toasts via toastBus (stockage sessionStorage). Marque "lu"
 // au moment où l'historique est ouvert.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { clearHistory, getHistory, subscribe } from '../../utils/toastBus';
 
 const READ_KEY = 'toast_last_read_ts';
@@ -13,7 +13,7 @@ function _lastRead() {
 }
 
 function _markRead(ts) {
-  try { sessionStorage.setItem(READ_KEY, ts); } catch {}
+  try { sessionStorage.setItem(READ_KEY, ts); } catch { /* private mode */ }
 }
 
 function relTime(iso) {
@@ -32,7 +32,10 @@ function relTime(iso) {
 export default function ToastBell() {
   const [history, setHistory] = useState(() => getHistory());
   const [open, setOpen] = useState(false);
-  const [unread, setUnread] = useState(0);
+  // `lastReadTick` force le recalcul de `unread` quand on ouvre la cloche
+  // (au moment où on appelle _markRead). On ne stocke pas lastRead lui-même
+  // dans un state pour rester source-of-truth = sessionStorage.
+  const [lastReadTick, setLastReadTick] = useState(0);
   const popRef = useRef(null);
 
   // Subscribe to bus
@@ -41,12 +44,14 @@ export default function ToastBell() {
     return unsub;
   }, []);
 
-  // Recompute unread count
-  useEffect(() => {
+  // unread est dérivé de history + sessionStorage — useMemo plutôt que
+  // useState+useEffect (évite cascading render et set-state-in-effect).
+  const unread = useMemo(() => {
     const last = _lastRead();
-    const n = history.filter(t => !last || (t.ts || '') > last).length;
-    setUnread(n);
-  }, [history]);
+    return history.filter(t => !last || (t.ts || '') > last).length;
+    // lastReadTick fait partie des deps pour invalider le memo après _markRead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, lastReadTick]);
 
   // Click outside / Escape closes
   useEffect(() => {
@@ -66,7 +71,8 @@ export default function ToastBell() {
   const openHistory = () => {
     if (!open && history.length > 0) {
       _markRead(history[history.length - 1].ts || new Date().toISOString());
-      setUnread(0);
+      // Tick le memo de unread → recompte avec la nouvelle lastRead.
+      setLastReadTick((t) => t + 1);
     }
     setOpen(o => !o);
   };
