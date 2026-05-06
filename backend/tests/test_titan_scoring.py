@@ -598,3 +598,178 @@ def test_lot1_zero_ratios_treated_as_none():
     # ZERO ne doit PAS être au top Value (ses ratios sont neutralisés,
     # value reposera uniquement sur fcf_yield qui est identique partout).
     assert scored["OK"]["value_score"] >= scored["ZERO"]["value_score"]
+
+
+# ─────────────────────────────────────────────────────────────────
+# PHASE 5 — Audit qualité signal (2026-05-06)
+# ─────────────────────────────────────────────────────────────────
+
+def test_phase5_percentile_rank_bisect_correctness():
+    """Le passage `bisect_left/right` doit produire EXACTEMENT le même résultat
+    que la formule naïve `sum(< v) + 0.5 × sum(== v)`. Test de non-régression
+    numérique : on évalue manuellement l'ancienne formule sur quelques valeurs
+    et on compare à la nouvelle implémentation.
+    """
+    from modules.sector_metrics._scoring import _percentile_rank
+    values = {
+        "A": 10.0, "B": 20.0, "C": 20.0, "D": 30.0, "E": 30.0,
+        "F": 30.0, "G": 40.0, "H": 50.0, "I": None, "J": float("inf"),
+    }
+    out = _percentile_rank(values, higher_is_better=True)
+    # n = 8 valeurs présentes finies. Pour D=30.0 : less = 3 (A,B,C),
+    # equal = 3 (D,E,F) → pct = (3 + 0.5×3) / 8 × 100 = 56.25.
+    assert abs(out["D"] - 56.25) < 1e-9, f"D pct: {out['D']}"
+    # Pour A=10.0 : less = 0, equal = 1 → pct = 0.5 / 8 × 100 = 6.25.
+    assert abs(out["A"] - 6.25) < 1e-9
+    # Pour H=50.0 : less = 7, equal = 1 → pct = (7+0.5)/8 × 100 = 93.75.
+    assert abs(out["H"] - 93.75) < 1e-9
+    # None reste None ; inf est exclu (math.isfinite=False) → None.
+    assert out["I"] is None
+    assert out["J"] is None
+
+
+def test_phase5_percentile_rank_inversion_consistent():
+    """higher_is_better=False produit l'inverse exact de True (100 - pct)."""
+    from modules.sector_metrics._scoring import _percentile_rank
+    values = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
+    up = _percentile_rank(values, higher_is_better=True)
+    down = _percentile_rank(values, higher_is_better=False)
+    for k in values:
+        assert abs((up[k] or 0) + (down[k] or 0) - 100.0) < 1e-9
+
+
+def test_phase5_peg_floor_treats_pathological_low_as_none():
+    """PEG < 0.10 = artefact mathématique (denom EPS quasi-nul) → traité
+    comme None, ne doit PAS classer le ticker top Value."""
+    universe = _build_universe([
+        # FAKE_BARGAIN : PEG = 0.05 (artefact). Doit être neutralisé.
+        ("FAKE", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        # REAL_VALUE : PEG = 0.8 (vraie growth pas chère).
+        ("REAL", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        # Bruit pour avoir n>=2 dans les ranks.
+        ("MID1", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        ("MID2", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+        ("MID3", "Technology", {"ev_to_ebitda": 30.0, "forward_pe": 35.0}),
+    ])
+    universe["FAKE"]["peg_ratio"] = 0.05  # < _PEG_SANITY_MIN
+    universe["REAL"]["peg_ratio"] = 0.8
+    universe["MID1"]["peg_ratio"] = 1.5
+    universe["MID2"]["peg_ratio"] = 2.0
+    universe["MID3"]["peg_ratio"] = 2.5
+    scored = _score_universe(universe)
+    # REAL (PEG 0.8 légitime, top du rank cheap-growth) doit avoir un
+    # value_score > FAKE (PEG 0.05 neutralisé → contribue 0 composante PEG).
+    assert scored["REAL"]["value_score"] > scored["FAKE"]["value_score"], (
+        f"REAL V={scored['REAL']['value_score']} should beat FAKE "
+        f"V={scored['FAKE']['value_score']} (PEG 0.05 neutralized)"
+    )
+
+
+def test_phase5_pillars_data_count_exposed():
+    """Le payload doit exposer pillars_data_count par pilier — utile pour
+    distinguer un score 70 dense (4/4 inputs) d'un score 70 sparse (1/4)."""
+    universe = {
+        f"T{i}": _mk_ticker(f"T{i}", "Technology")
+        for i in range(5)
+    }
+    scored = _score_universe(universe)
+    for r in scored.values():
+        assert "pillars_data_count" in r
+        assert isinstance(r["pillars_data_count"], dict)
+        # Tous les piliers core doivent être présents (même si count=0).
+        for k in ("quality", "value", "risk", "sentiment", "momentum",
+                  "piotroski", "growth", "revisions", "insider"):
+            assert k in r["pillars_data_count"]
+        # Sur un ticker complet, q_count = 3 (roe, opm, gross_margin tous fournis).
+        assert r["pillars_data_count"]["quality"] == 3
+
+
+def test_phase5_low_signal_flag_when_many_pillars_neutral():
+    """Un ticker avec 4+ piliers à count=0 (tous None) doit être low_signal=True.
+
+    Avec le defaults complet de _mk_ticker, sentiment+revisions+insider
+    sont à count 0 ou 1 selon la dispo des champs. Pour avoir 4+ piliers
+    à count=0, il faut nuller plusieurs métriques.
+    """
+    sparse = _mk_ticker(
+        "SPARSE", "Technology",
+        roe=None, op_margin=None, gross_margin=None,        # quality 0/3
+        ev_to_ebitda=None, forward_pe=None, free_cash_flow=None,  # value 0/4 (plus PEG/EY non set)
+        debt_to_equity=None, current_ratio=None,            # risk 0/2
+        recommendation_mean=None, price_target_mean=None,   # sentiment 0/2
+        momentum_return_pct=None, momentum_risk_adjusted=None,    # momentum 0/3
+        revenue_growth=None, earnings_growth=None,          # growth 0/2
+    )
+    # Ce ticker a DQ ≈ 0/11 → exclu par le gate _MIN_DATA_QUALITY=0.70.
+    # Pour quand même tester low_signal, on injecte 8 fields requis pour DQ
+    # mais qui ne nourrissent pas tous les piliers (cas réel : un mid-cap
+    # qui n'a pas couverture analyste mais a des fondamentaux complets).
+    holes = _mk_ticker(
+        "HOLES", "Technology",
+        recommendation_mean=None, price_target_mean=None,    # sentiment count=0
+        momentum_return_pct=None, momentum_risk_adjusted=None,    # momentum count=0
+        # revisions/insider non fournis = count=0 par défaut
+    )
+    universe = {
+        "HOLES": holes,
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    # On ignore SPARSE (filtré par DQ gate).
+    _ = sparse
+    scored = _score_universe(universe)
+    if "HOLES" not in scored:
+        # Si HOLES exclu par DQ (n'utilise pas momentum_return_pct...), test no-op.
+        return
+    # HOLES : sentiment=0, momentum=0, revisions=0, insider=0 → 4 piliers neutres.
+    counts = scored["HOLES"]["pillars_data_count"]
+    n_zero = sum(1 for v in counts.values() if v == 0)
+    assert n_zero >= 4, f"HOLES neutral pillars: {counts}"
+    assert scored["HOLES"]["low_signal"] is True
+
+
+def test_phase5_consistency_tilt_does_not_fire_with_synthetic_neutrals():
+    """Bug fix Phase 5 : le tilt 'consistent' ne doit PAS se déclencher
+    quand `pillars_with_data < _CONSISTENCY_MIN_PILLARS_USED` (auparavant
+    s=50 neutre artificiel comptait dans la dispersion → faux positif).
+
+    Le SPARSE ticker doit SURVIVRE au gate DQ (≥ 0.70) tout en ayant
+    plusieurs piliers à count=0 :
+      • Null reco + target + mom_return = 3 fields DQ manquants → DQ = 8/11 ≈ 0.73 ✓
+      • Sentiment count=0 (skip via sentiment_available=False)
+      • Momentum count=0 (mom_return + mom_ra + mom_52wh tous None)
+      • Revisions count=0 (pas de data analyste)
+      • Insider count=0 (pas de field)
+    → pillars_with_data = {Q, V, R, P, G} = 5 < 6 → consistent absent.
+
+    Avant le fix, l'ancienne formule `pillars_valid = [q,v,r,s,m,p,g]` aurait
+    inclus s=50 et m=50 (synthétiques), produit une std faible, et déclenché
+    `consistent` à tort.
+    """
+    universe = {
+        "SPARSE": _mk_ticker(
+            "SPARSE", "Technology",
+            recommendation_mean=None, price_target_mean=None,  # sentiment count=0
+            momentum_return_pct=None, momentum_risk_adjusted=None,  # momentum count=0
+            # revisions/insider non fournis = count=0
+        ),
+        "T1": _mk_ticker("T1", "Technology"),
+        "T2": _mk_ticker("T2", "Technology"),
+        "T3": _mk_ticker("T3", "Technology"),
+        "T4": _mk_ticker("T4", "Technology"),
+    }
+    scored = _score_universe(universe)
+    assert "SPARSE" in scored, "SPARSE devrait survivre au gate DQ (DQ≈0.73)"
+    counts = scored["SPARSE"]["pillars_data_count"]
+    # Sanity : sentiment + momentum + revisions + insider à count=0
+    assert counts["sentiment"] == 0
+    assert counts["momentum"] == 0
+    assert counts["revisions"] == 0
+    assert counts["insider"] == 0
+    # Le flag consistent NE doit PAS apparaître (5 piliers réels < 6 minimum).
+    assert "consistent" not in scored["SPARSE"]["titan_tilt_flags"], (
+        f"SPARSE flags = {scored['SPARSE']['titan_tilt_flags']} — consistent "
+        f"ne devrait pas se déclencher avec si peu de piliers nourris"
+    )
