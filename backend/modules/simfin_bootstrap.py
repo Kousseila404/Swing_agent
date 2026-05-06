@@ -179,7 +179,8 @@ def _generate_snapshot_for_date(
         return 0
 
     # Score le universe rebuilt à cette date.
-    scored = _score_universe(rebuilt)
+    # Phase 1 audit — as_of=target_date active le gate Piotroski Y-1 strict.
+    scored = _score_universe(rebuilt, as_of=target_date)
     if not scored:
         return 0
 

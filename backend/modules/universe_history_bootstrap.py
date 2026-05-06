@@ -229,7 +229,9 @@ def _materialize_snapshot(
     if not ticker_rows:
         return 0
 
-    scored = _score_universe(ticker_rows)
+    # Phase 1 audit (2026-05-06) — propage as_of=snapshot_date pour activer le
+    # gate Piotroski Y-1 strict (refuse Y-1 si publish_date > snapshot_date).
+    scored = _score_universe(ticker_rows, as_of=as_of)
     if not scored:
         return 0
 

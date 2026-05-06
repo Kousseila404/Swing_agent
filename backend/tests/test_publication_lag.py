@@ -334,9 +334,14 @@ def test_piotroski_falls_back_when_period_end_missing(monkeypatch):
 
 def test_piotroski_handles_corrupted_period_end_string(monkeypatch):
     """`fundamentals_period_end_y1` invalide (string non-ISO) → ne crash pas,
-    fallback sur le comportement legacy (utilise Y-1)."""
+    et REFUSE les Y-1 (Phase 1 audit : on ne peut pas vérifier la
+    publishability d'une date corrompue ⇒ fallback sur snapshot lookup,
+    qui retourne None faute d'historique)."""
+    # Patch _lookup_yoy_snapshot pour qu'il retourne None (pas d'historique).
+    monkeypatch.setattr(_scoring, "_lookup_yoy_snapshot", lambda *a, **kw: None)
     row = _row_with_yoy_fields("not-a-date")
     score, diag = _scoring._piotroski_score_pillar(
         row, as_of=date(2025, 6, 1), publication_lag_days=90,
     )
-    assert diag["f_score_max"] == 9
+    # Date corrompue → Y-1 refusé → seuls les 4 critères absolus évalués.
+    assert diag["f_score_max"] == 4

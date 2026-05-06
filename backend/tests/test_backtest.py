@@ -386,7 +386,8 @@ def test_run_titan_top_n_smoke_with_two_snapshots(monkeypatch):
                         lambda d: snap_a if d == fake_dates[0] else snap_b)
 
     result = bt.run_titan_top_n(top_n=10, benchmark=None,
-                                 weighting="equal", point_in_time=False)
+                                 weighting="equal", point_in_time=False,
+                                 publication_lag_days=0)
     assert result.diagnostics["n_periods"] == 1
     assert result.total_return == pytest.approx(0.05, rel=1e-6)
 

@@ -425,7 +425,7 @@ def run_titan_top_n(
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
     point_in_time: bool = True,
-    publication_lag_days: int = 0,
+    publication_lag_days: int = 5,
     book_size_usd: float = 100_000.0,
     impact_coef: float = 0.0,
     fallback_turnover_ratio: float = 0.005,
@@ -440,11 +440,10 @@ def run_titan_top_n(
         slippage_bps: bps de slippage one-way par turnover (défaut 0).
         commission_per_share: $ par action sur les ordres (défaut 0).
         publication_lag_days: décale le ranking de N jours pour éviter le
-            lookahead fondamentaux (défaut 0 = pas de lag, comportement
-            historique). 90 j = lag 10-K typique, recommandé pour un
-            backtest production-grade. À signal_date d_i, on utilisera
-            le snapshot le plus récent < d_i - lag pour ranker, mais le
-            return reste mesuré sur (d_i, d_{i+1}).
+            lookahead fondamentaux (défaut 5 = lag minimum FMP/yfinance T+2 à
+            T+5). 90 j = lag 10-K typique pour un backtest production-grade.
+            À signal_date d_i, on utilisera le snapshot le plus récent < d_i
+            - lag pour ranker, mais le return reste mesuré sur (d_i, d_{i+1}).
     """
     dates = universe_history.list_snapshots()
     if len(dates) < 2:
@@ -454,12 +453,26 @@ def run_titan_top_n(
         )
 
     snapshots: list[tuple[date, dict[str, Any]]] = []
+    n_bootstrap = 0
     for d in dates:
         snap = universe_history.read_snapshot(d)
         if snap:
             snapshots.append((d, snap))
+            # Détecte si le snapshot vient du bootstrap rétroactif (fundamentals
+            # figés à aujourd'hui = lookahead). Cf. universe_history_bootstrap.py.
+            if (snap.get("macro") or {}).get("_bootstrap"):
+                n_bootstrap += 1
     if len(snapshots) < 2:
         raise ValueError("Snapshots illisibles")
+    if n_bootstrap > 0:
+        logger.warning(
+            f"[Backtest] LOOKAHEAD WARNING: {n_bootstrap}/{len(snapshots)} "
+            f"snapshots viennent du bootstrap rétroactif — fundamentals figés "
+            f"à aujourd'hui (Q/V/R/S/P/G/RV/IN). Seuls Momentum + current_price "
+            f"sont vrais point-in-time. Les métriques alpha/IC sont biaisées "
+            f"vers le haut. Pour un backtest as-reported, utiliser des snapshots "
+            f"matérialisés en live (cron quotidien)."
+        )
 
     # Audit S1.1 — filtre point-in-time : à chaque date, on ne ranke que
     # les tickers qui étaient actifs à ce moment (registry delisted). Sans
@@ -578,6 +591,8 @@ def run_titan_top_n(
         "n_snapshots":          len(snapshots),
         "n_periods":            len(periods),
         "n_skipped_lag":        n_skipped_periods,
+        "n_bootstrap_snapshots": n_bootstrap,
+        "lookahead_warning":     n_bootstrap > 0,
         "benchmark":            benchmark,
         "weighting":            weighting,
         "slippage_bps":         slippage_bps,
@@ -619,10 +634,11 @@ def _main() -> int:
                         "Alpaca = 0 ; Interactive Brokers = 0.005.")
     p.add_argument("--no-point-in-time", action="store_true",
                    help="Désactive le filtre point-in-time (registry delisted).")
-    p.add_argument("--publication-lag-days", type=int, default=0,
+    p.add_argument("--publication-lag-days", type=int, default=5,
                    help="Décalage du ranking en jours (anti-lookahead "
-                        "fondamentaux). 0 = pas de lag (défaut, comportement "
-                        "historique). 90 = recommandé production, lag 10-K. "
+                        "fondamentaux). Défaut 5 j = lag minimum FMP/yf T+2 à T+5. "
+                        "0 = pas de lag (legacy, lookahead implicite). "
+                        "90 = lag 10-K production-grade. "
                         "Quand lag > historique → période skippée.")
     p.add_argument("--book-size-usd", type=float, default=100_000.0,
                    help="Taille du book simulé en USD (défaut 100k). Sert "
