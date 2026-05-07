@@ -177,6 +177,12 @@ class FinancialRatios:
     # "ev_to_ebitda"] si FMP a manqué ces champs et YF les a fournis). None = pas
     # de fallback déclenché, [] = fallback déclenché mais rien à combler.
     backfill_fields: list[str] | None = None
+    # Bug #20 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-20) — divergences détectées entre primary et
+    # fallback (>5 % sur fields critiques : trailing_pe, forward_pe, ev_ebitda,
+    # ROE, op_margin, D/E, market_cap, current_price). None = pas de fallback,
+    # [] = fallback OK pas de divergence, list = items "field=primary/fallback".
+    # Propagé jusqu'au scoring pour que l'aval pénalise la confidence.
+    cross_provider_divergence: list[str] | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
