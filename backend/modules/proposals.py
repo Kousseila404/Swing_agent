@@ -41,27 +41,52 @@ PROPOSALS_AUDIT_PATH = api_core.BASE / "data" / "proposals_audit.jsonl"
 # Statuts terminaux : pas de transition possible.
 _TERMINAL_STATUSES = {"executed", "rejected", "expired"}
 
-# TTL par défaut : une proposition non décidée 36 h est marquée expired.
-# 36h couvre un weekend (vendredi soir → lundi matin) sans expirer prématurément.
-DEFAULT_TTL_HOURS = 36
+# TTL par défaut — désactivé (audit 2026-05-07). Comportement antérieur :
+# expiration automatique au bout de 36 h. Désormais une proposition pending
+# reste visible jusqu'à action manuelle (approve/reject) ou regenerate.
+# Override via env var PROPOSAL_TTL_HOURS (>0 = nb d'heures, 0 ou unset = aucun
+# TTL, comportement par défaut).
+DEFAULT_TTL_HOURS: float = 0.0
+
+# Sentinel ISO pour `expires_at` quand le TTL est désactivé. La comparaison
+# string ("9999-…" vs now_iso) reste textuellement correcte → `expire_pending`
+# ne déclenche jamais sur ce sentinel sans branchement spécial.
+_NEVER_EXPIRES_ISO = "9999-12-31T23:59:59Z"
+
+
+def _proposal_ttl_hours_default() -> float:
+    """Résout le TTL par défaut depuis l'env. Audit 2026-05-07 : default 0
+    (TTL désactivé). PROPOSAL_TTL_HOURS=36 (par exemple) restaure l'ancien
+    comportement — utile en CI/test ou en dev pour rejouer la doctrine.
+    """
+    raw = (os.getenv("PROPOSAL_TTL_HOURS") or "").strip()
+    if not raw:
+        return DEFAULT_TTL_HOURS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_TTL_HOURS
+
 
 # Garde uniquement les N dernières propositions terminées dans la file vivante.
 # Au-delà, elles ne servent qu'à l'audit (qui reste complet via .jsonl).
 _LIVE_HISTORY_LIMIT = 100
 
-# Cooldown anti-veto : combien de jours un ticker rejected doit "sécher" avant
-# de pouvoir être reproposé. Évite que l'auto_proposer repropose dès le lendemain
-# un ticker que l'utilisateur vient de veto-er. 7 jours = fenêtre courte qui
-# laisse la config bouger (news, swing régime) sans harceler.
-# Override via env var VETO_COOLDOWN_DAYS (0 = cooldown désactivé, comportement pré-fix).
+# Cooldown anti-veto — désactivé par défaut depuis 2026-05-07. Historiquement
+# on bannissait un ticker pendant 7 jours après veto pour éviter le harcèlement
+# auto_proposer. Doctrine inversée : l'utilisateur veut voir ses choix
+# re-questionnés à chaque cycle (le contexte change, la file évolue).
+# Override via env var VETO_COOLDOWN_DAYS (>0 = nb de jours, 0 ou unset = aucun
+# cooldown, comportement par défaut). L'historique des vétos reste consultable
+# via `list_veto_history()` (audit jsonl + file vivante).
 def _veto_cooldown_days() -> float:
     raw = (os.getenv("VETO_COOLDOWN_DAYS") or "").strip()
     if not raw:
-        return 7.0
+        return 0.0
     try:
         return max(0.0, float(raw))
     except ValueError:
-        return 7.0
+        return 0.0
 
 
 # Cooldown anti-churn WIN/LOSS : un ticker clôturé récemment (TP, SL, TS, time exit)
@@ -226,14 +251,25 @@ def make_proposal(
     sector: str,
     signal: str,
     context: dict[str, Any] | None = None,
-    ttl_hours: float = DEFAULT_TTL_HOURS,
+    ttl_hours: float | None = None,
 ) -> Proposal:
-    """Construit une proposition (sans la persister). Pure — testable."""
+    """Construit une proposition (sans la persister). Pure — testable.
+
+    `ttl_hours` :
+      • `None`  → résout depuis `PROPOSAL_TTL_HOURS` (env), default 0 = aucun TTL.
+      • `0`     → aucun TTL, `expires_at` = sentinel `_NEVER_EXPIRES_ISO`.
+      • `> 0`   → expiration automatique après N heures.
+    """
     now = _now_utc()
+    ttl = _proposal_ttl_hours_default() if ttl_hours is None else max(0.0, float(ttl_hours))
+    if ttl <= 0:
+        expires_at = _NEVER_EXPIRES_ISO
+    else:
+        expires_at = _iso(now + timedelta(hours=ttl))
     return Proposal(
         id=f"PROP_{uuid.uuid4().hex[:8].upper()}",
         created_at=_iso(now),
-        expires_at=_iso(now + timedelta(hours=ttl_hours)),
+        expires_at=expires_at,
         status="pending",
         ticker=ticker.upper().strip(),
         direction=direction,
@@ -251,13 +287,14 @@ def enqueue_batch(proposals: Iterable[Proposal]) -> list[dict[str, Any]]:
     """Ajoute un lot de propositions à la file. Trois règles de dédup :
 
     1. **Pending actif** : si un ticker a déjà une proposition pending, on skip.
-    2. **Cooldown anti-veto** (audit 2026-04-23) : si un ticker a été rejected
-       récemment (< VETO_COOLDOWN_DAYS, default 7j), on skip aussi. Évite le
-       harcèlement "auto_proposer repropose ce que l'utilisateur vient de veto".
-       Env var VETO_COOLDOWN_DAYS=0 désactive le cooldown (comportement legacy).
-    3. **Cooldown anti-churn WIN/LOSS** (audit 2026-04-23 LT) : si un ticker a
-       été clôturé récemment (TP/SL/TS/time exit) < WIN_COOLDOWN_DAYS (default
-       14j — horizon Long-Term), on skip. Évite le re-churn observé CTRA 22→23/04.
+    2. **Cooldown anti-veto** (désactivé par défaut depuis 2026-05-07) : si
+       VETO_COOLDOWN_DAYS > 0 et qu'un ticker a été rejected récemment
+       (< VETO_COOLDOWN_DAYS), on skip. Default 0 = cooldown OFF, le ticker
+       redevient candidat dès le prochain cycle. L'historique des vétos reste
+       consultable via `list_veto_history()`.
+    3. **Cooldown anti-churn WIN/LOSS** (audit 2026-04-23 LT, default 14j) :
+       si un ticker a été clôturé récemment (TP/SL/TS/time exit), on skip.
+       Distinct du veto humain — protège du re-churn post-trade.
        Env var WIN_COOLDOWN_DAYS=0 désactive.
 
     Retourne les propositions effectivement insérées (sérialisées).
@@ -434,9 +471,10 @@ def expire_all_pending(reason: str = "user_regenerate") -> int:
     Utilisé par le flow "Régénérer un plan" côté UI — l'utilisateur veut
     changer ses paramètres (capital, mode, include_held) et repartir propre.
 
-    On passe par le statut `expired` (pas `rejected`) pour éviter le cooldown
-    veto 7 j qui skipperait les tickers à la prochaine génération. L'audit
-    jsonl trace `expired` + reason pour que l'origine soit reconstruisible.
+    On passe par le statut `expired` (pas `rejected`) pour ne pas marquer
+    historiquement le ticker comme "vetoé par l'utilisateur" — un regenerate
+    n'est pas un avis négatif sur les tickers, juste une demande de re-plan.
+    L'audit jsonl trace `expired` + `reason` pour reconstruire l'origine.
     """
     now_iso = _iso(_now_utc())
     expired_count = 0
@@ -457,3 +495,81 @@ def expire_all_pending(reason: str = "user_regenerate") -> int:
         if changed:
             _write_all_unlocked(_trim_live_history(items))
     return expired_count
+
+
+# ─────────────────────────────────────────────────────────────────
+# HISTORIQUE DES VÉTOS — consultation simplifiée
+# ─────────────────────────────────────────────────────────────────
+
+def list_veto_history(
+    *,
+    ticker: str | None = None,
+    since_days: float | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Renvoie l'historique des propositions rejetées par l'utilisateur,
+    triées du plus récent au plus ancien.
+
+    Source : `proposals.json` (file vivante, garde les `_LIVE_HISTORY_LIMIT`
+    dernières terminées). Les vétos plus anciens restent dans
+    `proposals_audit.jsonl` mais ne sont pas rechargés ici (lecture rapide).
+
+    Filtres optionnels :
+      • `ticker`     — restreint à un ticker précis (case-insensitive).
+      • `since_days` — fenêtre rolling N jours (basée sur `decided_at`).
+                       None = pas de borne basse.
+      • `limit`      — taille max de la liste retournée (default 50).
+
+    Chaque entrée expose : id, ticker, sector, signal, entry, stop_loss,
+    take_profit, decided_at, decided_by, rejection_reason, created_at,
+    direction, size, context. C'est un sur-ensemble lisible — pas de
+    transformation, juste les rejected du JSON.
+    """
+    items = list_all(status="rejected")
+    if ticker:
+        t_norm = ticker.upper().strip()
+        items = [p for p in items if (p.get("ticker") or "").upper() == t_norm]
+    if since_days is not None and since_days >= 0:
+        cutoff_iso = _iso(_now_utc() - timedelta(days=since_days))
+        items = [p for p in items if (p.get("decided_at") or "") >= cutoff_iso]
+    # `list_all` trie par created_at ; on re-sort par decided_at pour que
+    # l'historique reflète l'ordre des décisions humaines (plus pertinent ici).
+    items.sort(
+        key=lambda p: p.get("decided_at") or p.get("created_at") or "",
+        reverse=True,
+    )
+    return items[: max(0, int(limit))]
+
+
+def veto_history_summary(*, since_days: float | None = 90) -> dict[str, Any]:
+    """Synthèse compacte de l'historique veto sur une fenêtre rolling.
+
+    Pratique pour un dashboard "discipline humaine" — combien de vétos j'ai
+    posés, sur quels tickers récurrents, quelles raisons reviennent.
+
+    Retourne :
+      • `n_total`       — total des vétos sur la fenêtre.
+      • `since_days`    — fenêtre demandée (echo).
+      • `top_tickers`   — [{ticker, n}] tickers les plus rejetés (top 10).
+      • `top_reasons`   — [{reason, n}] motifs les plus fréquents (top 5).
+      • `last_veto_at`  — ISO du veto le plus récent (None si vide).
+    """
+    items = list_veto_history(since_days=since_days, limit=10_000)
+    if not items:
+        return {
+            "n_total": 0, "since_days": since_days,
+            "top_tickers": [], "top_reasons": [],
+            "last_veto_at": None,
+        }
+    from collections import Counter
+    tickers = Counter((p.get("ticker") or "?") for p in items)
+    reasons = Counter(
+        (p.get("rejection_reason") or "user_veto") for p in items
+    )
+    return {
+        "n_total":      len(items),
+        "since_days":   since_days,
+        "top_tickers":  [{"ticker": t, "n": n} for t, n in tickers.most_common(10)],
+        "top_reasons":  [{"reason": r, "n": n} for r, n in reasons.most_common(5)],
+        "last_veto_at": items[0].get("decided_at"),
+    }

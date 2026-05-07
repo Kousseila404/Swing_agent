@@ -57,12 +57,44 @@ def test_make_proposal_fields(isolated_proposals):
     assert p.created_at < p.expires_at  # TTL strictly future
 
 
-def test_make_proposal_ttl_default_36h(isolated_proposals):
+def test_make_proposal_ttl_explicit_36h(isolated_proposals):
     p = _mk(ttl_hours=36)
     created = datetime.fromisoformat(p.created_at.replace("Z", "+00:00"))
     expires = datetime.fromisoformat(p.expires_at.replace("Z", "+00:00"))
     delta = expires - created
     assert delta == timedelta(hours=36)
+
+
+def test_make_proposal_ttl_disabled_by_default(isolated_proposals, monkeypatch):
+    """Audit 2026-05-07 — TTL désactivé par défaut. `expires_at` doit pointer
+    sur le sentinel `_NEVER_EXPIRES_ISO` ; `expire_pending` ne doit jamais
+    déclencher sur ce sentinel.
+    """
+    monkeypatch.delenv("PROPOSAL_TTL_HOURS", raising=False)
+    p = _mk()  # ttl_hours non précisé → env (default 0)
+    assert p.expires_at == proposals._NEVER_EXPIRES_ISO
+
+
+def test_make_proposal_ttl_env_override(isolated_proposals, monkeypatch):
+    """PROPOSAL_TTL_HOURS=12 → expiration 12h après création."""
+    monkeypatch.setenv("PROPOSAL_TTL_HOURS", "12")
+    p = _mk()  # ttl_hours non précisé → env
+    created = datetime.fromisoformat(p.created_at.replace("Z", "+00:00"))
+    expires = datetime.fromisoformat(p.expires_at.replace("Z", "+00:00"))
+    assert expires - created == timedelta(hours=12)
+
+
+def test_expire_pending_skips_never_sentinel(isolated_proposals, monkeypatch):
+    """Audit 2026-05-07 — une proposition créée sans TTL (sentinel) ne doit
+    JAMAIS être expirée par `expire_pending` (filet de sécurité contre une
+    régression du comparateur ISO).
+    """
+    monkeypatch.delenv("PROPOSAL_TTL_HOURS", raising=False)
+    proposals.enqueue_batch([_mk("AAPL")])
+    assert proposals.expire_pending() == 0
+    items = proposals.list_all()
+    assert items[0]["status"] == "pending"
+    assert items[0]["expires_at"] == proposals._NEVER_EXPIRES_ISO
 
 
 def test_enqueue_batch_inserts_all(isolated_proposals):
@@ -234,15 +266,21 @@ def test_enqueue_pending_beats_cooldown_check(isolated_proposals, monkeypatch):
     assert re_inserted == []
 
 
-def test_enqueue_cooldown_default_7d_when_env_unset(isolated_proposals, monkeypatch):
-    """Sans env var, cooldown par défaut = 7j → skip un veto frais."""
+def test_enqueue_cooldown_disabled_by_default(isolated_proposals, monkeypatch):
+    """Audit 2026-05-07 — cooldown veto OFF par défaut. Un ticker rejected
+    doit être reproposable au prochain cycle sans attendre. L'env var
+    VETO_COOLDOWN_DAYS=N réactive l'ancien comportement.
+    """
     monkeypatch.delenv("VETO_COOLDOWN_DAYS", raising=False)
     inserted = proposals.enqueue_batch([_mk("AAPL")])
     pid = inserted[0]["id"]
     proposals.update_status(pid, "rejected", rejection_reason="user_veto")
 
     re_inserted = proposals.enqueue_batch([_mk("AAPL")])
-    assert re_inserted == []  # skip par default
+    assert len(re_inserted) == 1, (
+        "Default cooldown=0 → ticker rejected reproposable immédiatement"
+    )
+    assert re_inserted[0]["ticker"] == "AAPL"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -357,3 +395,111 @@ def test_enqueue_handles_missing_journal_gracefully(isolated_proposals, monkeypa
 
     inserted = proposals.enqueue_batch([_mk("AAPL")])
     assert len(inserted) == 1
+
+
+# ─────────────────────────────────────────────────────────────────
+# Historique des vétos — list_veto_history + veto_history_summary
+# (audit 2026-05-07 : facilite la consultation, plus de cooldown imposé)
+# ─────────────────────────────────────────────────────────────────
+
+def _veto(ticker: str, reason: str = "user_veto") -> str:
+    """Insère + rejette un ticker, retourne l'ID."""
+    inserted = proposals.enqueue_batch([_mk(ticker)])
+    pid = inserted[0]["id"]
+    proposals.update_status(pid, "rejected", rejection_reason=reason)
+    return pid
+
+
+def test_list_veto_history_empty_when_no_rejected(isolated_proposals):
+    """Pas de rejected en file → liste vide (pas d'erreur)."""
+    proposals.enqueue_batch([_mk("AAPL")])  # pending, pas un veto
+    assert proposals.list_veto_history() == []
+
+
+def test_list_veto_history_returns_rejected_only(isolated_proposals, monkeypatch):
+    """Doit ignorer pending/approved/expired/executed — seulement rejected."""
+    monkeypatch.delenv("VETO_COOLDOWN_DAYS", raising=False)
+    _veto("AAPL")
+    _veto("MSFT")
+    # Un pending qui ne deviendra pas rejected
+    proposals.enqueue_batch([_mk("NVDA")])
+    history = proposals.list_veto_history()
+    assert {h["ticker"] for h in history} == {"AAPL", "MSFT"}
+
+
+def test_list_veto_history_filter_by_ticker(isolated_proposals, monkeypatch):
+    """Filtre exact (case-insensitive) sur ticker."""
+    monkeypatch.delenv("VETO_COOLDOWN_DAYS", raising=False)
+    _veto("AAPL", reason="too_expensive")
+    _veto("AAPL", reason="just_bought_competitor")
+    _veto("MSFT")
+    history = proposals.list_veto_history(ticker="aapl")  # lowercase volontaire
+    assert len(history) == 2
+    assert all(h["ticker"] == "AAPL" for h in history)
+
+
+def test_list_veto_history_sorted_decided_at_desc(isolated_proposals, monkeypatch):
+    """Le plus récent d'abord (ordre des décisions humaines, pas créations)."""
+    monkeypatch.delenv("VETO_COOLDOWN_DAYS", raising=False)
+    _veto("AAPL")
+    _veto("MSFT")
+    _veto("NVDA")
+    history = proposals.list_veto_history()
+    decisions = [h.get("decided_at") for h in history]
+    assert decisions == sorted(decisions, reverse=True)
+
+
+def test_list_veto_history_filter_since_days(isolated_proposals, monkeypatch):
+    """`since_days=1` exclut un veto vieux de 5 jours."""
+    monkeypatch.delenv("VETO_COOLDOWN_DAYS", raising=False)
+    _veto("RECENT")
+    pid_old = _veto("OLD")
+    # Backdate decided_at de OLD à -5 jours
+    p_path = isolated_proposals[0]
+    data = json.loads(p_path.read_text())
+    old_iso = (datetime.now(UTC) - timedelta(days=5)).replace(
+        microsecond=0,
+    ).isoformat().replace("+00:00", "Z")
+    for item in data:
+        if item["id"] == pid_old:
+            item["decided_at"] = old_iso
+    p_path.write_text(json.dumps(data))
+
+    history = proposals.list_veto_history(since_days=1)
+    assert {h["ticker"] for h in history} == {"RECENT"}
+
+
+def test_list_veto_history_respects_limit(isolated_proposals, monkeypatch):
+    """`limit=2` tronque même si 3 vétos disponibles."""
+    monkeypatch.delenv("VETO_COOLDOWN_DAYS", raising=False)
+    for t in ("A", "B", "C"):
+        _veto(t)
+    history = proposals.list_veto_history(limit=2)
+    assert len(history) == 2
+
+
+def test_veto_history_summary_aggregates(isolated_proposals, monkeypatch):
+    """Synthèse compacte : top tickers + top reasons + last_veto_at."""
+    monkeypatch.delenv("VETO_COOLDOWN_DAYS", raising=False)
+    _veto("AAPL", reason="too_expensive")
+    _veto("AAPL", reason="too_expensive")
+    _veto("MSFT", reason="sector_overweight")
+    _veto("NVDA", reason="too_expensive")
+    summary = proposals.veto_history_summary()
+    assert summary["n_total"] == 4
+    assert summary["last_veto_at"] is not None
+    # AAPL apparaît 2× → premier en top_tickers
+    assert summary["top_tickers"][0]["ticker"] == "AAPL"
+    assert summary["top_tickers"][0]["n"] == 2
+    # too_expensive apparaît 3× → premier en top_reasons
+    assert summary["top_reasons"][0]["reason"] == "too_expensive"
+    assert summary["top_reasons"][0]["n"] == 3
+
+
+def test_veto_history_summary_empty(isolated_proposals):
+    """Pas de vétos → shape stable mais valeurs vides."""
+    summary = proposals.veto_history_summary()
+    assert summary["n_total"] == 0
+    assert summary["top_tickers"] == []
+    assert summary["top_reasons"] == []
+    assert summary["last_veto_at"] is None
