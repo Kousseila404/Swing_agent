@@ -62,6 +62,33 @@ def _parse_fetched_at_age_days(
     except (ValueError, TypeError):
         return None
 
+
+def _parse_period_end_age_days(
+    period_end: Any,
+    *,
+    as_of: date | None = None,
+) -> float | None:
+    """Bug #7 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-7) — âge du report fiscal vs as_of.
+
+    `_parse_fetched_at_age_days` mesure quand on a *téléchargé* la donnée,
+    pas quand le rapport financier sous-jacent a été *clos*. Un fetch aujourd'hui
+    d'un EPS Q3-2024 a fetched_at_age=0 mais report_age ≈ 240 jours. Pour
+    Piotroski Y/Y et tout pilier dépendant de la période fiscale, c'est cette
+    métrique qui compte.
+
+    Format attendu : "YYYY-MM-DD" (date) ou "YYYY-MM-DDT..." (datetime).
+    Retourne None si parsing impossible.
+    """
+    if not isinstance(period_end, str) or not period_end:
+        return None
+    try:
+        pe = date.fromisoformat(period_end[:10])
+    except (ValueError, TypeError):
+        return None
+    ref = as_of if as_of is not None else date.today()
+    delta = (ref - pe).days
+    return round(max(0.0, float(delta)), 1)
+
 # Score neutre quand toutes les composantes d'un pilier sont absentes.
 # Pas 0 pour éviter de pénaliser injustement un trou d'API.
 _NEUTRAL_SCORE = 50.0
@@ -138,22 +165,36 @@ _W_TITAN_IN_NO_SENTIMENT = _W_TITAN_INSIDER   / _SENTIMENT_FALLBACK_SUM
 # dessus du gate, pénaliser linéairement -15 pts entre DQ=0.70 et DQ=1.0
 # avantageait systématiquement les mega-caps US (couverture yfinance/FMP
 # parfaite) au détriment de mid-caps légitimes — biais structurel vers le
-# top du SP500. Le coef est désormais quasi-neutre : 0.95 à 0.70 → 1.00 à
-# 1.00 (5 pts d'écart max), juste assez pour départager des ex-aequo.
-_DQ_MIN_COEF = 0.95
+# top du SP500.
+#
+# Bug #24 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-24) — 0.95 était quasi-neutre (1.5 pts d'écart)
+# → impossible de distinguer un DQ=0.72 (gate juste passé, 2/3 fields critiques
+# manquent) d'un DQ=1.0 (toutes données présentes). 0.92 donne 8 pts d'écart
+# entre DQ=0.70 et DQ=1.0, plus discriminant sans réintroduire le biais
+# mega-caps de l'ancien 0.50 (15 pts d'écart).
+_DQ_MIN_COEF = 0.92
 
 # ── Cross-signal tilt thresholds (audit Phase 5, 2026-05-06) ────────────────
 # Constantes auditables — déplacées ici depuis le corps de _score_universe.
 # Permettent de backtester chaque seuil indépendamment et de visualiser la
 # politique de tilt sans grepper la fonction principale.
 #
+# Bug #13/14/15 fix (audit 2026-05-07) — magnitudes réduites + cap absolu :
+# • Les tilts capturent des INTERACTIONS non-linéaires (Q haut ET V haut
+#   simultanément ≠ moyenne arithmétique de Q+V), donc défendables.
+# • MAIS leur empilement (QARP+GARP+consistency = +10, ou cheap_junk+
+#   falling_knife = -16) peut écraser un composite sain.
+# • Magnitudes réduites pour atténuer le double-counting partiel avec les
+#   piliers (momentum déjà bas → falling_knife re-pénalise).
+# • Cap absolu sur tilt_adjust pour borner l'impact total.
+#
 # Penalties :
 _TILT_CHEAP_JUNK_V_MIN     = 80.0   # Value très haut...
 _TILT_CHEAP_JUNK_Q_MAX     = 30.0   # ...combiné à Quality très bas → value trap
-_TILT_CHEAP_JUNK_PENALTY   = -10.0
+_TILT_CHEAP_JUNK_PENALTY   = -7.0   # avant -10 (Bug #15 — Q et V déjà piliers)
 _TILT_FALLING_KNIFE_V_MIN  = 80.0   # Value très haut...
 _TILT_FALLING_KNIFE_M_MAX  = 30.0   # ...combiné à Momentum très négatif → reversal pas confirmé
-_TILT_FALLING_KNIFE_PENALTY = -6.0
+_TILT_FALLING_KNIFE_PENALTY = -4.0  # avant -6 (Bug #14 — momentum bas déjà capturé pilier M)
 
 # Bonuses :
 _TILT_QARP_Q_MIN           = 70.0   # Quality At Reasonable Price (Novy-Marx)
@@ -163,11 +204,20 @@ _TILT_GARP_G_MIN           = 70.0   # Growth At Reasonable Price (Lynch)
 _TILT_GARP_V_MIN           = 70.0
 _TILT_GARP_BONUS           = +3.0
 
+# Bug #13 fix — cap absolu cumulé sur tilt_adjust. Empêche un ticker de
+# recevoir plus de ±_TILT_TOTAL_CAP même si plusieurs tilts s'empilent.
+# Borne défendable : 8 = QARP + GARP + un peu de marge consistency.
+_TILT_TOTAL_CAP            = 8.0
+
 # Consistency bonus : récompense les profils homogènes (faible σ entre piliers).
 # `_CONSISTENCY_MIN_PILLARS_USED` doit être atteint *parmi les piliers réellement
 # disponibles* (pas neutre 50 par défaut) ; sinon le bonus ne s'applique pas.
+# Bug #18 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-18) — relevé 6 → 7. Sur 9 piliers, exiger 7
+# avec data réelle (count>0) bloque le faux positif "consistency" sur les
+# tickers FMP-only (Sentiment + Revisions souvent vides) — ils ne pouvaient
+# jamais réunir > 7 piliers avec data simultanément.
 _CONSISTENCY_STD_MAX            = 15.0
-_CONSISTENCY_MIN_PILLARS_USED   = 6
+_CONSISTENCY_MIN_PILLARS_USED   = 7
 _CONSISTENCY_BONUS              = +2.0
 # Phase 6 audit (2026-05-06) — garde-fou anti "consistent neutral".
 # L'ancien check fire si σ < 15 sans contrainte sur la moyenne. Or un ticker
@@ -324,6 +374,8 @@ def _percentile_rank_by_sector(
     values: dict[str, float | None],
     sectors: dict[str, str],
     higher_is_better: bool = True,
+    *,
+    fallback_record: set[str] | None = None,
 ) -> dict[str, float | None]:
     """Percentile-rank intra-secteur — chaque ticker comparé à ses pairs
     GICS, pas à l'univers entier.
@@ -369,6 +421,12 @@ def _percentile_rank_by_sector(
         global_ranked = _percentile_rank(values, higher_is_better=higher_is_better)
         for t in fallback_tickers:
             out[t] = global_ranked.get(t)
+        # Bug #12 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-12) — exposition du fallback. Le caller
+        # peut passer un set partagé pour collecter tous les tickers qui ont
+        # subi un fallback global (intra-secteur dégénéré) sur n'importe
+        # quelle métrique → expose côté payload pour transparence.
+        if fallback_record is not None:
+            fallback_record.update(fallback_tickers)
 
     return out
 
@@ -449,10 +507,34 @@ def _lookup_yoy_snapshot(
     return None
 
 
+# Bug #10 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-10) — secteurs où certains critères Piotroski
+# n'ont pas de sens structurel. Piotroski (2000) est conçu pour value/manuf.
+#   • Financials : current_ratio inadapté (bilan classé en maturités, pas
+#                  court/long), D/E structurellement 8-12× (banques opèrent
+#                  sur leverage), gross_margin non significatif (pas de COGS
+#                  industriel). On garde les critères de cash-flow et ROA.
+#   • Real Estate (REITs) : gross_margin idem non significatif (revenue =
+#                  loyers, pas de manufacturing). Current ratio n'est pas un
+#                  signal de santé pour des dépréciations sur biens immo.
+# Pour ces secteurs, on retire les critères inappropriés du calcul (n_evaluated
+# diminue, n_passed proportionnel) → score sur un dénominateur de 9 reste
+# numériquement comparable mais reflète honnêtement les critères applicables.
+_PIOTROSKI_SKIP_CRITERIA_BY_SECTOR: dict[str, frozenset[str]] = {
+    "Financials":   frozenset({"f5_debt_decreased_yoy", "f7_current_ratio_gt_1",
+                               "f6_current_ratio_improved_yoy",
+                               "f9_gross_margin_improved_yoy"}),
+    "Real Estate":  frozenset({"f7_current_ratio_gt_1",
+                               "f6_current_ratio_improved_yoy",
+                               "f9_gross_margin_improved_yoy"}),
+}
+
+
 def _piotroski_f_score_absolute(
     row: dict[str, Any],
     yoy_row: dict[str, Any] | None = None,
-) -> tuple[int, int, dict[str, bool | None]]:
+    *,
+    sector: str | None = None,
+) -> tuple[int, int, int, dict[str, bool | None]]:
     """Calcule le F-Score Piotroski — jusqu'à 9/9 critères si yoy_row fourni.
 
     Critères ABSOLUS (1 snapshot) :
@@ -468,12 +550,21 @@ def _piotroski_f_score_absolute(
       F8 : No new shares issued        (shares_outstanding_now ≤ shares_year_ago × 1.02)
       F9 : Gross margin improved       (gross_margin_now > gross_margin_year_ago)
 
+    Bug #10 fix : pour Financials/REITs, certains critères sont structurellement
+    inappropriés et sont skippés (cf. _PIOTROSKI_SKIP_CRITERIA_BY_SECTOR).
+
     Returns:
-        (n_passed, n_evaluated, breakdown)
+        (n_passed, n_evaluated, n_max_applicable, breakdown)
         - n_passed : nombre de critères vérifiés.
         - n_evaluated : nombre de critères ayant pu être calculés.
+        - n_max_applicable : nombre max de critères applicables pour le secteur
+                             (9 - len(skip)). Sert de dénominateur honnête au
+                             score normalisé pour Financials/REITs.
         - breakdown : {f1: True/False/None, ...} pour audit UI.
     """
+    sector_norm = _SECTOR_NORMALIZE.get(sector or "", sector or "")
+    skip = _PIOTROSKI_SKIP_CRITERIA_BY_SECTOR.get(sector_norm, frozenset())
+
     roa = _safe_float(row.get("return_on_assets"))
     ocf = _safe_float(row.get("operating_cash_flow"))
     ni  = _safe_float(row.get("net_income"))
@@ -519,8 +610,25 @@ def _piotroski_f_score_absolute(
             "f9_gross_margin_improved_yoy": f9,
         })
 
+    # Bug #10 fix — retire les critères skippés pour le secteur du décompte.
+    if skip:
+        for skip_key in skip:
+            if skip_key in breakdown:
+                breakdown[skip_key] = None  # marqué non-applicable
+    # n_max_applicable = 9 (univers Piotroski complet) MOINS les critères
+    # structurellement non-applicables au secteur. Indépendant de la présence
+    # ou non de yoy_row : un ticker sans Y/Y data sera juste évalué sur les
+    # absolus, mais le dénominateur reste celui du sector (5 pour Financials,
+    # 6 pour Real Estate, 9 sinon). Un IPO avec 4/4 absolu passing aura
+    # score = 4/9 = 44 (signal partiel honnête, pas 100 % flatteur).
+    n_max_applicable = 9 - len(skip)
     evaluated = [v for v in breakdown.values() if v is not None]
-    return sum(1 for v in evaluated if v), len(evaluated), breakdown
+    return (
+        sum(1 for v in evaluated if v),
+        len(evaluated),
+        n_max_applicable,
+        breakdown,
+    )
 
 
 def _piotroski_score_pillar(
@@ -610,25 +718,36 @@ def _piotroski_score_pillar(
             if ticker else None
         )
 
-    n_passed, n_evaluated, breakdown = _piotroski_f_score_absolute(row, yoy_row)
+    # Bug #10 fix — propage le secteur pour skipper les critères inadaptés
+    # (Financials, REITs).
+    sector = row.get("sector")
+    n_passed, n_evaluated, n_max_applicable, breakdown = (
+        _piotroski_f_score_absolute(row, yoy_row, sector=sector)
+    )
     # Phase 4 audit (2026-05-06) — F-Score dénominateur fixe 9 (Piotroski 2000
     # original) : avant, 1/4 et 5/9 retournaient ~25% et ~55% sans qu'on
-    # puisse distinguer le ticker IPO data-pauvre du mature data-riche. Avec
-    # dénominateur fixe, 1/9 = 11% (vrai pessimisme) vs 5/9 = 55%.
-    # Garde-fou : si moins de 4 critères évaluables (IPO < 1 an, scraping KO),
-    # on retourne le neutral 50 plutôt que de pénaliser à tort.
-    if n_evaluated == 0 or n_evaluated < 4:
+    # puisse distinguer le ticker IPO data-pauvre du mature data-riche.
+    # Bug #10 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-10) — pour Financials (5 critères skippés)
+    # et REITs (3 critères skippés), normalisation sur n_max_applicable au
+    # lieu de 9 fixe : un Financial avec 4/4 critères absolus passing aurait
+    # eu 4/9 = 44 % (faux signal de faiblesse). Avec dénominateur honnête =
+    # 4 (= n_max_applicable), il a 100 % qui reflète la santé fondamentale
+    # sur les seuls critères pertinents.
+    # Garde-fou IPO/data sparse : si évalués < min(4, n_max_applicable),
+    # neutral 50 plutôt que pénaliser à tort.
+    min_evaluated_required = min(4, n_max_applicable)
+    if n_evaluated == 0 or n_evaluated < min_evaluated_required:
         return _NEUTRAL_SCORE, {
             "f_score":           None,
-            "f_score_max":       9,
+            "f_score_max":       n_max_applicable,
             "f_score_evaluated": n_evaluated,
             "f_score_breakdown": breakdown,
             "f_score_neutral":   True,  # diagnostic : signal absent, pas mauvais
         }
-    score = (n_passed / 9.0) * 100.0
+    score = (n_passed / float(max(1, n_max_applicable))) * 100.0
     return score, {
         "f_score":           n_passed,
-        "f_score_max":       9,
+        "f_score_max":       n_max_applicable,
         "f_score_evaluated": n_evaluated,
         "f_score_breakdown": breakdown,
     }
@@ -675,6 +794,28 @@ def _compute_data_quality(ticker_row: dict[str, Any]) -> float:
         if _safe_float(ticker_row.get(f)) is not None
     )
     return present / len(fields)
+
+
+def _compute_structural_gaps(ticker_row: dict[str, Any]) -> list[str]:
+    """Bug #21 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-21) — diagnostic des champs *non-applicables*
+    structurellement mais effectivement absents.
+
+    Ex: pour Financials, `debt_to_equity` est exclu du DQ (le ratio est
+    structurellement haut, pas comparable cross-secteur), mais une banque
+    *doit* avoir une D/E reportée. Si elle est absente, c'est un trou data
+    réel — le DQ sector-aware le masque silencieusement (la banque a 100 %
+    DQ malgré le manque). Ce diagnostic expose les trous sans modifier le
+    scoring (back-compat) pour que l'aval (UI, alerter) puisse les afficher.
+    """
+    sector = ticker_row.get("sector")
+    fields_applied = set(_fields_for_sector(sector))
+    full_set = set(_TITAN_SCORING_FIELDS)
+    non_applicable = full_set - fields_applied
+    gaps: list[str] = []
+    for f in sorted(non_applicable):
+        if _safe_float(ticker_row.get(f)) is None:
+            gaps.append(f)
+    return gaps
 
 
 def _weighted_mean_scores(tickers: list[dict[str, Any]]) -> dict[str, float]:
@@ -757,12 +898,23 @@ def _score_universe(
     dq_cache: dict[str, float] = {
         k: _compute_data_quality(tickers_map[k]) for k in keys_all
     }
-    keys = [k for k in keys_all if dq_cache[k] >= _MIN_DATA_QUALITY]
+    # Bug #19 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-19) — gate hard market_cap > 0.
+    # market_cap n'est pas dans _TITAN_SCORING_FIELDS, donc un penny OTC
+    # defunct (mcap=0) pouvait passer le DQ gate s'il avait 70 % des autres
+    # fields renseignés, puis dériver Value via EV/EBITDA seul (FCF-yield
+    # déjà filtré par mcap≤0 ligne ~810). Exclusion explicite plus propre.
+    def _has_valid_mcap(row: dict[str, Any]) -> bool:
+        mc = _safe_float(row.get("market_cap"))
+        return mc is not None and math.isfinite(mc) and mc > 0
+    keys = [
+        k for k in keys_all
+        if dq_cache[k] >= _MIN_DATA_QUALITY and _has_valid_mcap(tickers_map[k])
+    ]
     n_excluded = len(keys_all) - len(keys)
     if n_excluded > 0:
         logger.info(
             f"[SectorMetrics] Scoring : {n_excluded}/{len(keys_all)} tickers exclus "
-            f"(data_quality < {_MIN_DATA_QUALITY:.0%})"
+            f"(data_quality < {_MIN_DATA_QUALITY:.0%} ou market_cap ≤ 0)"
         )
     if not keys:
         return {}
@@ -786,14 +938,25 @@ def _score_universe(
     # rank avec higher_is_better=False les classerait au top Value alors qu'ils
     # méritent un signal d'absence (None → imputé pilier neutre par fallback).
     # Idem Forward P/E < 0 = pertes attendues (WBD=-1649, MRNA=-12).
-    ev_ebitda = {
-        k: (v if (v is not None and v > 0) else None)
-        for k, v in ((k, _safe_float(tickers_map[k].get("ev_to_ebitda"))) for k in keys)
-    }
-    fwd_pe = {
-        k: (v if (v is not None and v > 0) else None)
-        for k, v in ((k, _safe_float(tickers_map[k].get("forward_pe"))) for k in keys)
-    }
+    # Bug #9 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-9) — capture du flag d'unprofitability pour
+    # exposition aval (turnaround story = signal légitime à ne pas masquer
+    # silencieusement). Comportement scoring inchangé : None → fallback Value
+    # sur FCF/PEG/EY uniquement, mais l'aval (UI, alerter) sait pourquoi.
+    unprofitable_flags: dict[str, list[str]] = {}
+    ev_ebitda: dict[str, float | None] = {}
+    fwd_pe: dict[str, float | None] = {}
+    for k in keys:
+        ev_raw = _safe_float(tickers_map[k].get("ev_to_ebitda"))
+        fpe_raw = _safe_float(tickers_map[k].get("forward_pe"))
+        ev_ebitda[k] = ev_raw if (ev_raw is not None and ev_raw > 0) else None
+        fwd_pe[k] = fpe_raw if (fpe_raw is not None and fpe_raw > 0) else None
+        flags_v: list[str] = []
+        if ev_raw is not None and ev_raw <= 0:
+            flags_v.append("ev_ebitda_negative")
+        if fpe_raw is not None and fpe_raw <= 0:
+            flags_v.append("forward_pe_negative")
+        if flags_v:
+            unprofitable_flags[k] = flags_v
 
     # FCF yield = FCF / Market Cap. PAS de fallback OCF → biais haussier
     # sur les capital-intensive (Utilities/Energy/Telecom : OCF ≫ FCF car
@@ -907,18 +1070,23 @@ def _score_universe(
     # comparent une action à toutes les opportunités), pas à son secteur.
     sectors_map = sectors_raw  # même mapping que pour le winsorize sectoriel
 
-    roe_r      = _percentile_rank_by_sector(roe,       sectors_map, higher_is_better=True)
-    roa_r      = _percentile_rank_by_sector(roa,       sectors_map, higher_is_better=True)
-    opm_r      = _percentile_rank_by_sector(op_margin, sectors_map, higher_is_better=True)
-    gm_r       = _percentile_rank_by_sector(gross_margin, sectors_map, higher_is_better=True)
-    ev_r       = _percentile_rank_by_sector(ev_ebitda, sectors_map, higher_is_better=False)
-    fpe_r      = _percentile_rank_by_sector(fwd_pe,    sectors_map, higher_is_better=False)
-    fcf_r      = _percentile_rank_by_sector(fcf_yield, sectors_map, higher_is_better=True)
-    peg_r      = _percentile_rank_by_sector(peg,       sectors_map, higher_is_better=False)
-    ey_r       = _percentile_rank_by_sector(earnings_yield, sectors_map, higher_is_better=True)
-    d2e_r      = _percentile_rank_by_sector(d2e,       sectors_map, higher_is_better=False)
-    curr_r     = _percentile_rank_by_sector(curr_ratio, sectors_map, higher_is_better=True)
-    qr_r       = _percentile_rank_by_sector(qr,        sectors_map, higher_is_better=True)
+    # Bug #12 fix — collecte des tickers ayant subi un fallback global (sector
+    # < 12 tickers valides). On agrège sur toutes les métriques sector-relative
+    # car un fallback sur ne serait-ce qu'une métrique vaut signaling.
+    sector_fallback_tickers: set[str] = set()
+
+    roe_r      = _percentile_rank_by_sector(roe,       sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
+    roa_r      = _percentile_rank_by_sector(roa,       sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
+    opm_r      = _percentile_rank_by_sector(op_margin, sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
+    gm_r       = _percentile_rank_by_sector(gross_margin, sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
+    ev_r       = _percentile_rank_by_sector(ev_ebitda, sectors_map, higher_is_better=False, fallback_record=sector_fallback_tickers)
+    fpe_r      = _percentile_rank_by_sector(fwd_pe,    sectors_map, higher_is_better=False, fallback_record=sector_fallback_tickers)
+    fcf_r      = _percentile_rank_by_sector(fcf_yield, sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
+    peg_r      = _percentile_rank_by_sector(peg,       sectors_map, higher_is_better=False, fallback_record=sector_fallback_tickers)
+    ey_r       = _percentile_rank_by_sector(earnings_yield, sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
+    d2e_r      = _percentile_rank_by_sector(d2e,       sectors_map, higher_is_better=False, fallback_record=sector_fallback_tickers)
+    curr_r     = _percentile_rank_by_sector(curr_ratio, sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
+    qr_r       = _percentile_rank_by_sector(qr,        sectors_map, higher_is_better=True, fallback_record=sector_fallback_tickers)
     reco_r     = _percentile_rank(reco,      higher_is_better=False)  # GLOBAL
     upside_r   = _percentile_rank(upside,    higher_is_better=True)   # GLOBAL
 
@@ -1023,33 +1191,42 @@ def _score_universe(
 
         if sentiment_available:
             s, s_count = _pillar_score_with_count([reco_r[k], upside_r[k]])
-            composite = (
-                _W_TITAN_QUALITY   * q
-                + _W_TITAN_VALUE     * v
-                + _W_TITAN_RISK      * r
-                + _W_TITAN_SENTIMENT * s
-                + _W_TITAN_MOMENTUM  * m
-                + _W_TITAN_PIOTROSKI * p
-                + _W_TITAN_GROWTH    * g
-                + _W_TITAN_REVISIONS * rv
-                + _W_TITAN_INSIDER   * ins
-            )
-            weight_mode = "full"
         else:
-            # Pansement : Sentiment indisponible → renormalisation 8 piliers.
+            # Pansement : Sentiment indisponible → exclu (renorm dynamique
+            # absorbe ce cas via count=0).
             s = _NEUTRAL_SCORE  # reporté pour traçabilité, non utilisé dans composite
             s_count = 0
-            composite = (
-                _W_TITAN_Q_NO_SENTIMENT  * q
-                + _W_TITAN_V_NO_SENTIMENT  * v
-                + _W_TITAN_R_NO_SENTIMENT  * r
-                + _W_TITAN_M_NO_SENTIMENT  * m
-                + _W_TITAN_P_NO_SENTIMENT  * p
-                + _W_TITAN_G_NO_SENTIMENT  * g
-                + _W_TITAN_RV_NO_SENTIMENT * rv
-                + _W_TITAN_IN_NO_SENTIMENT * ins
-            )
-            weight_mode = "no_sentiment"
+
+        # Bug #17 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-17) — renormalisation DYNAMIQUE des poids.
+        # Avant : un pilier entièrement vide (count=0, score imputé à neutre 50)
+        # contribuait quand même à hauteur de son poids — pull artificiel vers
+        # 50 sur tous les tickers. Si Momentum API down, l'univers entier
+        # voyait sa variance composite réduite par la dilution 15 % * 50.
+        # Désormais : on assemble (poids, score) pour les piliers dont count>0,
+        # puis on divise par la somme des poids effectivement utilisés. Si tout
+        # est vide → composite neutre 50. La back-compat avec sentiment_available
+        # est préservée : count=0 sur Sentiment exclut bien le pilier.
+        pillar_pieces: list[tuple[float, float]] = []
+        if q_count > 0:    pillar_pieces.append((_W_TITAN_QUALITY,   q))
+        if v_count > 0:    pillar_pieces.append((_W_TITAN_VALUE,     v))
+        if r_count > 0:    pillar_pieces.append((_W_TITAN_RISK,      r))
+        if sentiment_available and s_count > 0:
+                           pillar_pieces.append((_W_TITAN_SENTIMENT, s))
+        if m_count > 0:    pillar_pieces.append((_W_TITAN_MOMENTUM,  m))
+        if p_count > 0:    pillar_pieces.append((_W_TITAN_PIOTROSKI, p))
+        if g_count > 0:    pillar_pieces.append((_W_TITAN_GROWTH,    g))
+        if rv_count > 0:   pillar_pieces.append((_W_TITAN_REVISIONS, rv))
+        if ins_count > 0:  pillar_pieces.append((_W_TITAN_INSIDER,   ins))
+        weight_total = sum(w for w, _ in pillar_pieces)
+        if weight_total > 0:
+            composite = sum(w * s_ for w, s_ in pillar_pieces) / weight_total
+            if sentiment_available:
+                weight_mode = "full" if abs(weight_total - 1.0) < 1e-9 else "renormalized"
+            else:
+                weight_mode = "no_sentiment"
+        else:
+            composite = _NEUTRAL_SCORE
+            weight_mode = "all_empty"
 
         # ── Lot 14.1 — Cross-signal adjustments ────────────────────────────
         # Signaux composites typiques de la littérature LT (QARP/GARP, value
@@ -1116,7 +1293,19 @@ def _score_universe(
                 tilt_adjust += _CONSISTENCY_BONUS
                 flags.append("consistent")
 
-        composite = max(0.0, min(100.0, composite + tilt_adjust))
+        # Bug #13 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-13) — cap absolu cumulé sur tilt_adjust.
+        # Empêche l'empilement (QARP+GARP+consistency = +10, cheap_junk+
+        # falling_knife = -11) d'écraser le composite. L'INTERACTION est
+        # capturée, mais sa magnitude reste bornée.
+        tilt_adjust = max(-_TILT_TOTAL_CAP, min(_TILT_TOTAL_CAP, tilt_adjust))
+
+        # Bug #6 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-6) — clipping après dq_coef au lieu d'avant.
+        # Ancien : clip(composite + tilt) puis × dq_coef → un ticker à 98 + QARP(+5)
+        # = 103 était clip → 100 → ×0.95 = 95.0, alors que l'ordre correct donne
+        # 103 × 0.95 = 97.85. Le bonus QARP était partiellement absorbé par le
+        # clip avant que dq_coef ne le ramène sous 100. Réordonner conserve
+        # l'effet relatif des tilts en présence d'un dq_coef non-trivial.
+        composite_with_tilt_unclipped = composite + tilt_adjust
 
         # Pondération par data_quality — pénalise doucement les profils incomplets.
         # On expose les 2 valeurs pour audit : composite "brut" (avant pénalité,
@@ -1125,7 +1314,14 @@ def _score_universe(
         # Phase 8 audit (perf) — réutilise dq_cache calculé en amont du gate.
         dq = dq_cache[k]
         dq_coef = _DQ_MIN_COEF + (1.0 - _DQ_MIN_COEF) * dq
-        composite_weighted = composite * dq_coef
+        composite_weighted = max(
+            0.0, min(100.0, composite_with_tilt_unclipped * dq_coef)
+        )
+        # composite_raw (display) — clip seulement pour le payload de surface,
+        # ne sert plus au calcul du composite final.
+        composite_raw_display = max(
+            0.0, min(100.0, composite_with_tilt_unclipped)
+        )
 
         # Phase 5 audit — diagnostiques de densité par pilier. Permet à l'aval
         # (UI, backtester, alerter) de distinguer un score 70 dense (4/4
@@ -1150,6 +1346,15 @@ def _score_universe(
         # de filtrer les tickers à data stale (cache > 30j → Quality/Value
         # reposent sur du périmé). Calculé vs `as_of` en backtest.
         age_days = _parse_fetched_at_age_days(t_base.get("fetched_at"), as_of=as_of)
+        # Bug #7 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-7) — âge du *report fiscal* (period_end)
+        # complémentaire à age_days (fetched_at). Un fetch frais d'un report 8
+        # mois stale a age_days=0 mais report_age=240 → Piotroski Y/Y miné.
+        report_age_days = _parse_period_end_age_days(
+            t_base.get("fundamentals_period_end"), as_of=as_of,
+        )
+        report_age_days_y1 = _parse_period_end_age_days(
+            t_base.get("fundamentals_period_end_y1"), as_of=as_of,
+        )
 
         scored[k] = {
             **t_base,
@@ -1169,7 +1374,7 @@ def _score_universe(
             "f_score":                  p_diag.get("f_score"),
             "f_score_max":              p_diag.get("f_score_max"),
             "f_score_breakdown":        p_diag.get("f_score_breakdown"),
-            "titan_composite_raw":      round(composite, 2),
+            "titan_composite_raw":      round(composite_raw_display, 2),
             "titan_composite_score":    round(composite_weighted, 2),
             "titan_weight_mode":        weight_mode,
             "titan_tilt_adjust":        round(tilt_adjust, 2),
@@ -1180,8 +1385,29 @@ def _score_universe(
             "pillars_data_count":       pillars_data_count,
             "n_pillars_neutral":        n_pillars_neutral,
             "low_signal":               low_signal,
-            # Phase 7 audit — fraîcheur des fundamentaux.
+            # Phase 7 audit — fraîcheur des fundamentaux (fetch).
             "fundamentals_age_days":    age_days,
+            # Bug #7 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-7) — fraîcheur du *report fiscal*.
+            # > 200j sur Q-latest = au moins 2 trimestres stale. > 450j sur Y-1
+            # = Piotroski Y/Y reposant sur des comparables périmés.
+            "fundamentals_report_age_days":     report_age_days,
+            "fundamentals_report_age_days_y1":  report_age_days_y1,
+            # Bug #9 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-9) — flags structural unprofitability.
+            # Liste explicite : ev_ebitda_negative, forward_pe_negative.
+            "value_unprofitable_flags": unprofitable_flags.get(k, []),
+            # Bug #20 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-20) — divergences inter-providers
+            # propagées du FallbackFundamentalProvider. Exposé dans le scored
+            # payload pour que /api/universe + UI puissent afficher l'incohérence
+            # FMP/YF (déjà loggée mais auparavant invisible côté client).
+            "cross_provider_divergence": t_base.get("cross_provider_divergence") or [],
+            # Bug #21 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-21) — gaps structurels (champs non
+            # applicables au secteur mais effectivement absents). DQ ne les
+            # mesure pas (par design), expose-les ici pour visibilité.
+            "structural_gaps":           _compute_structural_gaps(t_base),
+            # Bug #12 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-12) — flag indiquant que ce ticker a
+            # subi un fallback rank global au lieu d'intra-secteur (au moins
+            # une métrique sector-relative a fallbacké). Petits secteurs <12.
+            "sector_relative_fallback": k in sector_fallback_tickers,
         }
 
     # ── Phase 6 audit — Composite z-score (universe-relative) ───────────

@@ -88,6 +88,16 @@ DEFAULT_MIN_PROPOSAL_USD = 250.0  # plancher : ne propose pas en-dessous
 DEFAULT_TOTAL_CAPITAL = 100_000.0
 UNIVERSE_SEVERE_HOURS = 48.0
 
+# Bug #22 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-22) — gate fundamentals freshness.
+# Le gate `_gate_universe_freshness` vérifie l'âge de universe.json (le fichier
+# global), mais pas la fraîcheur des fundamentals à l'intérieur (cache 7j max
+# par ticker via fundamentals_cache.STALE_FALLBACK_MAX_AGE_SECONDS).
+# Avant : universe rebuild hier à 6 h → gate OK même si 70 % des tickers sont
+# servis par stale_fallback (breaker YF ouvert depuis 5j). Conséquence : recos
+# basées sur cache stale + report fiscal périmé sans alerte.
+# Au-delà de FUNDAMENTALS_STALE_MAX_RATIO de tickers en stale, on bloque.
+FUNDAMENTALS_STALE_MAX_RATIO = 0.30  # 30 % des tickers en stale → STOP
+
 # Top-N mode — pilote le nombre de candidats retenus :
 #   "free_slots"   → min(max_holdings - n_open, n_bullish) — cron quotidien (défaut).
 #   "max_holdings" → jusqu'à max_holdings candidats (rebalance complet UI).
@@ -255,6 +265,60 @@ def _gate_universe_freshness() -> GateResult:
         "universe_freshness", True,
         f"age={age_hours:.1f}h",
         value=age_hours,
+    )
+
+
+def _gate_fundamentals_staleness() -> GateResult:
+    """Bug #22 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-22) — gate fundamentals freshness intra-ticker.
+
+    Compte le ratio de tickers dont source_provider contient '/stale' (cache
+    fallback après échec live) ou 'stale_report' (period_end > seuil dur).
+    Au-delà de FUNDAMENTALS_STALE_MAX_RATIO, on bloque les recommendations.
+    """
+    try:
+        if not api_core.UNIVERSE_QUANTAMENTAL_PATH.exists():
+            return GateResult(
+                "fundamentals_staleness", False, "universe.json absent"
+            )
+        raw = json.loads(
+            api_core.UNIVERSE_QUANTAMENTAL_PATH.read_text(encoding="utf-8")
+        )
+    except (json.JSONDecodeError, OSError) as e:
+        return GateResult(
+            "fundamentals_staleness", False, f"read_failed: {e}"
+        )
+    tickers = raw.get("tickers") if isinstance(raw, dict) else None
+    if not tickers or not isinstance(tickers, dict):
+        return GateResult(
+            "fundamentals_staleness", True,
+            "skip (univers vide ou format inattendu)",
+        )
+    total = 0
+    stale = 0
+    for row in tickers.values():
+        if not isinstance(row, dict):
+            continue
+        total += 1
+        sp = (row.get("source_provider") or "").lower()
+        err = (row.get("error") or "").lower()
+        if "stale" in sp or "stale_report" in sp or "stale" in err:
+            stale += 1
+    if total == 0:
+        return GateResult(
+            "fundamentals_staleness", True, "skip (aucun ticker)",
+        )
+    ratio = stale / total
+    if ratio >= FUNDAMENTALS_STALE_MAX_RATIO:
+        return GateResult(
+            "fundamentals_staleness", False,
+            f"{stale}/{total} stale ({ratio:.0%} ≥ "
+            f"{FUNDAMENTALS_STALE_MAX_RATIO:.0%})",
+            value=ratio,
+        )
+    return GateResult(
+        "fundamentals_staleness", True,
+        f"{stale}/{total} stale ({ratio:.0%})",
+        value=ratio,
     )
 
 
@@ -454,6 +518,15 @@ def plan_proposals(
     g_univ = _gate_universe_freshness()
     gates.append(g_univ)
     if not g_univ.ok:
+        return ProposerResult(False, gates, [], diagnostics)
+
+    # Bug #22 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-22) — gate fundamentals freshness intra-ticker.
+    # Universe.json fresh ne garantit PAS que les fundamentals dedans sont
+    # frais (cache 7j stale_fallback peut servir 70 % des tickers en cas de
+    # breaker YF ouvert). On bloque si > 30 % des tickers sont stale.
+    g_fund_stale = _gate_fundamentals_staleness()
+    gates.append(g_fund_stale)
+    if not g_fund_stale.ok:
         return ProposerResult(False, gates, [], diagnostics)
 
     # Gates qui dépendent du portefeuille courant

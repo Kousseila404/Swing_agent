@@ -175,6 +175,9 @@ class TickerFundamentals:
     # Valeurs : "fmp", "yfinance", "fmp+yfinance" (FallbackFundamentalProvider).
     source_provider: str | None = None
     backfill_fields: list[str] | None = None
+    # Bug #20 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-20) — divergences cross-provider
+    # propagées du FallbackFundamentalProvider jusqu'à universe.json/scoring.
+    cross_provider_divergence: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -360,6 +363,7 @@ def _ratios_to_fundamentals(
         error=ratios.error,
         source_provider=ratios.source_provider,
         backfill_fields=ratios.backfill_fields,
+        cross_provider_divergence=ratios.cross_provider_divergence,
     )
 
 

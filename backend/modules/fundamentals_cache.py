@@ -54,6 +54,17 @@ CACHE_LOCK_PATH = CACHE_DIR / "index.json.gz.lock"
 DEFAULT_TTL_SECONDS = 86_400
 STALE_FALLBACK_MAX_AGE_SECONDS = 7 * 86_400
 
+# Bug #8 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-8) — bornes dures sur l'âge du *report fiscal*.
+# Le TTL de cache (7j max) protège contre un fetch trop ancien, mais pas contre
+# un report fiscal périmé : on peut fetcher AUJOURD'HUI un EPS Q3-2024 et le
+# considérer "frais" alors qu'il a 240j. Conséquence : Piotroski Y/Y, Quality,
+# Value reposent sur des comparables stale sans warning.
+#   • Q-latest > 200 j  (~2 trimestres) → flag REPORT_STALE
+#   • Y-1     > 450 j  (publication 10-K + 1 année fiscale) → flag YOY_STALE
+# Ces flags sont injectés dans `error` pour propagation au pipeline data_confidence.
+PERIOD_END_MAX_AGE_DAYS = 200
+PERIOD_END_Y1_MAX_AGE_DAYS = 450
+
 
 def _now() -> float:
     return time.time()
@@ -286,10 +297,19 @@ def _validate_period_end_not_future(ticker: str, r: FinancialRatios) -> None:
     fuseau horaire mal géré. On ne supprime PAS les ratios eux-mêmes (ils
     peuvent être valides côté provider même si la date métadonnée déraille)
     mais on coupe le levier de Y-1 pour éviter un look-ahead silencieux.
+
+    Bug #8 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-8) — ajoute une borne dure sur l'âge maximum
+    du report fiscal (PERIOD_END_MAX_AGE_DAYS / PERIOD_END_Y1_MAX_AGE_DAYS).
+    Au-delà → tag dans `error` (propagé à data_confidence.freshness via le
+    suffixe "/stale_report" sur source_provider).
     """
     from datetime import date as _date
     today = _date.today()
-    for field_name in ("fundamentals_period_end", "fundamentals_period_end_y1"):
+    stale_flags: list[str] = []
+    for field_name, max_age in (
+        ("fundamentals_period_end", PERIOD_END_MAX_AGE_DAYS),
+        ("fundamentals_period_end_y1", PERIOD_END_Y1_MAX_AGE_DAYS),
+    ):
         val = getattr(r, field_name, None)
         if not isinstance(val, str):
             continue
@@ -308,6 +328,24 @@ def _validate_period_end_not_future(ticker: str, r: FinancialRatios) -> None:
                 f"(today={today.isoformat()}) — clearing to prevent lookahead"
             )
             setattr(r, field_name, None)
+            continue
+        age_days = (today - pe).days
+        if age_days > max_age:
+            stale_flags.append(f"{field_name}={age_days}d")
+    if stale_flags:
+        # Tag explicite : data_confidence + scoring sauront que le report est
+        # stale même si le cache est récent. On préserve l'error existante.
+        tag = f"report_stale={','.join(stale_flags)}"
+        existing = (r.error or "").strip()
+        r.error = f"{existing}; {tag}".lstrip("; ") if existing else tag
+        # Suffix source_provider pour cohérence avec le motif "/stale" déjà
+        # consommé par modules.data_confidence._freshness_factor.
+        sp = (r.source_provider or "").strip()
+        if "/stale_report" not in sp:
+            r.source_provider = f"{sp}/stale_report".lstrip("/") if sp else "stale_report"
+        logger.info(
+            f"[FundamentalsCache] {ticker} report_stale flagged: {','.join(stale_flags)}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────

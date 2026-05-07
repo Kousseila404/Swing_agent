@@ -107,13 +107,16 @@ def _merge(primary: FinancialRatios, fallback: FinancialRatios) -> FinancialRati
     """
     # Reconciliation : log si divergence > 5% sur champs critiques.
     ticker = getattr(primary, "ticker", "?")
-    _check_divergence(primary, fallback, ticker)
+    divergence = _check_divergence(primary, fallback, ticker)
 
     filled: list[str] = []
     merged_kwargs: dict = {}
     for f in fields(primary):
         name = f.name
-        if name in ("source_provider", "fetched_at", "error", "backfill_fields"):
+        if name in (
+            "source_provider", "fetched_at", "error",
+            "backfill_fields", "cross_provider_divergence",
+        ):
             # Métadonnées traitées séparément après le merge des champs data.
             continue
         p_val = getattr(primary, name)
@@ -133,6 +136,9 @@ def _merge(primary: FinancialRatios, fallback: FinancialRatios) -> FinancialRati
         # L'erreur primary devient info secondaire si le fallback a complété.
         error=None if filled else primary.error,
         backfill_fields=filled if filled else None,
+        # Bug #20 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-20)
+        # propagation explicite des divergences (avant : log only).
+        cross_provider_divergence=(divergence if divergence else None),
     )
 
 
