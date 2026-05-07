@@ -20,6 +20,7 @@ Composantes None → ignorées dans la moyenne ; toutes None → score neutre 50
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from typing import Any
 
 _NEUTRAL = 50.0
@@ -44,8 +45,15 @@ def _safe(v: Any) -> float | None:
 
 
 def _percentile_rank(values: dict[str, float | None], higher_is_better: bool = True) -> dict[str, float | None]:
-    """Percentile-rank cross-universe (fractional ranking, ties = mid-rank)."""
-    present = sorted([v for v in values.values() if v is not None and math.isfinite(v)])
+    """Percentile-rank cross-universe (fractional ranking, ties = mid-rank).
+
+    Implémentation : `bisect` sur la liste triée — O(n log n) total au lieu
+    du O(n²) naïf (sum-comprehension sur tout le tableau pour chaque ticker).
+    Aligné avec `sector_metrics._scoring._percentile_rank` (Phase 5 audit) :
+    `bisect_left` compte les < strict, `bisect_right - bisect_left` compte
+    les == — formule "fractional ranking" inchangée numériquement.
+    """
+    present = sorted(v for v in values.values() if v is not None and math.isfinite(v))
     n = len(present)
     if n < 2:
         return {k: (_NEUTRAL if (v is not None and math.isfinite(v)) else None)
@@ -55,8 +63,8 @@ def _percentile_rank(values: dict[str, float | None], higher_is_better: bool = T
         if v is None or not math.isfinite(v):
             out[k] = None
             continue
-        less = sum(1 for x in present if x < v)
-        equal = sum(1 for x in present if x == v)
+        less = bisect_left(present, v)
+        equal = bisect_right(present, v) - less
         pct = (less + 0.5 * equal) / n * 100.0
         out[k] = pct if higher_is_better else (100.0 - pct)
     return out

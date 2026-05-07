@@ -141,10 +141,17 @@ def _compute_per_sector(sector: str, tickers: list[dict[str, Any]]) -> dict[str,
         "subsectors":          subsectors,
         "num_analysts_total":  n_analysts,
         # ── Multi-factor TITAN ────────────────────────────────────────
+        # Phase 8 audit — exposition des 9 piliers (avant : 4 seulement).
+        # Permet aux dashboards sector-level de voir la dispersion par pilier.
         "quality_score_mean":      titan["quality_score"],
         "value_score_mean":        titan["value_score"],
         "risk_score_mean":         titan["risk_score"],
         "sentiment_score_mean":    titan["sentiment_score"],
+        "momentum_score_mean":     titan["momentum_score"],
+        "piotroski_score_mean":    titan["piotroski_score"],
+        "growth_score_mean":       titan["growth_score"],
+        "revisions_score_mean":    titan["revisions_score"],
+        "insider_score_mean":      titan["insider_score"],
         "titan_composite_score":   titan["titan_composite_score"],
         # momentum_6m_pct et rotation_score v1 sont ajoutés dans _post_process.
     }

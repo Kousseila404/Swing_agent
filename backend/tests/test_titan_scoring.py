@@ -1083,3 +1083,88 @@ def test_phase7_fundamentals_age_negative_clamped_to_zero():
     future = (datetime.now(UTC) + timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
     age = _parse_fetched_at_age_days(future)
     assert age == 0.0, f"age = {age}, attendu 0.0 (futur clampé)"
+
+
+# ─────────────────────────────────────────────────────────────────
+# PHASE 8 — perf (DQ caching) + sector aggregation 9 piliers
+# ─────────────────────────────────────────────────────────────────
+
+def test_phase8_weighted_mean_scores_covers_nine_pillars():
+    """Phase 8 audit — l'agrégat sectoriel via `_weighted_mean_scores` doit
+    exposer les 9 piliers (avant : seulement Q/V/R/Sentiment + composite). Sans
+    cela, le dashboard sector-level ne pouvait pas voir Momentum/Piotroski/
+    Growth/Revisions/Insider agrégés par secteur.
+    """
+    from modules.sector_metrics._scoring import _score_universe, _weighted_mean_scores
+
+    universe = _build_universe([
+        (f"T{i}", "Technology", {"market_cap": (i + 1) * 1e10})
+        for i in range(5)
+    ])
+    scored = _score_universe(universe)
+    out = _weighted_mean_scores(list(scored.values()))
+    expected = {
+        "quality_score", "value_score", "risk_score", "sentiment_score",
+        "momentum_score", "piotroski_score", "growth_score",
+        "revisions_score", "insider_score", "titan_composite_score",
+    }
+    assert set(out.keys()) == expected, f"clés manquantes : {expected - set(out.keys())}"
+    # Toutes les valeurs doivent être finies dans [0, 100] (ou neutre 50).
+    for k, v in out.items():
+        assert 0.0 <= v <= 100.0, f"{k} = {v} hors [0, 100]"
+
+
+def test_phase8_per_sector_payload_exposes_nine_pillar_means():
+    """Phase 8 audit — `_compute_per_sector` doit propager les 9 mean_scores
+    pour que `/api/sectors` puisse les afficher par secteur.
+    """
+    from modules.sector_metrics._aggregation import _compute_per_sector
+    from modules.sector_metrics._scoring import _score_universe
+
+    universe = _build_universe([
+        (f"T{i}", "Technology", {"market_cap": (i + 1) * 1e10})
+        for i in range(5)
+    ])
+    scored = _score_universe(universe)
+    stats = _compute_per_sector("Technology", list(scored.values()))
+    expected_keys = {
+        "quality_score_mean", "value_score_mean", "risk_score_mean",
+        "sentiment_score_mean", "momentum_score_mean",
+        "piotroski_score_mean", "growth_score_mean",
+        "revisions_score_mean", "insider_score_mean",
+        "titan_composite_score",
+    }
+    missing = expected_keys - set(stats.keys())
+    assert not missing, f"clés sectorielles manquantes : {missing}"
+
+
+def test_phase8_dq_cache_consistent_with_per_ticker_compute():
+    """Phase 8 audit (perf) — la valeur `data_quality` exposée dans le payload
+    doit être identique à `_compute_data_quality(row)` (le cache ne doit pas
+    introduire de divergence numérique). Garde-fou contre une éventuelle
+    mutation du row entre le gate et le scoring final.
+    """
+    from modules.sector_metrics._scoring import _compute_data_quality, _score_universe
+
+    universe = _build_universe([
+        ("FULL", "Technology", {}),
+        ("SPARSE", "Technology", {
+            "ev_to_ebitda": None, "debt_to_equity": None, "current_ratio": None,
+        }),
+        ("T1", "Technology", {}),
+        ("T2", "Technology", {}),
+        ("T3", "Technology", {}),
+        ("T4", "Technology", {}),
+        ("T5", "Technology", {}),
+        ("T6", "Technology", {}),
+        ("T7", "Technology", {}),
+    ])
+    scored = _score_universe(universe)
+    for k, row in scored.items():
+        # `_compute_data_quality` recalcule depuis le row brut original (toujours
+        # présent dans le scored row via le `**t_base` spread).
+        recomputed = _compute_data_quality(row)
+        cached = row["data_quality"]
+        assert abs(recomputed - cached) < 1e-9, (
+            f"{k} DQ cached={cached} vs recomputed={recomputed}"
+        )
