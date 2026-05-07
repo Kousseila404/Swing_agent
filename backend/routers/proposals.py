@@ -183,6 +183,39 @@ def list_proposals(
     }
 
 
+@router.get("/veto-history")
+def get_veto_history(
+    ticker:     str | None = Query(default=None, description="filtre exact (case-insensitive)"),
+    since_days: float | None = Query(default=None, ge=0,
+                                     description="fenêtre rolling N jours (basée sur decided_at)"),
+    limit:      int = Query(default=50, ge=1, le=500,
+                            description="max d'items dans `items`"),
+):
+    """Historique des vétos humains — propositions rejetées par l'utilisateur.
+
+    Endpoint public (lecture seule, comme `GET /api/proposals`) qui facilite la
+    consultation de l'historique des décisions négatives :
+      • `summary` — agrégat sur la fenêtre `since_days` (default 90j) :
+        nombre total, top tickers récurrents, top motifs, dernier veto.
+      • `items`   — détail des `limit` derniers vétos, du plus récent au plus
+        ancien, filtrable par ticker.
+
+    Utile pour identifier les patterns (ex: "je veto-e tout le secteur Energy
+    depuis 30j" → repenser sa thèse macro) ou retrouver pourquoi un ticker a
+    été refusé il y a quelques semaines.
+    """
+    items = proposals.list_veto_history(
+        ticker=ticker, since_days=since_days, limit=limit,
+    )
+    summary = proposals.veto_history_summary(
+        since_days=since_days if since_days is not None else 90,
+    )
+    return {
+        "summary": summary,
+        "items":   items,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────
 # POST /refresh — run auto_proposer + enqueue
 # ─────────────────────────────────────────────────────────────────
@@ -519,8 +552,7 @@ def manual_proposal(
         raise HTTPException(400, "target_amount_usd doit être > 0")
     size = max(1, int(target_usd / float(price)))
 
-    ttl = req.ttl_hours if req.ttl_hours is not None else proposals.DEFAULT_TTL_HOURS
-
+    # `ttl_hours` non précisé → make_proposal lit PROPOSAL_TTL_HOURS (default 0 = no TTL).
     proposal = proposals.make_proposal(
         ticker=ticker,
         direction="LONG",
@@ -530,7 +562,7 @@ def manual_proposal(
         size=size,
         sector=str(row.get("sector") or ""),
         signal=req.signal,
-        ttl_hours=ttl,
+        ttl_hours=req.ttl_hours,
         context={
             "titan_score":      row.get("titan_composite_score"),
             "quality_score":    row.get("quality_score"),

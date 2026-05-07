@@ -68,3 +68,39 @@ def test_score_in_range_0_100():
     out = compute_revisions_pillar(universe)
     for v in out.values():
         assert 0.0 <= v["revisions_score"] <= 100.0
+
+
+def test_phase8_percentile_rank_bisect_matches_naive_formula():
+    """Phase 8 audit (perf) — la migration `bisect` (O(n log n)) du
+    `_percentile_rank` doit produire EXACTEMENT le même résultat que la formule
+    naïve `sum(< v) + 0.5 × sum(== v)` qu'elle remplace. Test numérique de
+    non-régression : on compare manuellement quelques valeurs ties-aware.
+    """
+    from modules.revisions_score import _percentile_rank
+
+    values = {
+        "A": 10.0, "B": 20.0, "C": 20.0, "D": 30.0, "E": 30.0,
+        "F": 30.0, "G": 40.0, "H": 50.0, "I": None, "J": float("inf"),
+    }
+    out = _percentile_rank(values, higher_is_better=True)
+    # n = 8 valeurs présentes finies. Pour D=30.0 : less = 3 (A,B,C),
+    # equal = 3 (D,E,F) → pct = (3 + 0.5×3) / 8 × 100 = 56.25.
+    assert abs(out["D"] - 56.25) < 1e-9, f"D pct: {out['D']}"
+    # Pour A=10.0 : less = 0, equal = 1 → pct = 0.5 / 8 × 100 = 6.25.
+    assert abs(out["A"] - 6.25) < 1e-9
+    # Pour H=50.0 : less = 7, equal = 1 → pct = (7+0.5)/8 × 100 = 93.75.
+    assert abs(out["H"] - 93.75) < 1e-9
+    # None reste None ; inf est exclu (math.isfinite=False) → None.
+    assert out["I"] is None
+    assert out["J"] is None
+
+
+def test_phase8_percentile_rank_inversion_consistent():
+    """higher_is_better=False produit l'inverse exact de True (100 - pct)."""
+    from modules.revisions_score import _percentile_rank
+
+    values = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
+    up = _percentile_rank(values, higher_is_better=True)
+    down = _percentile_rank(values, higher_is_better=False)
+    for k in values:
+        assert abs((up[k] or 0) + (down[k] or 0) - 100.0) < 1e-9

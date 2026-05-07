@@ -298,7 +298,7 @@ def _build_proposal_from_alloc(
     alloc: dict[str, Any],
     *,
     macro_meta: dict[str, Any],
-    ttl_hours: float,
+    ttl_hours: float | None,
 ) -> proposals.Proposal | None:
     """Convertit une allocation enrichie (issue de PortfolioManager + suggested_levels)
     en Proposal prête à enqueuer. Retourne None si l'allocation est inutilisable
@@ -379,7 +379,7 @@ def plan_proposals(
     min_free_slots: int = DEFAULT_MIN_FREE_SLOTS,
     min_proposal_usd: float = DEFAULT_MIN_PROPOSAL_USD,
     allowed_regimes: tuple[str, ...] = DEFAULT_ALLOWED_REGIMES,
-    ttl_hours: float = proposals.DEFAULT_TTL_HOURS,
+    ttl_hours: float | None = None,
     allow_fractional_shares: bool = False,
     include_held: bool = False,
     top_n_mode: str = DEFAULT_TOP_N_MODE,

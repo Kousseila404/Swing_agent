@@ -685,10 +685,16 @@ def _weighted_mean_scores(tickers: list[dict[str, Any]]) -> dict[str, float]:
 
     Fallback si aucun market cap → moyenne simple.
     Fallback si aucune valeur → score neutre 50.
+
+    Phase 8 audit — couvre les 9 piliers (avant : Q/V/R/Sentiment seulement).
+    Manquaient Momentum, Piotroski, Growth, Revisions, Insider — ce qui rendait
+    impossible le diagnostic sectoriel par pilier dans /api/sectors.
     """
     score_keys = (
         "quality_score", "value_score", "risk_score",
-        "sentiment_score", "titan_composite_score",
+        "sentiment_score", "momentum_score", "piotroski_score",
+        "growth_score", "revisions_score", "insider_score",
+        "titan_composite_score",
     )
     out: dict[str, float] = {}
     for key in score_keys:
@@ -744,7 +750,14 @@ def _score_universe(
         return {}
 
     # ── Gate data_quality : seulement les tickers suffisamment remplis ──
-    keys = [k for k in keys_all if _compute_data_quality(tickers_map[k]) >= _MIN_DATA_QUALITY]
+    # Phase 8 audit (perf) — DQ est calculée 2× par ticker historiquement (gate
+    # ici + pondération composite ligne ~1112). Sur 500 tickers × 12 fields, ça
+    # double le coût `_safe_float`. On cache le résultat dans `dq_cache` pour
+    # une seule passe d'extraction. Sémantique inchangée.
+    dq_cache: dict[str, float] = {
+        k: _compute_data_quality(tickers_map[k]) for k in keys_all
+    }
+    keys = [k for k in keys_all if dq_cache[k] >= _MIN_DATA_QUALITY]
     n_excluded = len(keys_all) - len(keys)
     if n_excluded > 0:
         logger.info(
@@ -1109,7 +1122,8 @@ def _score_universe(
         # On expose les 2 valeurs pour audit : composite "brut" (avant pénalité,
         # comparable au TITAN historique) et composite "final" (après, utilisé
         # pour le ranking en production).
-        dq = _compute_data_quality(t_base)
+        # Phase 8 audit (perf) — réutilise dq_cache calculé en amont du gate.
+        dq = dq_cache[k]
         dq_coef = _DQ_MIN_COEF + (1.0 - _DQ_MIN_COEF) * dq
         composite_weighted = composite * dq_coef
 
