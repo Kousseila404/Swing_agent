@@ -36,6 +36,17 @@ _SCORE_FIELDS_EXPOSED: tuple[str, ...] = (
     "f_score",
     "f_score_max",
     "dq_coef",
+    # Hardening 2026-05-07 — diagnostics exposés
+    # (cf. backend/docs/titan/audit_2026-05-07.md).
+    # Coût payload négligeable (listes courtes / scalaires bornés) ; permet
+    # à l'UI de filtrer/afficher sans aller chercher /api/ticker_analysis.
+    "fundamentals_report_age_days",     # #bug-7 — âge report fiscal Q-latest
+    "fundamentals_report_age_days_y1",  # #bug-7 — âge Y-1 (Piotroski Y/Y)
+    "value_unprofitable_flags",         # #bug-9 — turnaround story signaling
+    "cross_provider_divergence",        # #bug-20 — FMP/YF disagree
+    "structural_gaps",                  # #bug-21 — fields cachés par DQ sector
+    "sector_relative_fallback",         # #bug-12 — secteur < 12 → rank global
+    "titan_weight_mode",                # #bug-17 — full/no_sentiment/renormalized/all_empty
 )
 
 # Fenêtre du drift TITAN. 7 jours = standard "weekly momentum" — assez court
