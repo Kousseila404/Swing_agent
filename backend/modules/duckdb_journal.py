@@ -68,6 +68,11 @@ _COLUMN_TYPES: dict[str, str] = {
     "Confidence_Entry":  "DOUBLE",   # 0-100 (data_confidence à l'entrée)
     # Phase 7 audit (2026-05-06) — granularité de la raison de clôture.
     "Close_Reason":      "VARCHAR",
+    # Audit 2026-05-12 — décisions lt_exit_policy persistées pour mesurer
+    # l'edge de la policy après coup (corrélation action↔outcome).
+    "Last_LT_Action":    "VARCHAR",  # HOLD|ADD_ON|TRIM|EXIT_THESIS|...
+    "Last_LT_Date":      "VARCHAR",  # YYYY-MM-DD du dernier check
+    "Last_LT_Severity":  "INTEGER",  # 0..4 (filtre les rows actionnables)
 }
 
 # Sécurise l'accès multi-thread (FastAPI peut appeler depuis plusieurs workers).

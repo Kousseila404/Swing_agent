@@ -535,6 +535,18 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                     insider_score=_current.get("insider_score") if _current else None,
                 )
 
+                # Audit 2026-05-12 — persistance LT décision dans le CSV
+                # (toutes les actions, pas seulement les actionnables, pour
+                # avoir un historique complet des évaluations vs outcomes).
+                try:
+                    if "Last_LT_Action" in df.columns:
+                        df.at[idx, "Last_LT_Action"] = _decision.action
+                        df.at[idx, "Last_LT_Date"] = datetime.now().strftime("%Y-%m-%d")
+                        df.at[idx, "Last_LT_Severity"] = int(_decision.severity)
+                        modified_count += 1
+                except Exception as exc:
+                    logger.debug(f"[{ticker}] LT decision persist failed: {exc}")
+
                 # On pousse Telegram pour les actions actionnables uniquement.
                 # HOLD/NO_DATA = pas d'alerte. EXIT_CATASTROPHE est rare car
                 # la branche SL plus bas ferme et alerte ; ce cas couvre

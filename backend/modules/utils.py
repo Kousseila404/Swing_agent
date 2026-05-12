@@ -119,6 +119,16 @@ CSV_SCHEMA = [
     # Valeurs : SL_HIT | TP_HIT | TIMEOUT | THESIS_BREAK | EXIT_VALUATION |
     # EXIT_CATASTROPHE | EMERGENCY_DD | TRAILING_STOP | MANUAL | "" (legacy).
     "Close_Reason",
+    # Audit 2026-05-12 — persistance des décisions lt_exit_policy. Avant : les
+    # actions (HOLD/ADD_ON/TRIM/EXIT_THESIS/...) étaient seulement envoyées
+    # en Telegram, jamais journalisées → impossible de mesurer l'edge de la
+    # policy après coup. Permet de corréler `Last_LT_Action` avec l'outcome
+    # (WIN/LOSS) pour valider l'utilité du module.
+    # Valeurs : HOLD | ADD_ON | TRIM | EXIT_THESIS | EXIT_VALUATION |
+    # EXIT_CATASTROPHE | NO_DATA | "" (jamais évalué — back-compat).
+    "Last_LT_Action",
+    "Last_LT_Date",       # Date YYYY-MM-DD du dernier check lt_exit_policy
+    "Last_LT_Severity",   # 0..4 — utile pour filtrer les rows actionnables
 ]
 
 
