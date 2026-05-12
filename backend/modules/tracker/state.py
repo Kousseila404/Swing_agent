@@ -60,6 +60,10 @@ LT_DECISION_COOLDOWN_HOURS = {
     "EXIT_THESIS":       THESIS_ALERT_COOLDOWN_HOURS,  # 24h, aligné rétrocompat thesis_break
     "EXIT_VALUATION":    24,
     "EXIT_CATASTROPHE":   6,
+    # Audit 2026-05-12 — earnings TRIM J-3 si gain > +10 %.
+    # 12h : un earnings se passe sur 1-3j, on veut être ré-alerté à J-3 puis
+    # potentiellement à J-2/J-1 si la position évolue, mais sans spammer.
+    "EARNINGS_TRIM":     12,
 }
 
 

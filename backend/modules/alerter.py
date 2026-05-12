@@ -263,6 +263,8 @@ def send_lt_decision_alert(
         "EXIT_THESIS":       ("🧠", "THÈSE CASSÉE"),
         "EXIT_VALUATION":    ("💎", "SURVALORISATION EXTRÊME"),
         "EXIT_CATASTROPHE":  ("🚨", "CATASTROPHE FLOOR"),
+        # Audit 2026-05-12 — protection earnings J-3 sur gain > +10 %.
+        "EARNINGS_TRIM":     ("📊", "EARNINGS PROCHE — TRIM 50 %"),
     }
     icon, label = icons.get(action, ("⚠️", action))
     bullets = "\n".join(f"  • {r}" for r in (reasons or [])[:5]) or "  • —"
@@ -273,6 +275,8 @@ def send_lt_decision_alert(
         cta = "✂️ Réduire la position (~30-50 %) — la conviction est entamée."
     elif action == "EXIT_CATASTROPHE":
         cta = "🚨 Floor catastrophe — sortie immédiate recommandée."
+    elif action == "EARNINGS_TRIM":
+        cta = "📊 Earnings imminent + gain confortable — vendre 50 % pour cristalliser."
     else:
         cta = "⚠️ Décision LT manuelle — le tracker ne ferme pas."
 

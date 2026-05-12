@@ -578,6 +578,47 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             except Exception as exc:
                 logger.debug(f"[{ticker}] lt_exit_policy check échoué : {exc}")
 
+        # ── 0bis. Earnings TRIM J-3 (Audit 2026-05-12) ────────────────
+        # Si la position est en gain > +10 % ET earnings dans ≤3 jours,
+        # on suggère un TRIM 50 % pour cristalliser une partie du profit
+        # avant le gap binaire post-earnings (typiquement ±10-20 % sur
+        # large cap, ±20-40 % sur biotech/SaaS).
+        # Le tracker NE FERME PAS automatiquement — alerte Telegram seule.
+        try:
+            _next_earn = None
+            if scored_universe:
+                _next_earn = (scored_universe.get(ticker) or {}).get("next_earnings_date")
+            if _next_earn and pct_gain >= 10.0:
+                from datetime import date as _date
+                _s = str(_next_earn)[:10]
+                try:
+                    _ed = _date.fromisoformat(_s)
+                    _days_to_earn = (_ed - _date.today()).days
+                except ValueError:
+                    _days_to_earn = None
+                if _days_to_earn is not None and 0 <= _days_to_earn <= 3:
+                    if can_send_lt_decision_alert(ticker, "EARNINGS_TRIM"):
+                        send_lt_decision_alert(
+                            ticker=ticker,
+                            action="EARNINGS_TRIM",
+                            direction=direction,
+                            entry_price=entry,
+                            current_price=current_price,
+                            pct_gain=pct_gain,
+                            reasons=[
+                                f"Earnings dans {_days_to_earn}j — gap binaire ±10-20 % attendu",
+                                f"Position en gain {pct_gain:+.1f}% — cristalliser 50 % avant catalyst",
+                                "Conserver l'autre moitié pour capter un beat éventuel",
+                            ],
+                        )
+                        mark_lt_decision_alert_sent(ticker, "EARNINGS_TRIM")
+                        logger.info(
+                            f"📊 [{ticker}] EARNINGS_TRIM J-{_days_to_earn} "
+                            f"(gain {pct_gain:+.1f}%) — alerte envoyée"
+                        )
+        except Exception as exc:
+            logger.debug(f"[{ticker}] earnings TRIM check échoué : {exc}")
+
         # ── 1. Time exit (priorité maximale) ───────────────────────
         entry_date_str = str(row.get("Date", ""))
         try:
