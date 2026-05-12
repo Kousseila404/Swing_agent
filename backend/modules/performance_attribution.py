@@ -214,6 +214,66 @@ def _tilt_flags_attribution(df: pd.DataFrame) -> dict[str, Any]:
     return {"flags": out_flags, "n_total": n_total}
 
 
+def _lt_action_attribution(df: pd.DataFrame) -> dict[str, Any]:
+    """Audit 2026-05-12 — attribution par DERNIÈRE action lt_exit_policy avant
+    clôture. Mesure si la policy émet des signaux *informatifs* (les trades
+    précédés par TRIM/EXIT_* finissent-ils LOSS plus souvent que ceux laissés
+    HOLD ?).
+
+    Une action vraiment informative montrera :
+      • HOLD          : WR ~marché baseline.
+      • EXIT_THESIS   : WR <<< baseline (la policy aurait dû sortir).
+      • EXIT_VALUATION: WR > 50 % mais PnL pct plus contenu (pic raté).
+      • ADD_ON        : WR ≥ baseline (les averaging down réussis).
+
+    Skip si Last_LT_Action est vide (back-compat trades pré-2026-05-12).
+    """
+    if "Last_LT_Action" not in df.columns:
+        return {"label": "LT actions", "actions": [], "n_total": 0,
+                "stable": False, "note": "schema_missing_Last_LT_Action"}
+
+    rows: list[dict[str, Any]] = []
+    for _, r in df.iterrows():
+        is_win = _is_winner(r)
+        if is_win is None:
+            continue
+        action = str(r.get("Last_LT_Action") or "").strip().upper()
+        if not action:
+            action = "NEVER_EVALUATED"
+        rows.append({
+            "action":  action,
+            "win":     bool(is_win),
+            "pnl_pct": _trade_pnl_pct(r),
+        })
+
+    # Regrouper par action
+    by_action: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_action.setdefault(row["action"], []).append(row)
+
+    out_actions = []
+    for action, bucket in sorted(by_action.items(), key=lambda kv: -len(kv[1])):
+        n = len(bucket)
+        n_wins = sum(1 for r in bucket if r["win"])
+        pnls = [r["pnl_pct"] for r in bucket if r["pnl_pct"] is not None]
+        avg = (sum(pnls) / len(pnls)) if pnls else None
+        out_actions.append({
+            "action":      action,
+            "n":           n,
+            "n_wins":      n_wins,
+            "win_rate":    (n_wins / n * 100.0) if n else None,
+            "pnl_avg_pct": avg,
+            "stable":      n >= MIN_SAMPLE_STABLE,
+        })
+
+    return {
+        "label":   "LT actions (lt_exit_policy)",
+        "actions": out_actions,
+        "n_total": len(rows),
+        "stable":  len(rows) >= MIN_TOTAL_TRADES_STABLE,
+    }
+
+
 def compute_attribution() -> dict[str, Any]:
     """Point d'entrée principal. Retourne dict structuré pour l'UI."""
     try:
@@ -229,6 +289,8 @@ def compute_attribution() -> dict[str, Any]:
             "stable": False,
             "pillars": [],
             "tilts":   {"flags": [], "n_total": 0},
+            "lt_actions": {"label": "LT actions", "actions": [], "n_total": 0,
+                           "stable": False},
         }
 
     pillars_out = [_attribute_pillar(df, p["col"], p["label"]) for p in PILLARS]
@@ -249,6 +311,7 @@ def compute_attribution() -> dict[str, Any]:
         "pillars":       pillars_out,
         "f_score":       f_score_buckets,
         "tilts":         _tilt_flags_attribution(df),
+        "lt_actions":    _lt_action_attribution(df),
     }
 
 

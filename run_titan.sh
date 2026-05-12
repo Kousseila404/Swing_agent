@@ -142,8 +142,12 @@ fi
 #     trop lâche en yearly). 60j train + 20j test = signal stable.
 rc_wfo=0
 if [[ "$(date +%d)" == "01" ]]; then
-    echo "── Step 3b/4 : wfo_monitor (mensuel)"
-    "$PYTHON" -m modules.wfo_monitor --train-days 60 --test-days 20 --publication-lag-days 90
+    # Audit 2026-05-12 — lag 90→30 explicite. Historique snapshots actuel
+    # = ~21j, lag 90 forçait l'auto-reduce (warning log). 30 est cohérent
+    # avec un cycle trimestriel earnings + reporting yfinance T+5 à T+30.
+    # À remonter vers 60-90 une fois 180+ jours d'historique disponibles.
+    echo "── Step 3b/4 : wfo_monitor (mensuel, lag=30)"
+    "$PYTHON" -m modules.wfo_monitor --train-days 30 --test-days 10 --publication-lag-days 30
     rc_wfo=$?
     if [[ $rc_wfo -ne 0 ]]; then
         echo "WARN: wfo_monitor exit=$rc_wfo (historique probablement insuffisant — non bloquant)"
@@ -185,6 +189,23 @@ else
         rc_props=$?
         echo "WARN: refresh proposals HTTP failed (rc=$rc_props)"
     fi
+fi
+
+# ── 5. Bear hedge (audit 2026-05-12) ─────────────────────────────
+#     Si confirmed_regime ∈ {BEAR_MARKET, CRASH_PANIC} pendant ≥
+#     BEAR_HEDGE_MIN_DAYS jours, ouvre un LONG SH (10% du book). Si
+#     BULL_MARKET revient ≥ 3j, ferme le hedge.
+#
+#     No-op silencieux en BULL_MARKET stable : la décision retourne
+#     HOLD_NO_HEDGE et execute_decision ne fait rien. Gating via
+#     config.BEAR_HEDGE_ENABLED (True depuis 2026-05-12).
+echo "── Step 5/5 : bear_hedge (régime macro défensif)"
+"$PYTHON" -m modules.bear_hedge
+rc_hedge=$?
+if [[ $rc_hedge -ne 0 ]]; then
+    # Le module retourne exit 1 si OPEN/CLOSE a échoué (broker down, etc.).
+    # HOLD_* / SKIP retournent exit 0.
+    echo "WARN: bear_hedge exit=$rc_hedge (vérifier macro_state.json + broker)"
 fi
 
 # ── Exit code synthétique ────────────────────────────────────────

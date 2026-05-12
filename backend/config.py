@@ -124,8 +124,10 @@ TRAILING_STOP_ATR_TRAIL_MULT      = 3.0   # SL = plus-haut − 3.0 × ATR (incha
 # hauteur de PCT_OF_BOOK du capital. Inverse-ETF = hedge directionnel simple,
 # pas d'options, pas de short véritable (compatible PEA/CTO sans marge).
 #
-# Off par défaut — activer après validation paper sur un cycle BEAR complet.
-BEAR_HEDGE_ENABLED      = False
+# Activé 2026-05-12 (avec confirmed_regime=BULL_MARKET stable, pas d'effet
+# immédiat — le module ne déclenchera OPEN que si BEAR_MARKET ou CRASH_PANIC
+# pendant ≥ BEAR_HEDGE_MIN_DAYS jours consécutifs).
+BEAR_HEDGE_ENABLED      = True
 BEAR_HEDGE_TICKER       = "SH"     # ProShares Short S&P500 — alternative : SDS (2×)
 BEAR_HEDGE_PCT_OF_BOOK  = 0.10     # 10 % du capital total
 BEAR_HEDGE_MIN_DAYS     = 3        # confirmation N-jours (anti-whipsaw)
