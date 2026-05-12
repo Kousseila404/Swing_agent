@@ -88,15 +88,19 @@ DEFAULT_MIN_PROPOSAL_USD = 250.0  # plancher : ne propose pas en-dessous
 DEFAULT_TOTAL_CAPITAL = 100_000.0
 UNIVERSE_SEVERE_HOURS = 48.0
 
-# Bug #22 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-22) — gate fundamentals freshness.
-# Le gate `_gate_universe_freshness` vérifie l'âge de universe.json (le fichier
-# global), mais pas la fraîcheur des fundamentals à l'intérieur (cache 7j max
-# par ticker via fundamentals_cache.STALE_FALLBACK_MAX_AGE_SECONDS).
-# Avant : universe rebuild hier à 6 h → gate OK même si 70 % des tickers sont
-# servis par stale_fallback (breaker YF ouvert depuis 5j). Conséquence : recos
-# basées sur cache stale + report fiscal périmé sans alerte.
-# Au-delà de FUNDAMENTALS_STALE_MAX_RATIO de tickers en stale, on bloque.
-FUNDAMENTALS_STALE_MAX_RATIO = 0.30  # 30 % des tickers en stale → STOP
+# Bug #22 fix (audit 2026-05-07) — gate fundamentals freshness.
+# Audit 2026-05-12 — distinction stricte de deux types de "stale" :
+#   • stale_fallback : cache 7j servi après ÉCHEC live fetch (breaker YF
+#     ouvert, quota exceeded, network down). C'est un VRAI problème — la
+#     donnée n'a pas été refresh malgré tentative. → seuil 30%.
+#   • report_stale  : period_end fiscal > 200j (Q-latest) ou > 450j (Y-1).
+#     Le rapport est juste vieux ; la donnée a été fetchée correctement.
+#     N'affecte qu'un sous-pilier (Piotroski Y/Y, Growth YoY). → géré
+#     individuellement via `confidence_score` au scoring, pas un gate.
+# Avant le fix : 303/494 (61%) tickers en `report_stale_y1=494d` (cycle
+# fiscal annuel normal) bloquaient TOUTES les propositions.
+FUNDAMENTALS_STALE_MAX_RATIO = 0.30        # cap stale_fallback (vrai stale)
+FUNDAMENTALS_REPORT_STALE_MAX_RATIO = 0.85 # cap report_stale (Y/Y manquant) — large car cycle fiscal normal
 
 # Top-N mode — pilote le nombre de candidats retenus :
 #   "free_slots"   → min(max_holdings - n_open, n_bullish) — cron quotidien (défaut).
@@ -269,11 +273,18 @@ def _gate_universe_freshness() -> GateResult:
 
 
 def _gate_fundamentals_staleness() -> GateResult:
-    """Bug #22 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-22) — gate fundamentals freshness intra-ticker.
+    """Gate fundamentals freshness — distinction stale_fallback / report_stale.
 
-    Compte le ratio de tickers dont source_provider contient '/stale' (cache
-    fallback après échec live) ou 'stale_report' (period_end > seuil dur).
-    Au-delà de FUNDAMENTALS_STALE_MAX_RATIO, on bloque les recommendations.
+    Audit 2026-05-12 :
+      • stale_fallback : ÉCHEC du live fetch, cache 7j servi en remplacement.
+        Détecté par 'stale_fallback' dans error/source_provider OU
+        'cache_fallback_after_fail' dans error. Vrai problème opérationnel.
+        → cap FUNDAMENTALS_STALE_MAX_RATIO (default 30%).
+      • report_stale   : period_end fiscal > 200j/450j. Données fetchées
+        correctement mais comparable Y/Y manquant (Piotroski Y/Y, Growth YoY
+        dégradés). Cycle fiscal annuel normal, ~50-60% du SP500 attendu.
+        → cap FUNDAMENTALS_REPORT_STALE_MAX_RATIO (default 85%) — ne bloque
+        qu'en cas de blackout massif (e.g. SimFin/yf en panne sur 90% univers).
     """
     try:
         if not api_core.UNIVERSE_QUANTAMENTAL_PATH.exists():
@@ -294,31 +305,56 @@ def _gate_fundamentals_staleness() -> GateResult:
             "skip (univers vide ou format inattendu)",
         )
     total = 0
-    stale = 0
+    n_fallback = 0   # vrai stale (échec live)
+    n_report = 0     # report_stale Y/Y (cycle fiscal normal)
     for row in tickers.values():
         if not isinstance(row, dict):
             continue
         total += 1
         sp = (row.get("source_provider") or "").lower()
         err = (row.get("error") or "").lower()
-        if "stale" in sp or "stale_report" in sp or "stale" in err:
-            stale += 1
+        # stale_fallback : signifie échec live → cache servi en remplacement.
+        is_fallback = (
+            "stale_fallback" in sp or "stale_fallback" in err
+            or "cache_fallback_after_fail" in err
+        )
+        # report_stale : données OK mais period_end fiscal trop ancien.
+        is_report_stale = (
+            "report_stale" in sp or "report_stale" in err
+            or "stale_report" in sp  # ancien tag back-compat
+        )
+        if is_fallback:
+            n_fallback += 1
+        elif is_report_stale:
+            n_report += 1
     if total == 0:
         return GateResult(
             "fundamentals_staleness", True, "skip (aucun ticker)",
         )
-    ratio = stale / total
-    if ratio >= FUNDAMENTALS_STALE_MAX_RATIO:
+    ratio_fallback = n_fallback / total
+    ratio_report = n_report / total
+    diag = (
+        f"fallback={n_fallback}/{total} ({ratio_fallback:.0%}) | "
+        f"report={n_report}/{total} ({ratio_report:.0%})"
+    )
+    if ratio_fallback >= FUNDAMENTALS_STALE_MAX_RATIO:
         return GateResult(
             "fundamentals_staleness", False,
-            f"{stale}/{total} stale ({ratio:.0%} ≥ "
-            f"{FUNDAMENTALS_STALE_MAX_RATIO:.0%})",
-            value=ratio,
+            f"{diag} — fallback ratio ≥ "
+            f"{FUNDAMENTALS_STALE_MAX_RATIO:.0%} (live providers down)",
+            value={"fallback": ratio_fallback, "report": ratio_report},
+        )
+    if ratio_report >= FUNDAMENTALS_REPORT_STALE_MAX_RATIO:
+        return GateResult(
+            "fundamentals_staleness", False,
+            f"{diag} — report ratio ≥ "
+            f"{FUNDAMENTALS_REPORT_STALE_MAX_RATIO:.0%} "
+            "(blackout fundamentals provider Y-1)",
+            value={"fallback": ratio_fallback, "report": ratio_report},
         )
     return GateResult(
-        "fundamentals_staleness", True,
-        f"{stale}/{total} stale ({ratio:.0%})",
-        value=ratio,
+        "fundamentals_staleness", True, diag,
+        value={"fallback": ratio_fallback, "report": ratio_report},
     )
 
 
@@ -726,7 +762,16 @@ def plan_proposals(
             "support": support,
             "next_earnings_date": scored_row.get("next_earnings_date"),
         }
-        buy_signal_data = compute_buy_signal(buy_input).to_dict()
+        # Audit 2026-05-12 — passe confidence pour gate STRONG_BUY/BUY.
+        try:
+            from modules.data_confidence import compute_confidence
+            _conf = compute_confidence(scored_row)
+            _conf_score = _conf.get("score") if isinstance(_conf, dict) else None
+        except Exception:
+            _conf_score = None
+        buy_signal_data = compute_buy_signal(
+            buy_input, confidence_score=_conf_score,
+        ).to_dict()
 
         alloc = {
             **alloc,

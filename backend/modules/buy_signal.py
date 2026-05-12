@@ -64,6 +64,14 @@ _T_BEAT_RATE_BOOSTER = 0.75
 _EARNINGS_BLACKOUT_DAYS = 7
 _EARNINGS_NEAR_DAYS = 14
 
+# Audit 2026-05-12 — gate confidence_score (0-100, output data_confidence).
+# Avant : compute_buy_signal posait STRONG_BUY/BUY sans regarder confidence,
+# le sizing aval (`_sizing_buffett`) atténuait seulement le tilt. On peut donc
+# se retrouver STRONG_BUY 20% size sur un ticker dont les data sont à 30/100.
+# Désormais : STRONG_BUY exige conf≥60, BUY exige conf≥50. Sinon downgrade WATCH.
+_T_CONFIDENCE_STRONG_BUY = 60
+_T_CONFIDENCE_BUY = 50
+
 # Tilt négatifs déjà présents dans titan_tilt_flags du scoring.
 _TILT_CHEAP_JUNK = "cheap_junk"
 _TILT_FALLING_KNIFE = "falling_knife"
@@ -142,6 +150,7 @@ def compute_buy_signal(
     row: dict[str, Any],
     *,
     support_score: float | None = None,
+    confidence_score: float | None = None,
 ) -> BuySignalResult:
     """Calcule le verdict BUY pour un ticker.
 
@@ -178,6 +187,17 @@ def compute_buy_signal(
     pa_block = row.get("price_action") or {}
     drawdown_from_high = _safe(pa_block.get("drawdown_from_high_pct"))
     momentum_6m = _safe(pa_block.get("momentum_6m_pct"))
+
+    # Audit 2026-05-12 — récupère confidence (paramètre OU row.confidence_score
+    # OU row.confidence.score). Si totalement absent : on traite comme inconnu
+    # et n'applique PAS le gate (conservateur — on ne pénalise pas un univers
+    # qui n'a pas encore le pilier confidence).
+    if confidence_score is None:
+        confidence_score = _safe(row.get("confidence_score"))
+        if confidence_score is None:
+            _conf_block = row.get("confidence") or {}
+            if isinstance(_conf_block, dict):
+                confidence_score = _safe(_conf_block.get("score"))
 
     next_earnings = row.get("next_earnings_date")
     days_to_earnings = _days_until_iso(next_earnings)
@@ -304,12 +324,39 @@ def compute_buy_signal(
     else:
         support_mult = 1.0  # INSUFFICIENT_DATA → ne pas pénaliser
 
+    # ── Gate confidence (Audit 2026-05-12) ─────────────────────────
+    # Le verdict STRONG_BUY/BUY est rétrogradé si la confiance dans les data
+    # ne suit pas. Sans ce gate, on pouvait déclencher 20% sizing sur des
+    # fundamentals stale > 16 mois (cf. report_stale_y1=497d massif en log).
+    # confidence absent (None) → pas de gate — on tolère les univers sans
+    # ce pilier (back-compat).
+    if confidence_score is not None:
+        if confidence_score < _T_CONFIDENCE_BUY:
+            res.reasons_neg.append(
+                f"Confidence {confidence_score:.0f}/100 < {_T_CONFIDENCE_BUY:.0f} — data peu fiable"
+            )
+            if composite >= _T_WATCH:
+                res.verdict = "WATCH"
+                res.label = f"WATCH — confidence {confidence_score:.0f} (data dégradée)"
+                res.color = "warning"
+                res.score = 55
+                return res
+            # Composite < 70 : SKIP normal (chemin par défaut plus bas)
+        elif confidence_score < _T_CONFIDENCE_STRONG_BUY:
+            # Entre 50 et 60 : autorise BUY mais bloque STRONG_BUY (cap au seuil BUY).
+            res.reasons_neg.append(
+                f"Confidence {confidence_score:.0f}/100 < {_T_CONFIDENCE_STRONG_BUY:.0f} — STRONG_BUY bloqué"
+            )
+
     # ── Verdict principal ─────────────────────────────────────────
-    # STRONG_BUY : TITAN ≥ 80 + Q ≥ 60 + M ≥ 50 + ≥ 2 boosters + earnings safe
+    # STRONG_BUY : TITAN ≥ 80 + Q ≥ 60 + M ≥ 50 + ≥ 2 boosters + earnings safe + conf≥60
+    _strong_buy_conf_ok = (confidence_score is None
+                            or confidence_score >= _T_CONFIDENCE_STRONG_BUY)
     if (
         composite >= _T_STRONG_BUY
         and quality_ok and momentum_ok
         and n_boosters >= 2
+        and _strong_buy_conf_ok
     ):
         if is_ath_extended:
             # Rétrograde STRONG_BUY → BUY et applique pénalité ATH.
