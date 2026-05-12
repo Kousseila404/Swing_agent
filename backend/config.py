@@ -93,18 +93,28 @@ SLIPPAGE_PCT = 0.0005   # 0.05 % — plancher pour l'estimation adaptive
 MAX_HOLDING_DAYS = 60
 
 # Mode % fixe (fallback si pas d'OHLCV) :
-TRAILING_STOP_ACTIVATION_PCT = 15.0  # plafond du seuil d'activation (ne sera utilisé
-                                      # que si TP_distance × RATIO > 15 %)
+# Audit 2026-05-12 — activation 15 → 8 %, lock 25 → 40 %.
+# V4.1 LT (15 %/25 %) était trop conservateur pour des positions LT 60j :
+# sur des tickers σ-30 % qui plafonnent à +5-15 %, le TS ne s'activait
+# JAMAIS et les gains se rendaient en retournement. 8 % active le TS plus
+# tôt et 40 % du gain locké donne un buffer raisonnable (vs 25 %
+# qui équivalait à un quasi-breakeven au moment de l'activation).
+TRAILING_STOP_ACTIVATION_PCT = 8.0   # plafond du seuil d'activation (sera utilisé
+                                      # si TP_distance × RATIO > 8 %)
 TRAILING_STOP_ACTIVATION_RATIO = 0.5  # ratio du TP à partir duquel activer le trailing.
-                                      # Avec RATIO=0.5, un TP +20 % active le TS à +10 %.
-                                      # Évite la zone morte sur tickers volatils avec TP serré.
-TRAILING_STOP_LOCK_PCT       = 0.25  # verrouille 25 % du gain sous le SL
+                                      # Avec RATIO=0.5, un TP +16 % active le TS à +8 %.
+                                      # TP +30 % → TS activé à +15 % (cap 8 %=floor).
+TRAILING_STOP_LOCK_PCT       = 0.40  # verrouille 40 % du gain sous le SL
 #
 # Mode ATR-adaptatif (prioritaire si OHLCV dispo) :
 # ATR calculé sur 14 j → court terme ; on compense par un multiplicateur large
 # pour coller à un hold LT.
-TRAILING_STOP_ATR_ACTIVATION_MULT = 3.5   # active si profit $ ≥ 3.5 × ATR
-TRAILING_STOP_ATR_TRAIL_MULT      = 3.0   # SL = plus-haut − 3.0 × ATR
+# Audit 2026-05-12 — ATR_ACTIVATION_MULT 3.5 → 2.5. Sur σ-30 %, ATR≈$2 →
+# 3.5×ATR=$7=+6 % → quasi équivalent à l'ancien plancher 15 %, donc TS ATR
+# rarement actif. 2.5×ATR cohérent avec activation_pct=8 %.
+TRAILING_STOP_ATR_ACTIVATION_MULT = 2.5   # active si profit $ ≥ 2.5 × ATR
+TRAILING_STOP_ATR_TRAIL_MULT      = 3.0   # SL = plus-haut − 3.0 × ATR (inchangé,
+                                            # buffer LT vs noise intraday)
 
 # ─────────────────────────────────────────────────────────────────
 # 6. LOGGING

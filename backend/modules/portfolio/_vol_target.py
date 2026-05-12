@@ -28,9 +28,15 @@ from modules.log import logger
 
 from ._utils import _safe_float
 
-# Cible ~14 % σ annualisée. Abaisser vers 10 % pour profil plus conservateur,
-# monter à 18 % si broker autorise un peu plus de volatilité.
-DEFAULT_TARGET_VOL_PCT = 14.0
+# Cible σ annualisée du portefeuille.
+# Audit 2026-05-12 — passage 14 → 18 %. Avec 14 % et un univers large-cap US
+# (σ-individuelle 25-35 %), l'estimateur _CORR_SAFETY_FACTOR=0.7 produisait
+# σ_p ~28 % systématiquement → leverage clampé à 0.5 → 50 % du capital en
+# cash en permanence (cf. log universe.json 06:00 : `σ_p=28.6% > target=14.0%
+# → leverage=0.50 cash_residual=50%`). 18 % aligne avec la σ historique du
+# S&P 500 (~16-20 %) et coupe le cash-drag structurel sans pousser à la
+# concentration.
+DEFAULT_TARGET_VOL_PCT = 18.0
 
 # Facteur de sécurité face à l'approximation corr=0. On suppose corr moyenne ≈ 0.4
 # sur un portefeuille large-cap US ⇒ σ_p réelle ≈ 0.4 × Σw×σ (majorant) + 0.6 × √Σ(wσ)².

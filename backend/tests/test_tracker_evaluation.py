@@ -168,31 +168,30 @@ def test_evaluate_long_trailing_stop_updated(monkeypatch):
     assert out.iloc[0]["Stop_Loss"] == pytest.approx(102.5)
 
 
-def test_evaluate_long_trailing_stop_NOT_triggered_at_10pct_default(monkeypatch):
-    """Régression V4.1 Long-Term (2026-04-23) : avec les defaults LT
-    (activation 15 %), un profit de +10 % NE doit PAS activer le TS.
-    Sinon on retombe dans le bug du 22/04 : swings clôturés sur retracement
-    intraday avant d'atteindre le TP (+18-40 % typique en LT).
+def test_evaluate_long_trailing_stop_NOT_triggered_at_5pct_default(monkeypatch):
+    """Audit 2026-05-12 — avec les defaults (activation 8 %, ratio 0.5,
+    TP+40 % → effective_activation = min(8 %, 40 %×0.5)=8 %), un profit
+    de +5 % NE doit PAS activer le TS.
     """
-    # On ne force aucune valeur → les defaults de config.py s'appliquent (LT).
-    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 110.0)
+    # On ne force aucune valeur → les defaults de config.py s'appliquent.
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 105.0)
     df = _df(_open_trade(Entry=100, Stop_Loss=95, Take_Profit=140))
     out, closed, modified = evaluation.evaluate_trades(df)
     assert closed == 0
-    assert modified == 0, "TS ne doit pas se déclencher à +10 % avec activation=15 %"
+    assert modified == 0, "TS ne doit pas se déclencher à +5 % avec activation=8 %"
     assert out.iloc[0]["Stop_Loss"] == pytest.approx(95.0)  # SL inchangé
 
 
 def test_evaluate_long_trailing_stop_triggered_at_20pct_default(monkeypatch):
-    """Avec les defaults V4.1 LT (activation 15 %, lock 25 %), +20 % active
-    le TS et verrouille 25 % du gain → new_sl = 100 + (120-100)*0.25 = 105.0.
+    """Audit 2026-05-12 — defaults (activation 8 %, lock 40 %).
+    À +20 %, le TS active et lock 40 % du gain : new_sl = 100 + 20×0.40 = 108.
     """
     monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 120.0)
     df = _df(_open_trade(Entry=100, Stop_Loss=95, Take_Profit=140))
     out, closed, modified = evaluation.evaluate_trades(df)
     assert closed == 0
     assert modified == 1
-    assert out.iloc[0]["Stop_Loss"] == pytest.approx(105.0)
+    assert out.iloc[0]["Stop_Loss"] == pytest.approx(108.0)
 
 
 # ─────────────────────────────────────────────────────────────────
