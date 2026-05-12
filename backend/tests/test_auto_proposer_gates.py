@@ -16,6 +16,32 @@ import pytest
 from modules import api_core, auto_proposer, proposals
 
 
+@pytest.fixture(autouse=True)
+def _no_network_correlation(monkeypatch):
+    """Audit 2026-05-12 — correlation_check fait un appel yfinance.
+    Pour les tests gates (mock allocations), on no-op le module pour éviter
+    des timeouts réseau. Les tests dédiés au correlation_check restent intacts.
+    """
+    from modules import correlation_check as _cc
+    from modules.correlation_check import CorrelationResult
+    monkeypatch.setattr(
+        _cc, "compute_correlation",
+        lambda *a, **kw: CorrelationResult(
+            applied=False, n_tickers=len(a[0]) if a else 0,
+            reason="test_mock_no_network",
+        ),
+    )
+    # Patch aussi le symbole importé dans auto_proposer (déjà importé en local).
+    monkeypatch.setattr(
+        "modules.auto_proposer.compute_correlation",
+        lambda *a, **kw: CorrelationResult(
+            applied=False, n_tickers=len(a[0]) if a else 0,
+            reason="test_mock_no_network",
+        ),
+        raising=False,
+    )
+
+
 @pytest.fixture
 def isolated_proposals(tmp_path, monkeypatch):
     monkeypatch.setattr(proposals, "PROPOSALS_PATH", tmp_path / "proposals.json")
