@@ -18,6 +18,12 @@ from __future__ import annotations
 
 from modules.log import logger
 
+# Audit 2026-05-12 — cap absolu par position (fraction du capital).
+# Avant : seul `max_affordable = current_equity / entry` plafonnait → autorisait
+# 100% du capital sur une seule ligne (penny stock + SL ultra-serré). 18% =
+# compromis entre concentration Buffett (compounder ×1.5) et diversification N=8+.
+MAX_POSITION_PCT = 0.18
+
 # ─────────────────────────────────────────────────────────────────
 # POSITION SIZING DYNAMIQUE
 # ─────────────────────────────────────────────────────────────────
@@ -79,10 +85,12 @@ def calculate_position_size(
     risk_amount = current_equity * risk_pct   # ex : 100_000 × 0.0025 = 250 $
     raw_size    = risk_amount / distance_sl   # ex : 250 / 3.0 = 83.33
 
-    # ── Cap absolu : ne jamais allouer plus de 100% du capital ────────
+    # ── Cap absolu : MAX_POSITION_PCT du capital max par position ─────
     # Sans ce cap, un ATR très faible (SL ultra-serré) peut produire des
     # tailles astronomiques sur les penny stocks ou actions volatiles.
-    max_affordable = int(current_equity / entry)   # shares achetables au prix actuel
+    # Audit 2026-05-12 — passage de 100% (max_affordable) à MAX_POSITION_PCT
+    # (default 18%) pour interdire qu'une seule ligne soit > 18% du book.
+    max_affordable = int((current_equity * MAX_POSITION_PCT) / entry)
     return max(1, min(int(raw_size), max_affordable))
 
 
@@ -493,18 +501,19 @@ def _run_tests() -> None:
     assert result == 500, f"[FAIL] Cas 2 → attendu 500, reçu {result}"
     print(f"  [OK] Cas 2 — Action penny ($5)            : {result} actions")
 
-    # Cas 3 : Action chère (1000$ avec SL à 10$)
+    # Cas 3 : Action chère (1000$ avec SL à 10$) — Audit 2026-05-12 cap 18%
+    # raw = 25 mais MAX_POSITION_PCT × equity / price = 0.18 × 100_000 / 1000 = 18
     result = calculate_position_size(1000.0, 990.0, 0.0025, 100_000)
-    assert result == 25, f"[FAIL] Cas 3 → attendu 25, reçu {result}"
-    print(f"  [OK] Cas 3 — Action chère ($1000)         : {result} actions")
+    assert result == 18, f"[FAIL] Cas 3 → attendu 18 (cap 18%), reçu {result}"
+    print(f"  [OK] Cas 3 — Action chère ($1000), cap 18% : {result} actions")
 
-    # Cas 4 : SL très serré (0.01$) → raw_size = 24999 mais CAP à equity/price
-    # Avec entry=100$, equity=100k$ → max_affordable = 100_000/100 = 1000 shares
-    # Le cap protège contre l'allocation > 100% du capital (comportement corrigé V2)
+    # Cas 4 : SL très serré (0.01$) → raw_size = 24999 mais CAP à MAX_POSITION_PCT
+    # Avec entry=100$, equity=100k$ → max_affordable = 0.18 × 100_000 / 100 = 180
+    # Le cap protège contre l'allocation > 18% du capital sur une seule ligne.
     result = calculate_position_size(100.0, 99.99, 0.0025, 100_000)
-    max_affordable = int(100_000 / 100.0)  # 1000
-    assert result == max_affordable, f"[FAIL] Cas 4 → attendu {max_affordable} (cap 100%), reçu {result}"
-    print(f"  [OK] Cas 4 — SL ultra-serré → cap 100%    : {result} actions (max={max_affordable})")
+    max_affordable = int(MAX_POSITION_PCT * 100_000 / 100.0)  # 180
+    assert result == max_affordable, f"[FAIL] Cas 4 → attendu {max_affordable} (cap {MAX_POSITION_PCT:.0%}), reçu {result}"
+    print(f"  [OK] Cas 4 — SL ultra-serré → cap {MAX_POSITION_PCT:.0%}     : {result} actions (max={max_affordable})")
 
     # Cas 5 : SL large (20$) → taille minimale
     result = calculate_position_size(200.0, 180.0, 0.0025, 100_000)

@@ -306,9 +306,13 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
     # Durée max depuis best_strategy.json si dispo, sinon config
     # V4.1 LT : default 60j (ancien hardcoded 10 était incohérent avec la thèse
     # Quantamental Long-Term — horizon typique de convergence 1-3 mois).
+    # Audit 2026-05-12 — chemin absolu via _PROJECT_ROOT (avant : Path("data/...")
+    # CWD-relatif → silencieusement no-op si le tracker tourne depuis un cwd
+    # différent de backend/, fallback config restait actif sans warning).
     max_holding_days = int(getattr(config, "MAX_HOLDING_DAYS", 60))
     try:
-        _bsp = Path("data/best_strategy.json")
+        _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+        _bsp = _PROJECT_ROOT / "data" / "best_strategy.json"
         if _bsp.exists():
             _bsd = json.loads(_bsp.read_text())
             _raw_params = _bsd.get("params", _bsd)

@@ -21,11 +21,14 @@ class TestPositionSize:
         assert calculate_position_size(5.0, 4.5, 0.0025, 100_000) == 500
 
     def test_expensive_stock(self):
-        assert calculate_position_size(1000.0, 990.0, 0.0025, 100_000) == 25
+        # Audit 2026-05-12 — MAX_POSITION_PCT=0.18 cap → 100k×0.18/1000 = 18 shares
+        # (avant le cap : raw=25, cap historique 100% laissait passer 25).
+        assert calculate_position_size(1000.0, 990.0, 0.0025, 100_000) == 18
 
     def test_tight_sl_capped_at_equity(self):
-        # SL à 1 cent → raw_size énorme, doit être cappé à equity/price = 1000
-        assert calculate_position_size(100.0, 99.99, 0.0025, 100_000) == 1000
+        # Audit 2026-05-12 — MAX_POSITION_PCT=0.18 → 100k×0.18/100 = 180 shares
+        # (avant : 100% cap → 1000 shares = position de 100k$ sur un seul name).
+        assert calculate_position_size(100.0, 99.99, 0.0025, 100_000) == 180
 
     def test_large_sl(self):
         assert calculate_position_size(200.0, 180.0, 0.0025, 100_000) == 12
