@@ -61,10 +61,13 @@ PILLARS: tuple[str, ...] = (
 )
 
 # Pas par pilier sur la grille (granularité du simplex 1.0/STEP par axe).
-# 5 % suffit pour départager les piliers au-delà du bruit IC ; finer
-# ferait exploser la combinatoire (avec 7 piliers, 5 % → 27 132 simplexes,
-# 1 % → ~2 millions).
-_GRID_STEP = 0.05
+# Audit 2026-05-12 — passage 0.05 → 0.10. À 0.05 sur 7 piliers, on a
+# C(20+6,6)=38760 simplexes × N pairs/fold = ~2M Spearman calls/fold →
+# >5min/fold sur 500 tickers → cron mensuel timeout. 0.10 donne C(10+6,6)
+# =8008 simplexes (5× moins), suffisant pour départager les piliers
+# dominants (Quality/Momentum à 0.2-0.3) du bruit (Sentiment/Insider à
+# 0.05-0.10). Réglable via `--grid-step` au CLI.
+_GRID_STEP = 0.10
 
 
 @dataclass
@@ -258,7 +261,10 @@ def _enum_simplex(n: int, step: float) -> list[tuple[float, ...]]:
     return [tuple(round(x * step, 4) for x in pt) for pt in out]
 
 
-def _optimal_weights(rows: list[dict[str, Any]]) -> tuple[dict[str, float], float]:
+def _optimal_weights(
+    rows: list[dict[str, Any]],
+    grid_step: float = _GRID_STEP,
+) -> tuple[dict[str, float], float]:
     """Trouve les poids w (Σ=1, w≥0) qui max IC composite sur `rows`.
 
     Réduit aux piliers avec IC observable (au moins 5 paires non-None) pour
@@ -275,7 +281,7 @@ def _optimal_weights(rows: list[dict[str, Any]]) -> tuple[dict[str, float], floa
 
     best_ic = -2.0
     best_w_vec: tuple[float, ...] = tuple()
-    for pt in _enum_simplex(len(valid_pillars), _GRID_STEP):
+    for pt in _enum_simplex(len(valid_pillars), grid_step):
         w = {p: pt[i] for i, p in enumerate(valid_pillars)}
         ic = _composite_ic(rows, w)
         if ic is not None and ic > best_ic:
@@ -298,6 +304,7 @@ def run_walk_forward(
     test_days: int = 20,
     *,
     publication_lag_days: int = 5,
+    grid_step: float | None = None,
 ) -> WfoResult:
     """Walk-forward : roule (train, test) sur les snapshots disponibles.
 
@@ -310,6 +317,12 @@ def run_walk_forward(
             skippée si aucun snapshot suffisamment ancien n'est disponible
             avant la date d'entrée.
 
+            Audit 2026-05-12 : si l'historique ne couvre PAS un span ≥
+            `publication_lag_days × 2`, on auto-réduit le lag à
+            `max(0, span // 4)` pour produire au moins quelques folds (mieux
+            qu'un WFO "skipped" silencieux). Un warning est posé dans le
+            résultat (`diagnostics.lag_auto_reduced`).
+
     Le fold avance de `test_days` à chaque étape (non-overlapping test).
     """
     all_dates = universe_history.list_snapshots()
@@ -318,6 +331,25 @@ def run_walk_forward(
             f"Au moins 5 snapshots requis pour 1 fold (train+test+forward). "
             f"Disponibles : {len(all_dates)}"
         )
+
+    # Audit 2026-05-12 — auto-réduction du lag si historique insuffisant.
+    # Sans ce fallback, run_titan.sh appelait wfo_monitor avec lag=90 mais
+    # le span snapshots était < 30j → 0 paires utilisables → WFO skippé
+    # mensuellement sans jamais produire de poids OOS.
+    span_days = (all_dates[-1] - all_dates[0]).days
+    requested_lag = publication_lag_days
+    if publication_lag_days > 0 and span_days < publication_lag_days * 2:
+        publication_lag_days = max(0, span_days // 4)
+        logger.warning(
+            f"[WFO] Historique snapshots = {span_days}j (< {requested_lag*2}j "
+            f"requis pour lag={requested_lag}). Auto-réduction du lag à "
+            f"{publication_lag_days}j. À retirer une fois 180+ jours "
+            f"d'historique disponibles."
+        )
+    lag_auto_reduced = publication_lag_days != requested_lag
+
+    # Granularité simplex — passé en arg ou default module.
+    grid_step_used = float(grid_step) if grid_step is not None else _GRID_STEP
 
     # Charge tous les snapshots en mémoire (pour 5 ans × 500 tk × 50 KB ≈ 50 MB).
     snapshots: list[tuple[date, dict[str, Any]]] = []
@@ -402,7 +434,7 @@ def run_walk_forward(
             start_idx = test_idx
             continue
 
-        opt_w, ic_train = _optimal_weights(train_rows)
+        opt_w, ic_train = _optimal_weights(train_rows, grid_step=grid_step_used)
         ic_test = _composite_ic(test_rows, opt_w) or 0.0
 
         fold = FoldResult(
@@ -448,7 +480,9 @@ def run_walk_forward(
             "train_days":           train_days,
             "test_days":            test_days,
             "publication_lag_days": publication_lag_days,
-            "grid_step":            _GRID_STEP,
+            "publication_lag_days_requested": requested_lag,
+            "lag_auto_reduced":     lag_auto_reduced,
+            "grid_step":            grid_step_used,
             "date_range": {
                 "start": snapshots[0][0].isoformat(),
                 "end":   snapshots[-1][0].isoformat(),
@@ -486,6 +520,9 @@ def _main() -> int:
                         "90 = production-grade (lag 10-K).")
     p.add_argument("--no-persist", action="store_true",
                    help="Ne pas écrire data/wfo_weights.json")
+    p.add_argument("--grid-step", type=float, default=None,
+                   help=f"Granularité simplex (défaut {_GRID_STEP}). "
+                        "0.05 plus précis mais ~5× plus lent.")
     args = p.parse_args()
 
     try:
@@ -493,6 +530,7 @@ def _main() -> int:
             train_days=args.train_days,
             test_days=args.test_days,
             publication_lag_days=args.publication_lag_days,
+            grid_step=args.grid_step,
         )
     except ValueError as e:
         print(f"ERROR: {e}")
