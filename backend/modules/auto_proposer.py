@@ -705,6 +705,62 @@ def plan_proposals(
     else:
         cap = free_slots
 
+    # Audit 2026-05-12 — corrélation pairwise sur le panier "open + top
+    # candidats". Avant : risk_parity + sector_cap ne neutralisent pas la
+    # corrélation thématique (4 commodities NEM/CF/EQT/FCX = 1 thèse mais
+    # 3 secteurs GICS). On exclut les candidats over_correlated du panier
+    # OUVERT (priorité diversification) ou entre eux dans le top.
+    over_correlated_set: set[str] = set()
+    correlation_diag: dict[str, Any] = {"applied": False}
+    try:
+        from modules.correlation_check import compute_correlation
+        # Panier d'évaluation = positions ouvertes + top (cap+5) candidats
+        # ranked. On regarde si les candidats sont sur-corrélés au panier
+        # ouvert (priorité absolue) OU au reste du top retenu.
+        top_n_for_corr = min(len(ranked), cap + 5)
+        candidate_tickers = [t for t, _ in ranked[:top_n_for_corr]]
+        # Évite doublons OPEN ↔ candidats
+        eval_basket = list(dict.fromkeys(
+            list(tickers_open_set) + candidate_tickers
+        ))
+        if len(eval_basket) >= 4 and market_provider is not None:
+            corr_result = compute_correlation(
+                eval_basket, market_provider,
+                window_days=60, max_avg_corr=0.55,
+            )
+            if corr_result.applied:
+                # Un candidat est exclu si :
+                #   1. il fait partie des over_correlated du panier global, ET
+                #   2. il n'est PAS déjà détenu (on ne re-évalue pas l'existant).
+                for t in corr_result.over_correlated:
+                    if t not in tickers_open_set:
+                        over_correlated_set.add(t)
+                correlation_diag = {
+                    "applied":           True,
+                    "avg_corr_basket":   corr_result.avg_corr_basket,
+                    "threshold":         corr_result.max_avg_corr_threshold,
+                    "over_correlated":   list(corr_result.over_correlated),
+                    "n_candidates_excluded": len(over_correlated_set),
+                    "n_basket":          corr_result.n_tickers,
+                }
+                if over_correlated_set:
+                    logger.info(
+                        f"[AutoProposer] correlation_check : "
+                        f"{len(over_correlated_set)} candidat(s) exclu(s) "
+                        f"(over_corr > 0.55) : "
+                        f"{','.join(sorted(over_correlated_set))}"
+                    )
+            else:
+                correlation_diag = {
+                    "applied":  False,
+                    "reason":   corr_result.reason,
+                    "n_basket": corr_result.n_tickers,
+                }
+    except Exception as e:
+        logger.warning(f"[AutoProposer] correlation_check failed: {e}")
+        correlation_diag = {"applied": False, "error": str(e)[:120]}
+    diagnostics["correlation_check"] = correlation_diag
+
     skipped: list[dict[str, Any]] = []
     proposals_to_enqueue: list[proposals.Proposal] = []
 
@@ -718,6 +774,18 @@ def plan_proposals(
         already_held = ticker in tickers_open_set
         if already_held and not include_held:
             skipped.append({"ticker": ticker, "reason": "already_held"})
+            continue
+
+        # Filtre 1bis (Audit 2026-05-12) : corrélation pairwise.
+        # On exclut les candidats over_correlated avec le panier (positions
+        # ouvertes + top candidats). Hard skip — pas de surcharge UI possible
+        # car le pendant utilisateur (approve_batch) ne sait pas overrider ça.
+        if ticker in over_correlated_set:
+            skipped.append({
+                "ticker": ticker,
+                "reason": "over_correlated",
+                "avg_corr": correlation_diag.get("avg_corr_basket"),
+            })
             continue
 
         # Calcul projection secteur — utilise le total projeté pour la %. Avec
