@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import duckdb
 
+from modules.log import logger
 from modules.utils import CSV_PATH, CSV_SCHEMA
 
 if TYPE_CHECKING:
@@ -149,7 +150,12 @@ def shadow_insert(row: dict[str, Any], db_path: Path | str = DUCKDB_PATH) -> boo
     Phase 7 audit (2026-05-06) — BEGIN/COMMIT explicites pour garantir
     l'atomicité même si un autre thread/process accède au fichier entre
     l'INSERT et le flush WAL.
+
+    Fail-open volontaire (CSV = source de vérité) MAIS toute erreur est
+    désormais loguée WARN avec contexte ticker pour qu'une dérive miroir ↔
+    CSV soit visible en prod (avant : silencieuse).
     """
+    ticker = row.get("Ticker", "?")
     try:
         ensure_schema(db_path)
         values = [_coerce(col, row.get(col)) for col in CSV_SCHEMA]
@@ -163,11 +169,22 @@ def shadow_insert(row: dict[str, Any], db_path: Path | str = DUCKDB_PATH) -> boo
                     values,
                 )
                 conn.execute("COMMIT")
-            except Exception:
+            except duckdb.Error:
                 conn.execute("ROLLBACK")
                 raise
         return True
-    except Exception:
+    except duckdb.Error as e:
+        logger.warning(
+            "[duckdb_journal] shadow_insert %s failed (%s): %s",
+            ticker, type(e).__name__, e,
+        )
+        return False
+    except Exception as e:  # noqa: BLE001 — fail-open, CSV reste source de vérité
+        logger.warning(
+            "[duckdb_journal] shadow_insert %s unexpected (%s)",
+            ticker, type(e).__name__,
+            exc_info=True,
+        )
         return False
 
 
@@ -201,11 +218,22 @@ def shadow_update_status(
                     [status, float(exit_price), exit_date, ticker.upper()],
                 )
                 conn.execute("COMMIT")
-            except Exception:
+            except duckdb.Error:
                 conn.execute("ROLLBACK")
                 raise
         return True
-    except Exception:
+    except duckdb.Error as e:
+        logger.warning(
+            "[duckdb_journal] shadow_update_status %s→%s failed (%s): %s",
+            ticker, status, type(e).__name__, e,
+        )
+        return False
+    except Exception as e:  # noqa: BLE001 — fail-open volontaire (CSV est la vérité)
+        logger.warning(
+            "[duckdb_journal] shadow_update_status %s→%s unexpected (%s)",
+            ticker, status, type(e).__name__,
+            exc_info=True,
+        )
         return False
 
 
@@ -341,8 +369,11 @@ def _ensure_fresh(
         try:
             sync_from_csv(csv, db)
             _LAST_SYNC_MTIME[key] = csv_mtime
-        except Exception:
-            pass
+        except (duckdb.Error, OSError, ValueError) as e:
+            logger.warning(
+                "[duckdb_journal] _maybe_sync failed (%s): %s — analytics reads will fall back to CSV",
+                type(e).__name__, e,
+            )
 
 
 def read_journal_df(
@@ -371,7 +402,11 @@ def read_journal_df(
         if csv.exists() and csv.stat().st_size > 0:
             try:
                 return pd.read_csv(csv, dtype=str).fillna("")
-            except Exception:
+            except (OSError, pd.errors.ParserError, ValueError) as e:
+                logger.warning(
+                    "[duckdb_journal] CSV fallback read failed (%s): %s",
+                    type(e).__name__, e,
+                )
                 return pd.DataFrame(columns=CSV_SCHEMA)
         return pd.DataFrame(columns=CSV_SCHEMA)
 
@@ -417,7 +452,11 @@ def read_journal_df(
                 if col not in df.columns:
                     df[col] = ""
             df = df[CSV_SCHEMA]
-    except Exception:
+    except (duckdb.Error, OSError, ValueError, KeyError) as e:
+        logger.warning(
+            "[duckdb_journal] read_journal_df DuckDB path failed (%s): %s — falling back to CSV",
+            type(e).__name__, e,
+        )
         df = _read_csv_fallback()
 
     with _DF_CACHE_LOCK:

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useDebouncedValue } from '../hooks/useMediaQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   rebuildUniverse, killJob, pushManualProposal, runQuickBacktest, addToWatchlist,
@@ -9,6 +10,7 @@ import { fmtNum, fmtMarketCap, fmtSignedPct, safeCompare } from '../utils/format
 import { factorColor } from '../utils/colors';
 import Pagination from './Pagination';
 import PresetBar from './common/PresetBar';
+import LastUpdated from './common/LastUpdated';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { readJSON, writeJSON } from '../utils/storage';
 
@@ -102,10 +104,17 @@ export default function UniverseManagerPage() {
   // Filtre status portefeuille : 'all' | 'held' | 'proposed' | 'free'.
   const [statusFilter, setStatusFilter] = useState(persistedFilters.statusFilter ?? 'all');
 
-  // Persistance des filtres à chaque changement (Suivi #23).
+  // Persistance des filtres — debouncée 400ms pour éviter le sync localStorage
+  // à chaque keystroke (5 setState peuvent se déclencher en cascade sur un
+  // preset apply). Filtres rares (sector, sort, buy, status) → 400ms suffisent.
+  const filtersSnapshot = useMemo(
+    () => ({ sectorFilter, sortBy, sortDir, buyFilter, statusFilter }),
+    [sectorFilter, sortBy, sortDir, buyFilter, statusFilter],
+  );
+  const debouncedFilters = useDebouncedValue(filtersSnapshot, 400);
   useEffect(() => {
-    savePersistedFilters({ sectorFilter, sortBy, sortDir, buyFilter, statusFilter });
-  }, [sectorFilter, sortBy, sortDir, buyFilter, statusFilter]);
+    savePersistedFilters(debouncedFilters);
+  }, [debouncedFilters]);
   const [analysisTicker, setAnalysisTicker] = useState(null);
   // Trace par ticker des push manuels en cours (pour disable + spinner).
   const [pushingTickers, setPushingTickers] = useState({});
@@ -119,7 +128,7 @@ export default function UniverseManagerPage() {
   const [backtestResult, setBacktestResult]   = useState(null);
   const [backtestError, setBacktestError]     = useState(null);
 
-  const toggleCompare = (ticker) => {
+  const toggleCompare = useCallback((ticker) => {
     setCompareSet(prev => {
       const next = new Set(prev);
       if (next.has(ticker)) {
@@ -127,22 +136,25 @@ export default function UniverseManagerPage() {
       } else if (next.size < COMPARE_MAX) {
         next.add(ticker);
       } else {
-        toast(`⚠️ Comparateur limité à ${COMPARE_MAX} tickers`, 'error');
+        // toast inline pour rester pure dans le callback memoized
+        const id = Date.now() + Math.random();
+        setToasts(t => [...t, { id, msg: `⚠️ Comparateur limité à ${COMPARE_MAX} tickers`, type: 'error' }]);
+        setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500);
       }
       return next;
     });
-  };
+  }, []);
 
   const PAGE_SIZE = 50;
   const [page, setPage] = useState(1);
 
   const prevRebuildingRef = useRef(false);
 
-  const toast = (msg, type = 'ok') => {
+  const toast = useCallback((msg, type = 'ok') => {
     const id = Date.now() + Math.random();
     setToasts(t => [...t, { id, msg, type }]);
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500);
-  };
+  }, []);
 
   const universeQuery = useUniverse(null, {
     refetchInterval: (q) => (q.state.data?.rebuilding ? POLL_ACTIVE_MS : POLL_IDLE_MS),
@@ -170,7 +182,7 @@ export default function UniverseManagerPage() {
         toast(`✅ Univers reconstruit — ${kept} / ${total} tickers conservés`);
       }, 0);
     }
-  }, [rebuilding, payload]);
+  }, [rebuilding, payload, toast]);
 
   const jobId = payload?.rebuild_job_id;
   const jobQuery = useJob(jobId, {
@@ -198,9 +210,16 @@ export default function UniverseManagerPage() {
     }
   };
 
-  const handlePushProposal = async (ticker) => {
-    if (!ticker || pushingTickers[ticker]) return;
-    setPushingTickers(prev => ({ ...prev, [ticker]: true }));
+  // Note : on lit `pushingTickers` via le setter functional updater pour ne
+  // pas avoir à le mettre en dep (sinon le callback re-créerait à chaque push).
+  const handlePushProposal = useCallback(async (ticker) => {
+    if (!ticker) return;
+    let alreadyPushing = false;
+    setPushingTickers(prev => {
+      if (prev[ticker]) { alreadyPushing = true; return prev; }
+      return { ...prev, [ticker]: true };
+    });
+    if (alreadyPushing) return;
     try {
       const res = await pushManualProposal(ticker);
       if (res?.ok && res.proposal) {
@@ -220,9 +239,9 @@ export default function UniverseManagerPage() {
         return next;
       });
     }
-  };
+  }, [toast]);
 
-  const handleSetAlert = async (ticker, currentTitan) => {
+  const handleSetAlert = useCallback(async (ticker, currentTitan) => {
     if (!ticker) return;
     // Suggestion : si TITAN actuel < 80, propose un seuil "above 80" (alerte
     // d'opportunité d'achat). Sinon "below 70" (alerte de dégradation).
@@ -258,7 +277,7 @@ export default function UniverseManagerPage() {
     } catch (err) {
       toast(`❌ ${err?.message || 'Alerte impossible'}`, 'error');
     }
-  };
+  }, [toast]);
 
   const handleExportCsv = () => {
     if (filteredSorted.length === 0) {
@@ -829,6 +848,23 @@ export default function UniverseManagerPage() {
               setPage(1);
             }}
           />
+
+          {/* Compteur + fraîcheur des données (pattern Seeking Alpha). */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 'var(--space-3)', flexWrap: 'wrap',
+            margin: '0.5rem 0 0.25rem', fontSize: 'var(--fs-xs)',
+            color: 'var(--text-muted)',
+          }}>
+            <span>
+              <strong style={{ color: 'var(--text-main)' }}>{filteredSorted.length}</strong>
+              {filteredSorted.length !== count && <> / {count}</>} tickers
+            </span>
+            <LastUpdated
+              updatedAt={universeQuery.dataUpdatedAt}
+              isFetching={universeQuery.isFetching}
+            />
+          </div>
 
           {/* ── TABLE ── */}
           <div className="scan-table-wrap">

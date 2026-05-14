@@ -14,6 +14,7 @@ import {
 } from '../hooks/useApi';
 import ApiErrorBanner from './common/ApiErrorBanner';
 import EmptyState from './common/EmptyState';
+import LastUpdated from './common/LastUpdated';
 import { PageSkeleton } from './common/Skeleton';
 import TickerSpark from './common/TickerSpark';
 import TickerAnalysisModal from './TickerAnalysisModal';
@@ -191,9 +192,12 @@ export default function WatchlistPage() {
       {/* ── Liste ── */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', display: 'flex',
-                      justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <h3 style={{ margin: 0, fontSize: '0.95rem' }}>
-            👁 {items.length} ticker{items.length > 1 ? 's' : ''} surveillé{items.length > 1 ? 's' : ''}
+                      justifyContent: 'space-between', alignItems: 'baseline',
+                      gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0, fontSize: '0.95rem',
+                       display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
+            <span>👁 {items.length} ticker{items.length > 1 ? 's' : ''} surveillé{items.length > 1 ? 's' : ''}</span>
+            <LastUpdated updatedAt={watchQ.dataUpdatedAt} isFetching={watchQ.isFetching} />
           </h3>
           <button
             type="button"

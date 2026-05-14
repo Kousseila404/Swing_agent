@@ -14,7 +14,8 @@ import {
   useProposals,
   useStatus,
 } from '../hooks/useApi';
-import { fmtNum, fmtPrice, fmtSignedPct } from '../utils/format';
+import { fmtMoney, fmtNum, fmtPctRaw, fmtPrice, fmtSignedMoney, fmtSignedPct } from '../utils/format';
+import LastUpdated from './common/LastUpdated';
 import { PageSkeleton } from './common/Skeleton';
 import TickerSpark from './common/TickerSpark';
 
@@ -124,9 +125,9 @@ export default function BriefingPage({ onNavigate }) {
         let level = null;
         let detail = null;
         if (Number.isFinite(toSl) && toSl <= 5) {
-          level = 'sl'; detail = `À ${toSl.toFixed(1)}% du SL`;
+          level = 'sl'; detail = `À ${fmtPctRaw(toSl, 1)} du SL`;
         } else if (Number.isFinite(toTp) && toTp <= 3) {
-          level = 'tp'; detail = `À ${toTp.toFixed(1)}% du TP`;
+          level = 'tp'; detail = `À ${fmtPctRaw(toTp, 1)} du TP`;
         }
         return level ? { ...p, _level: level, _detail: detail } : null;
       })
@@ -180,8 +181,18 @@ export default function BriefingPage({ onNavigate }) {
                       alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)',
-                          textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              Briefing du jour
+                          textTransform: 'uppercase', letterSpacing: '0.1em',
+                          display: 'flex', alignItems: 'center',
+                          gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+              <span>Briefing du jour</span>
+              <LastUpdated
+                updatedAt={Math.max(
+                  portfolioQ.dataUpdatedAt || 0,
+                  macroQ.dataUpdatedAt || 0,
+                  statusQ.dataUpdatedAt || 0,
+                )}
+                isFetching={portfolioQ.isFetching || macroQ.isFetching || statusQ.isFetching}
+              />
             </div>
             <h2 style={{ margin: '4px 0 0', fontSize: '1.4rem',
                          textTransform: 'capitalize' }}>
@@ -234,14 +245,14 @@ export default function BriefingPage({ onNavigate }) {
         <Tile
           icon="💼"
           label="Capital"
-          value={`$${fmtNum(current, 0)}`}
-          sub={`P&L latent ${unrealized >= 0 ? '+' : ''}$${fmtNum(unrealized, 0)}`}
+          value={fmtMoney(current, 0)}
+          sub={`P&L latent ${fmtSignedMoney(unrealized, 0)}`}
           tone={unrealized >= 0 ? 'var(--success)' : 'var(--danger)'}
         />
         <Tile
           icon="📉"
           label="Drawdown jour"
-          value={`${dailyDdPct.toFixed(2)}%`}
+          value={fmtPctRaw(dailyDdPct, 2)}
           sub={dailyDdPct >= 4 ? '⛔ Killswitch' : dailyDdPct >= 2 ? '⚠️ Vigilance' : '✅ OK'}
           tone={dailyDdPct >= 4 ? 'var(--danger)' : dailyDdPct >= 2 ? 'var(--warning)' : 'var(--success)'}
         />
@@ -339,16 +350,16 @@ export default function BriefingPage({ onNavigate }) {
                           data-ticker={p.Ticker || p.ticker}>
                         <td><strong>{p.Ticker || p.ticker}</strong></td>
                         <td><TickerSpark ticker={p.Ticker || p.ticker} /></td>
-                        <td style={{ fontFamily: 'monospace' }}>${fmtPrice(p.Entry || p.entry)}</td>
+                        <td style={{ fontFamily: 'monospace' }}>{fmtPrice(p.Entry || p.entry)}</td>
                         <td style={{ fontFamily: 'monospace' }}>
-                          {p.current_price != null ? `$${fmtPrice(p.current_price)}` : '—'}
+                          {p.current_price != null ? fmtPrice(p.current_price) : '—'}
                         </td>
                         <td>
                           {upnl != null && (
                             <span className={upnl >= 0 ? 'pos' : 'neg'} style={{ fontWeight: 600 }}>
-                              {upnl >= 0 ? '+' : ''}${fmtNum(upnl, 2)}
+                              {fmtSignedMoney(upnl, 2)}
                               {pct != null && <small style={{ marginLeft: 4, opacity: 0.7 }}>
-                                ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
+                                ({fmtSignedPct(pct, 1)})
                               </small>}
                             </span>
                           )}
@@ -472,11 +483,11 @@ export default function BriefingPage({ onNavigate }) {
                       <td><TickerSpark ticker={p.Ticker || p.ticker} /></td>
                       <td style={{ fontFamily: 'monospace' }}>${fmtPrice(p.Entry || p.entry)}</td>
                       <td style={{ fontFamily: 'monospace' }}>
-                        {p.current_price != null ? `$${fmtPrice(p.current_price)}` : '—'}
+                        {p.current_price != null ? fmtPrice(p.current_price) : '—'}
                       </td>
                       <td>
                         <span className={upnl >= 0 ? 'pos' : 'neg'} style={{ fontWeight: 600 }}>
-                          {upnl >= 0 ? '+' : ''}${fmtNum(upnl, 2)}
+                          {fmtSignedMoney(upnl, 2)}
                         </span>
                       </td>
                       <td>

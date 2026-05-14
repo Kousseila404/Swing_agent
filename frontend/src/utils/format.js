@@ -45,6 +45,34 @@ export function fmtPrice(v, digits = 2, fallback = DASH) {
   return isNumeric(v) ? `$${v.toFixed(digits)}` : fallback;
 }
 
+// fmtMoney(12_345.6) → "$12,345.60" — comme fmtPrice mais groupé en milliers
+// pour les capitaux / P&L absolus. Pattern Seeking Alpha : toujours grouper.
+export function fmtMoney(v, digits = 2, fallback = DASH) {
+  if (!isNumeric(v)) return fallback;
+  return `$${v.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`;
+}
+
+// fmtSignedMoney(+1234.5) → "+$1,234.50", fmtSignedMoney(-50) → "-$50.00"
+// Pratique pour le P&L réalisé / non-réalisé.
+export function fmtSignedMoney(v, digits = 2, fallback = DASH) {
+  if (!isNumeric(v)) return fallback;
+  const sign = v >= 0 ? '+' : '-';
+  const abs = Math.abs(v).toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+  return `${sign}$${abs}`;
+}
+
+// fmtCount(12345) → "12,345" — entiers groupés (n_trades, n_positions).
+export function fmtCount(v, fallback = DASH) {
+  if (!isNumeric(v)) return fallback;
+  return Math.round(v).toLocaleString();
+}
+
 // safeCompare(null, ">=", 60) → false (évite de colorer du vert par défaut)
 export function safeCompare(v, op, threshold) {
   if (!isNumeric(v)) return false;

@@ -6,6 +6,9 @@ import {
   fmtSignedPct,
   fmtMarketCap,
   fmtPrice,
+  fmtMoney,
+  fmtSignedMoney,
+  fmtCount,
   safeCompare,
 } from '../format';
 
@@ -70,6 +73,41 @@ describe('fmtPrice', () => {
   it('ajoute $ + 2 décimales par défaut', () => {
     expect(fmtPrice(145.2)).toBe('$145.20');
     expect(fmtPrice(0)).toBe('$0.00');
+  });
+});
+
+describe('fmtMoney (groupé)', () => {
+  it('groupe les milliers', () => {
+    // Note: Intl.NumberFormat utilise séparateurs locale-dépendants.
+    // En "en-US" ce serait "$12,345.60". En "fr" ce serait "$12 345,60".
+    // On vérifie la présence du $ et des 2 décimales.
+    const result = fmtMoney(12_345.6, 2);
+    expect(result.startsWith('$')).toBe(true);
+    expect(result).toMatch(/12.345/);
+    expect(result.endsWith('60')).toBe(true);
+  });
+  it('null → "—"', () => {
+    expect(fmtMoney(null)).toBe('—');
+  });
+});
+
+describe('fmtSignedMoney', () => {
+  it('préfixe + sur positif, - sur négatif', () => {
+    expect(fmtSignedMoney(1234.5, 2)).toMatch(/^\+\$/);
+    expect(fmtSignedMoney(-50, 2)).toMatch(/^-\$/);
+  });
+  it('null → "—"', () => {
+    expect(fmtSignedMoney(null)).toBe('—');
+  });
+});
+
+describe('fmtCount', () => {
+  it('arrondi + groupé', () => {
+    const r = fmtCount(12345);
+    expect(r).toMatch(/12.345/);
+  });
+  it('null → "—"', () => {
+    expect(fmtCount(null)).toBe('—');
   });
 });
 

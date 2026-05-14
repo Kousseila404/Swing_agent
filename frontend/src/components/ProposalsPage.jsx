@@ -25,6 +25,7 @@ import { fmtNum, fmtPctRaw, fmtPrice, fmtSignedPct } from '../utils/format';
 import { factorColor } from '../utils/colors';
 import ApiErrorBanner from './common/ApiErrorBanner';
 import EmptyState from './common/EmptyState';
+import LastUpdated from './common/LastUpdated';
 import PresetBar from './common/PresetBar';
 import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
@@ -119,7 +120,7 @@ function Pill({ ok, label, detail, onClick }) {
   );
 }
 
-function StatusStrip({ lastRefresh, marketStatus, proposalsData }) {
+function StatusStrip({ lastRefresh, marketStatus, proposalsData, fetchedAt, isFetching }) {
   const gates  = lastRefresh?.gates || [];
   const diag   = lastRefresh?.diagnostics || {};
   const params = diag?.params || {};
@@ -136,8 +137,12 @@ function StatusStrip({ lastRefresh, marketStatus, proposalsData }) {
           <h2 style={{ margin: 0, fontSize: '1rem' }}>
             📬 {proposalsData?.n_pending ?? 0} à décider · {proposalsData?.n_total ?? 0} total
           </h2>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            Dernier refresh : {ranDate}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+                        flexWrap: 'wrap', fontSize: '0.72rem',
+                        color: 'var(--text-muted)', marginTop: 4 }}>
+            <span>Dernier refresh backend : {ranDate}</span>
+            <span aria-hidden="true">·</span>
+            <LastUpdated updatedAt={fetchedAt} isFetching={isFetching} prefix="Vue" />
           </div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -1112,6 +1117,8 @@ export default function ProposalsPage() {
         lastRefresh={lastRefresh}
         marketStatus={marketQ.data}
         proposalsData={proposalsQ.data}
+        fetchedAt={proposalsQ.dataUpdatedAt}
+        isFetching={proposalsQ.isFetching}
       />
 
       {marketClosed && (

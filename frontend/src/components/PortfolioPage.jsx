@@ -17,10 +17,12 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
 import { POLL } from '../config/api';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import LastUpdated from './common/LastUpdated';
 import { PageSkeleton } from './common/Skeleton';
 import PositionCard from './portfolio/PositionCard';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
+import { fmtCount, fmtMoney, fmtPctRaw, fmtPrice, fmtSignedMoney, fmtSignedPct } from '../utils/format';
 import { readString, writeString } from '../utils/storage';
 
 function downloadFile(filename, content, type = 'text/csv') {
@@ -341,18 +343,38 @@ export default function PortfolioPage() {
         </div>
       )}
 
+      {/* Fraîcheur des données portefeuille (poll 30s) — pattern Seeking Alpha. */}
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end',
+        marginBottom: 'var(--space-2)', fontSize: 'var(--fs-xs)',
+        color: 'var(--text-muted)',
+      }}>
+        <LastUpdated
+          updatedAt={portfolioQ.dataUpdatedAt}
+          isFetching={portfolioQ.isFetching}
+        />
+      </div>
+
       {/* ── KPIs ── */}
       <div className="port-kpis">
-        <KPI label="Capital compte" value={`$${current.toLocaleString(undefined, {maximumFractionDigits:0})}`} />
-        <KPI label="P&L Réalisé" value={`${equity?.realized_pnl >= 0 ? '+' : ''}$${(equity?.realized_pnl ?? 0).toFixed(2)}`} color={equity?.realized_pnl >= 0 ? 'pos' : 'neg'} />
-        <KPI label="P&L Non-réalisé" value={`${equity?.unrealized_pnl >= 0 ? '+' : ''}$${(equity?.unrealized_pnl ?? 0).toFixed(2)}`} color={equity?.unrealized_pnl >= 0 ? 'pos' : 'neg'} />
-        <KPI label="Win Rate" value={`${stats?.win_rate ?? 0}%`} color="pos" />
+        <KPI label="Capital compte" value={fmtMoney(current, 0)} />
+        <KPI
+          label="P&L Réalisé"
+          value={fmtSignedMoney(equity?.realized_pnl ?? 0)}
+          color={(equity?.realized_pnl ?? 0) >= 0 ? 'pos' : 'neg'}
+        />
+        <KPI
+          label="P&L Non-réalisé"
+          value={fmtSignedMoney(equity?.unrealized_pnl ?? 0)}
+          color={(equity?.unrealized_pnl ?? 0) >= 0 ? 'pos' : 'neg'}
+        />
+        <KPI label="Win Rate" value={fmtPctRaw(stats?.win_rate, 0)} color="pos" />
         <KPI label="Positions ouvertes" value={`${livePositions.length} / 5`} />
-        <KPI label="Trades clôturés" value={stats?.total_trades ?? 0} />
+        <KPI label="Trades clôturés" value={fmtCount(stats?.total_trades)} />
         {benchQ.data?.avg_alpha_pct != null && (
           <KPI
             label="Alpha moyen vs ETF"
-            value={`${benchQ.data.avg_alpha_pct >= 0 ? '+' : ''}${benchQ.data.avg_alpha_pct.toFixed(2)}%`}
+            value={fmtSignedPct(benchQ.data.avg_alpha_pct, 2)}
             color={benchQ.data.avg_alpha_pct >= 0 ? 'pos' : 'neg'}
           />
         )}
@@ -369,7 +391,7 @@ export default function PortfolioPage() {
         </div>
         <p className="risk-note">
           Drawdown actuel: <strong style={{ color: ddPct > 2 ? 'var(--danger)' : 'var(--success)' }}>
-            {ddPct.toFixed(2)}%
+            {fmtPctRaw(ddPct, 2)}
           </strong> — {ddPct >= 4 ? '⛔ KILLSWITCH ACTIF' : ddPct >= 2 ? '⚠️ Vigilance' : '✅ Zone sûre'}
         </p>
       </div>
@@ -532,22 +554,22 @@ export default function PortfolioPage() {
                             {dirIsLong ? '▲' : '▼'} {p.Direction}
                           </span>
                         </td>
-                        <td>${parseNum(p.Entry).toFixed(2)}</td>
+                        <td>{fmtPrice(parseNum(p.Entry))}</td>
                         <td>
                           {p.current_price != null
-                            ? <span style={{ color: 'var(--text-main)' }}>${parseNum(p.current_price).toFixed(2)}</span>
+                            ? <span style={{ color: 'var(--text-main)' }}>{fmtPrice(parseNum(p.current_price))}</span>
                             : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                         </td>
                         <td>
                           {upnl != null ? (
                             <span className={upnl >= 0 ? 'pos' : 'neg'} style={{ fontWeight: 600 }}>
-                              {upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}
-                              {pct != null && <small style={{ marginLeft: 4, opacity: 0.7 }}>({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)</small>}
+                              {fmtSignedMoney(upnl, 2)}
+                              {pct != null && <small style={{ marginLeft: 4, opacity: 0.7 }}>({fmtSignedPct(pct, 2)})</small>}
                             </span>
                           ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                         </td>
-                        <td style={{ color: 'var(--danger)' }}>${parseNum(p.Stop_Loss).toFixed(2)}</td>
-                        <td style={{ color: 'var(--success)' }}>${parseNum(p.Take_Profit).toFixed(2)}</td>
+                        <td style={{ color: 'var(--danger)' }}>{fmtPrice(parseNum(p.Stop_Loss))}</td>
+                        <td style={{ color: 'var(--success)' }}>{fmtPrice(parseNum(p.Take_Profit))}</td>
                         <td>{p.Size}</td>
                         <td>{p.RR || '—'}</td>
                         <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{(p.Date || '').slice(0, 10)}</td>
@@ -563,14 +585,14 @@ export default function PortfolioPage() {
                               ? (alpha >= 0 ? 'var(--success)' : 'var(--danger)')
                               : 'var(--text-muted)';
                             return (
-                              <div title={`Position ${b.return_pct >= 0 ? '+' : ''}${b.return_pct.toFixed(2)}% · ${b.etf || 'ETF ?'} ${b.etf_return_pct != null ? (b.etf_return_pct >= 0 ? '+' : '') + b.etf_return_pct.toFixed(2) + '%' : '—'}`}>
+                              <div title={`Position ${fmtSignedPct(b.return_pct, 2)} · ${b.etf || 'ETF ?'} ${b.etf_return_pct != null ? fmtSignedPct(b.etf_return_pct, 2) : '—'}`}>
                                 <div style={{ fontFamily: 'monospace', fontWeight: 600,
                                               color: b.return_pct >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                                  {b.return_pct >= 0 ? '+' : ''}{b.return_pct.toFixed(1)}%
+                                  {fmtSignedPct(b.return_pct, 1)}
                                 </div>
                                 {hasAlpha && (
                                   <div style={{ fontSize: '0.65rem', color: tone, fontWeight: 600 }}>
-                                    {b.etf} {alpha >= 0 ? '+' : ''}{alpha.toFixed(1)}
+                                    {b.etf} {fmtSignedPct(alpha, 1)}
                                   </div>
                                 )}
                               </div>
@@ -743,7 +765,7 @@ export default function PortfolioPage() {
                           <td>${t.Exit_Price || '—'}</td>
                           <td>{t.Size}</td>
                           <td>{t.RR}</td>
-                          <td className={pnl !== null ? (pnl >= 0 ? 'pos' : 'neg') : ''}>{pnl !== null ? `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}` : '—'}</td>
+                          <td className={pnl !== null ? (pnl >= 0 ? 'pos' : 'neg') : ''}>{pnl !== null ? fmtSignedMoney(pnl, 2) : '—'}</td>
                           <td><span className={`result-badge ${(t.Status === 'WIN' || t.Status === 'TP') ? 'win' : 'loss'}`}>{(t.Status === 'WIN' || t.Status === 'TP') ? '✅ WIN' : '❌ LOSS'}</span></td>
                           <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.Exit_Date || '—'}</td>
                         </tr>

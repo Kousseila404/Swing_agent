@@ -55,28 +55,65 @@ def _compute_support_for_ticker(ticker: str, price: float | None) -> dict[str, A
         history = read_ohlcv(ticker, days=300)
         # Fallback yfinance si DuckDB vide (mêmes 300j que le module Lot 7).
         if history is None or history.empty:
-            try:
-                import yfinance as yf
-                df = yf.download(ticker, period="14mo", interval="1d",
-                                 progress=False, auto_adjust=True, threads=False)
-                if df is not None and not df.empty:
-                    if isinstance(df.columns, type(df.columns)) and hasattr(df.columns, "get_level_values"):
-                        try:
-                            df.columns = df.columns.get_level_values(0)
-                        except Exception:
-                            pass
-                    history = df
-            except Exception:
-                history = None
+            history = _yf_fallback_ohlcv(ticker)
         result = compute_support_score(
             ticker=ticker,
             current_price=price,
             history=history,
         )
         return result.to_dict()
-    except Exception as e:
-        logger.debug(f"[support_score] {ticker} échec : {e}")
+    except (ImportError, AttributeError, KeyError, ValueError) as e:
+        # Erreurs « attendues » liées à la donnée (colonnes manquantes, etc.) :
+        # log WARN avec contexte mais sans stacktrace bruyante.
+        logger.warning(
+            "[support_score] %s data error (%s): %s",
+            ticker, type(e).__name__, e,
+        )
         return {"score": 0.0, "level": "INSUFFICIENT_DATA", "method": "insufficient_data"}
+    except Exception as e:  # noqa: BLE001 — pipeline doit continuer sur autre lot
+        # Garde-fou : log WARN + exc_info pour qu'un crash silencieux soit
+        # visible en prod (vs DEBUG précédent que personne ne lisait).
+        logger.warning(
+            "[support_score] %s unexpected error (%s)",
+            ticker, type(e).__name__,
+            exc_info=True,
+        )
+        return {"score": 0.0, "level": "INSUFFICIENT_DATA", "method": "insufficient_data"}
+
+
+def _yf_fallback_ohlcv(ticker: str):
+    """Fallback OHLCV via yfinance, isolé pour clarifier l'error handling.
+
+    Retourne None silencieusement si yfinance échoue — c'est attendu (breaker
+    YF ouvert, rate-limit, ticker inexistant) — mais log un WARN pour qu'on
+    voie en prod que le DuckDB cache est vide ET que le fallback live a échoué.
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        logger.warning("[support_score] %s : yfinance not installed", ticker)
+        return None
+    try:
+        df = yf.download(
+            ticker, period="14mo", interval="1d",
+            progress=False, auto_adjust=True, threads=False,
+        )
+    except Exception as e:  # noqa: BLE001 — yfinance lève un zoo d'exceptions
+        logger.warning(
+            "[support_score] %s yfinance fallback failed (%s): %s",
+            ticker, type(e).__name__, e,
+        )
+        return None
+    if df is None or df.empty:
+        logger.info("[support_score] %s yfinance returned empty frame", ticker)
+        return None
+    # yfinance retourne parfois un MultiIndex columns ; on flatten le 1er niveau.
+    if hasattr(df.columns, "get_level_values"):
+        try:
+            df.columns = df.columns.get_level_values(0)
+        except (AttributeError, IndexError):
+            pass
+    return df
 
 # ─────────────────────────────────────────────────────────────────
 # CONSTANTES — defaults conservateurs
