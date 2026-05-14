@@ -346,6 +346,52 @@
 .scan-row:hover { background: rgba(255,255,255,0.025); }
 .scan-row:last-child td { border-bottom: none; }
 
+/* Sticky cell opt-in (pattern Seeking Alpha) — opt-in via `data-sticky="left"`
+   sur la cellule à figer (typiquement la col Ticker) côté <th> ET <td>.
+   On évite :first-child car les tables ont souvent une col checkbox en 1re
+   position qui ne sert pas de repère visuel.
+   Usage : <th data-sticky="left">Ticker</th>
+           <td data-sticky="left">{ticker}</td> */
+.scan-table th[data-sticky="left"],
+.scan-table td[data-sticky="left"] {
+  position: sticky;
+  left: 0;
+  background: var(--panel-bg, #1f2937);
+}
+.scan-table td[data-sticky="left"] {
+  z-index: 1;
+  /* Hover row qui passe sous la cellule sticky → on remonte l'opacité pour
+     que le ticker reste parfaitement lisible. */
+  background: var(--bg-dark, #0f172a);
+}
+.scan-row:hover td[data-sticky="left"] {
+  background: rgba(40, 50, 70, 0.95);
+}
+.scan-table th[data-sticky="left"] {
+  /* th déjà sticky top → on combine top+left → corner cell prioritaire. */
+  z-index: 3;
+}
+/* Ombre droite légère pour signaler la séparation visuelle (SA-style). */
+.scan-table th[data-sticky="left"]::after,
+.scan-table td[data-sticky="left"]::after {
+  content: "";
+  position: absolute;
+  top: 0; right: -8px; bottom: 0;
+  width: 8px;
+  background: linear-gradient(to right, rgba(0,0,0,0.18), transparent);
+  pointer-events: none;
+}
+[data-theme="light"] .scan-table th[data-sticky="left"],
+[data-theme="light"] .scan-table td[data-sticky="left"] {
+  background: var(--panel-bg);
+}
+[data-theme="light"] .scan-table td[data-sticky="left"] {
+  background: #fbfcff;
+}
+[data-theme="light"] .scan-row:hover td[data-sticky="left"] {
+  background: rgba(15,23,42,0.06);
+}
+
 /* Keyboard cursor (j/k navigation via TableKeyNav) */
 .kbd-cursor { background: rgba(59,130,246,0.12) !important;
               box-shadow: inset 3px 0 0 0 var(--accent-primary); }

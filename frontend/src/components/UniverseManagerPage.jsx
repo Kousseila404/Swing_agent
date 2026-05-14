@@ -872,7 +872,7 @@ export default function UniverseManagerPage() {
               <thead>
                 <tr>
                   <th style={{ width: 28 }} title="Sélectionner pour comparaison (max 5)">⇄</th>
-                  <SortableTh col="ticker"     {...{ sortBy, sortDir, setSortBy, setSortDir }} title={COL_TOOLTIPS.ticker}>Ticker</SortableTh>
+                  <SortableTh col="ticker"     sticky {...{ sortBy, sortDir, setSortBy, setSortDir }} title={COL_TOOLTIPS.ticker}>Ticker</SortableTh>
                   <SortableTh col="status"     {...{ sortBy, sortDir, setSortBy, setSortDir }} title={COL_TOOLTIPS.status}>Status</SortableTh>
                   <SortableTh col="sector"     {...{ sortBy, sortDir, setSortBy, setSortDir }} title={COL_TOOLTIPS.sector}>Secteur</SortableTh>
                   <SortableTh col="titan"      {...{ sortBy, sortDir, setSortBy, setSortDir }} title={COL_TOOLTIPS.titan}>TITAN</SortableTh>
@@ -912,7 +912,7 @@ export default function UniverseManagerPage() {
                           style={{ cursor: 'pointer' }}
                         />
                       </td>
-                      <td>
+                      <td data-sticky="left">
                         <div className="scan-ticker-cell">
                           <span className="scan-ticker-logo">📈</span>
                           <div>
@@ -1250,7 +1250,7 @@ function Metric({ label, value, color }) {
   );
 }
 
-function SortableTh({ col, sortBy, sortDir, setSortBy, setSortDir, children, title }) {
+function SortableTh({ col, sortBy, sortDir, setSortBy, setSortDir, children, title, sticky }) {
   const active = sortBy === col;
   const arrow = active ? (sortDir === 'desc' ? '↓' : '↑') : '';
   const handleClick = () => {
@@ -1265,6 +1265,7 @@ function SortableTh({ col, sortBy, sortDir, setSortBy, setSortDir, children, tit
   return (
     <th
       onClick={handleClick}
+      data-sticky={sticky ? 'left' : undefined}
       title={title || `Trier par ${col}`}
       style={{
         cursor: 'pointer',
