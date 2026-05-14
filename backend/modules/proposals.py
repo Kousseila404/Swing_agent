@@ -220,8 +220,65 @@ def _append_audit(event: str, proposal: dict[str, Any], extra: dict[str, Any] | 
             record.update(extra)
         with PROPOSALS_AUDIT_PATH.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception as e:
-        logger.warning(f"[Proposals] Audit write failed: {e}")
+    except OSError as e:
+        logger.warning("[Proposals] Audit write failed (%s): %s", type(e).__name__, e)
+
+
+def log_mutation_audit(
+    event: str,
+    proposal_id: str,
+    ticker: str,
+    *,
+    request_ip: str | None = None,
+    request_ua: str | None = None,
+    decided_by: str = "user",
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """Ajoute une ligne d'audit enrichie depuis le router HTTP.
+
+    Trace QUI / QUAND / OÙ-DEPUIS / AVEC-QUOI a déclenché une mutation
+    (approve, reject, manual_push). Pattern observability minimum pour un
+    SaaS financier — avant : tracé du status JSON seul, après : on peut
+    reconstituer une chronologie utilisateur lors d'un incident.
+
+    Fail-open : un échec d'écriture ne bloque jamais la mutation.
+    """
+    record: dict[str, Any] = {"decided_by": decided_by}
+    if request_ip:
+        record["client_ip"] = request_ip
+    if request_ua:
+        # Tronque l'UA : éviter les payloads JSONL géants si un client envoie
+        # un UA pathologique. 256 chars couvre largement les UAs réels.
+        record["client_ua"] = request_ua[:256]
+    if payload:
+        record["payload"] = payload
+    _append_audit(
+        event,
+        {"id": proposal_id, "ticker": ticker, "status": event},
+        record,
+    )
+
+
+def extract_request_context(request: Any) -> tuple[str | None, str | None]:
+    """Helper FastAPI-agnostique : (ip, user_agent) depuis un Request.
+
+    Préfère X-Forwarded-For (déploiement derrière reverse proxy) puis fallback
+    client.host. Retourne (None, None) si rien d'exploitable.
+    """
+    if request is None:
+        return None, None
+    try:
+        headers = getattr(request, "headers", {}) or {}
+        xff = headers.get("x-forwarded-for") or headers.get("X-Forwarded-For")
+        # XFF peut être une chaîne "client, proxy1, proxy2" — on prend le 1er.
+        ip = xff.split(",")[0].strip() if xff else None
+        if not ip:
+            client = getattr(request, "client", None)
+            ip = getattr(client, "host", None) if client else None
+        ua = headers.get("user-agent") or headers.get("User-Agent")
+        return ip, ua
+    except (AttributeError, TypeError):
+        return None, None
 
 
 def _trim_live_history(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

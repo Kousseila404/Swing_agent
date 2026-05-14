@@ -503,3 +503,89 @@ def test_veto_history_summary_empty(isolated_proposals):
     assert summary["top_tickers"] == []
     assert summary["top_reasons"] == []
     assert summary["last_veto_at"] is None
+
+
+# ───────────────────────────────────────────────────────────────────
+# Audit trail enrichi (V2.3)
+# ───────────────────────────────────────────────────────────────────
+
+class _FakeClient:
+    def __init__(self, host):
+        self.host = host
+
+
+class _FakeRequest:
+    """Minimal mock pour proposals.extract_request_context — pas besoin d'un
+    vrai Starlette Request pour tester l'extraction header/client."""
+    def __init__(self, *, headers=None, client_host=None):
+        self.headers = headers or {}
+        self.client = _FakeClient(client_host) if client_host else None
+
+
+def test_extract_request_context_xff_priority():
+    """X-Forwarded-For prioritaire sur client.host (déploiement proxy)."""
+    req = _FakeRequest(
+        headers={"x-forwarded-for": "203.0.113.42, 10.0.0.1", "user-agent": "TestUA/1.0"},
+        client_host="10.0.0.1",
+    )
+    ip, ua = proposals.extract_request_context(req)
+    # Premier IP de la chaîne XFF
+    assert ip == "203.0.113.42"
+    assert ua == "TestUA/1.0"
+
+
+def test_extract_request_context_fallback_client_host():
+    """Pas de XFF → on prend client.host."""
+    req = _FakeRequest(
+        headers={"user-agent": "MozTest/2.0"},
+        client_host="192.168.1.1",
+    )
+    ip, ua = proposals.extract_request_context(req)
+    assert ip == "192.168.1.1"
+    assert ua == "MozTest/2.0"
+
+
+def test_extract_request_context_none_request():
+    """Tolère None (defensive)."""
+    ip, ua = proposals.extract_request_context(None)
+    assert ip is None
+    assert ua is None
+
+
+def test_log_mutation_audit_writes_jsonl(isolated_proposals):
+    """log_mutation_audit append une ligne jsonl avec contexte enrichi."""
+    proposals.log_mutation_audit(
+        "executed",
+        proposal_id="p_123",
+        ticker="AAPL",
+        request_ip="203.0.113.7",
+        request_ua="curl/8.0",
+        decided_by="user",
+        payload={"entry_used": 150.5, "size": 10},
+    )
+    audit_path = isolated_proposals[1]
+    lines = audit_path.read_text().strip().splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec["event"] == "executed"
+    assert rec["id"] == "p_123"
+    assert rec["ticker"] == "AAPL"
+    assert rec["client_ip"] == "203.0.113.7"
+    assert rec["client_ua"] == "curl/8.0"
+    assert rec["decided_by"] == "user"
+    assert rec["payload"]["entry_used"] == 150.5
+
+
+def test_log_mutation_audit_truncates_ua(isolated_proposals):
+    """User-Agent pathologique tronqué à 256 char pour éviter JSONL bloated."""
+    big_ua = "A" * 1000
+    proposals.log_mutation_audit(
+        "rejected",
+        proposal_id="p_x",
+        ticker="MSFT",
+        request_ua=big_ua,
+    )
+    audit_path = isolated_proposals[1]
+    lines = audit_path.read_text().strip().splitlines()
+    rec = json.loads(lines[-1])
+    assert len(rec["client_ua"]) == 256

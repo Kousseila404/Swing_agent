@@ -20,7 +20,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Security
+from fastapi import APIRouter, HTTPException, Query, Request, Security
 from pydantic import BaseModel, Field
 
 from modules import api_core, auto_proposer, proposals
@@ -273,6 +273,7 @@ def refresh_proposals(
 @router.post("/{proposal_id}/approve")
 def approve_proposal(
     proposal_id: str,
+    request: Request,
     _auth: None = Security(api_core.require_auth),
 ):
     """Approuve la proposition + ouvre le trade dans le journal.
@@ -400,6 +401,27 @@ def approve_proposal(
             f"[Proposals] post-execute status update failed for {proposal_id}: {e}"
         )
 
+    # Audit trail enrichi : IP/UA + valeurs effectives envoyées au broker.
+    # Permet de reconstituer une chronologie utilisateur lors d'un incident
+    # (qui a approuvé quoi, depuis où, à quels prix).
+    ip, ua = proposals.extract_request_context(request)
+    proposals.log_mutation_audit(
+        "executed",
+        proposal_id=proposal_id,
+        ticker=item["ticker"],
+        request_ip=ip,
+        request_ua=ua,
+        payload={
+            "entry_used":  entry_used,
+            "sl_used":     sl_used,
+            "tp_used":     tp_used,
+            "size":        item.get("size"),
+            "direction":   item.get("direction"),
+            "order_id":    order_id,
+            "broker":      broker.name,
+        },
+    )
+
     return {
         "ok":       True,
         "proposal": item,
@@ -418,6 +440,7 @@ def approve_proposal(
 @router.post("/{proposal_id}/reject")
 def reject_proposal(
     proposal_id: str,
+    request: Request,
     req: RejectRequest = RejectRequest(),  # noqa: B008
     _auth: None = Security(api_core.require_auth),
 ):
@@ -430,6 +453,16 @@ def reject_proposal(
         )
     except ValueError as e:
         raise HTTPException(404 if "introuvable" in str(e) else 400, str(e)) from e
+    # Audit trail (IP/UA/reason) — cf. approve_proposal.
+    ip, ua = proposals.extract_request_context(request)
+    proposals.log_mutation_audit(
+        "rejected",
+        proposal_id=proposal_id,
+        ticker=item["ticker"],
+        request_ip=ip,
+        request_ua=ua,
+        payload={"reason": req.reason} if req.reason else None,
+    )
     return {"ok": True, "proposal": item}
 
 
