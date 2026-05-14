@@ -27,7 +27,7 @@ function relTime(iso) {
 }
 
 const SCOPE_META = {
-  position:  { label: 'Position',  bg: 'rgba(34,197,94,0.16)',  fg: '#4ade80' },
+  position:  { label: 'Position',  bg: 'rgba(34,197,94,0.16)',  fg: 'var(--success-soft)' },
   watchlist: { label: 'Watchlist', bg: 'rgba(168,85,247,0.16)', fg: '#c084fc' },
 };
 
@@ -88,7 +88,7 @@ export default function NewsFirehosePage() {
         </div>
         <div className="status-chip">
           <span className="sc-lbl">Positions</span>
-          <span className="sc-val" style={{ color: '#4ade80' }}>{scope.n_open || 0}</span>
+          <span className="sc-val" style={{ color: 'var(--success-soft)' }}>{scope.n_open || 0}</span>
         </div>
         <div className="status-chip">
           <span className="sc-lbl">Watchlist</span>

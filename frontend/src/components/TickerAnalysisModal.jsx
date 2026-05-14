@@ -114,8 +114,8 @@ function BullBearCases({ cases }) {
   );
   return (
     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-      {block('Bullish case', cases.bull || [], '#4ade80', '🟢')}
-      {block('Bearish case', cases.bear || [], '#f87171', '🔴')}
+      {block('Bullish case', cases.bull || [], 'var(--success-soft)', '🟢')}
+      {block('Bearish case', cases.bear || [], 'var(--danger-soft)', '🔴')}
     </div>
   );
 }
@@ -182,8 +182,8 @@ function EarningsBadge({ days, date }) {
   if (date == null) return null;
   let bg = 'rgba(148,163,184,0.10)', fg = 'var(--text-muted)', label = `Earnings ${date}`;
   if (Number.isFinite(days)) {
-    if (days >= 0 && days < 7) { bg = 'rgba(248,113,113,0.18)'; fg = '#f87171'; label = `Earnings dans ${days}j (BLACKOUT)`; }
-    else if (days >= 0 && days < 30) { bg = 'rgba(251,191,36,0.18)'; fg = '#fbbf24'; label = `Earnings dans ${days}j`; }
+    if (days >= 0 && days < 7) { bg = 'rgba(248,113,113,0.18)'; fg = 'var(--danger-soft)'; label = `Earnings dans ${days}j (BLACKOUT)`; }
+    else if (days >= 0 && days < 30) { bg = 'rgba(251,191,36,0.18)'; fg = 'var(--warning-soft)'; label = `Earnings dans ${days}j`; }
     else if (days < 0) { label = `Earnings passés (${-days}j)`; }
     else { label = `Earnings dans ${days}j`; }
   }
@@ -257,7 +257,7 @@ function EntryPlanSection({ plan, ticker }) {
             <span style={{
               fontSize: '0.65rem', fontWeight: 700,
               padding: '0.15rem 0.5rem', borderRadius: 4,
-              background: 'rgba(248,113,113,0.18)', color: '#f87171',
+              background: 'rgba(248,113,113,0.18)', color: 'var(--danger-soft)',
             }}>
               ATH-EXTENDED
             </span>
@@ -299,7 +299,7 @@ function EntryPlanSection({ plan, ticker }) {
               <span style={{
                 fontFamily: 'monospace', fontSize: '0.72rem',
                 color: tier.discount_pct != null && tier.discount_pct < 0
-                       ? '#fbbf24' : 'var(--text-muted)',
+                       ? 'var(--warning-soft)' : 'var(--text-muted)',
               }}>
                 {tier.discount_pct != null ? `${tier.discount_pct.toFixed(1)} %` : '—'}
               </span>
@@ -324,7 +324,7 @@ function EntryPlanSection({ plan, ticker }) {
       {feedback && (
         <div style={{
           marginTop: 8, fontSize: '0.72rem',
-          color: feedback.ok ? '#4ade80' : '#fb7185',
+          color: feedback.ok ? 'var(--success-soft)' : '#fb7185',
         }}>
           {feedback.ok ? '✓' : '⚠️'} {feedback.msg}
         </div>
@@ -363,10 +363,10 @@ function ThesisStatusPanel({ thesis }) {
         <ul style={{ margin: '8px 0 0 0', paddingLeft: 18,
                      fontSize: '0.72rem', lineHeight: 1.55 }}>
           {breaks.map((r, i) => (
-            <li key={`b${i}`} style={{ color: '#f87171' }}>{r}</li>
+            <li key={`b${i}`} style={{ color: 'var(--danger-soft)' }}>{r}</li>
           ))}
           {warns.map((r, i) => (
-            <li key={`w${i}`} style={{ color: '#fbbf24' }}>{r}</li>
+            <li key={`w${i}`} style={{ color: 'var(--warning-soft)' }}>{r}</li>
           ))}
         </ul>
       )}
@@ -514,7 +514,7 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
 
           {error && <div style={{
             padding: '1rem', borderRadius: 6,
-            background: 'rgba(248,113,113,0.1)', color: '#f87171',
+            background: 'rgba(248,113,113,0.1)', color: 'var(--danger-soft)',
             border: '1px solid rgba(248,113,113,0.4)',
           }}>
             ❌ {error}
@@ -569,7 +569,7 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                       </summary>
                       <ul style={{ margin: '4px 0 0 0', paddingLeft: 18, lineHeight: 1.5 }}>
                         {data.buy_signal.reasons_pos.map((r, i) =>
-                          <li key={`p${i}`} style={{ color: '#4ade80' }}>{r}</li>
+                          <li key={`p${i}`} style={{ color: 'var(--success-soft)' }}>{r}</li>
                         )}
                         {(data.buy_signal.reasons_neg || []).map((r, i) =>
                           <li key={`n${i}`} style={{ color: '#fb7185' }}>{r}</li>
@@ -654,11 +654,11 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
             <Section title="TITAN — composite & piliers">
               <Grid cols={4}>
                 <KV label="Composite" value={fmtNum(data.titan.composite, 1)}
-                    tone={data.titan.composite >= 80 ? '#4ade80' : data.titan.composite >= 70 ? '#fbbf24' : 'var(--text-muted)'} />
+                    tone={data.titan.composite >= 80 ? 'var(--success-soft)' : data.titan.composite >= 70 ? 'var(--warning-soft)' : 'var(--text-muted)'} />
                 <KV label="F-Score" value={`${data.titan.f_score ?? '—'} / ${data.titan.f_score_max ?? 9}`}
-                    tone={data.titan.f_score >= 7 ? '#4ade80' : data.titan.f_score <= 3 ? '#f87171' : undefined} />
+                    tone={data.titan.f_score >= 7 ? 'var(--success-soft)' : data.titan.f_score <= 3 ? 'var(--danger-soft)' : undefined} />
                 <KV label="Tilts" value={data.titan.tilt_flags.length ? data.titan.tilt_flags.join(', ') : '—'}
-                    tone={data.titan.tilt_adjust > 0 ? '#4ade80' : data.titan.tilt_adjust < 0 ? '#f87171' : undefined}
+                    tone={data.titan.tilt_adjust > 0 ? 'var(--success-soft)' : data.titan.tilt_adjust < 0 ? 'var(--danger-soft)' : undefined}
                     hint={`Adjust ${data.titan.tilt_adjust ?? 0}`} />
                 <KV label="Market Cap" value={fmtMarketCap(data.identity.market_cap)} />
 
@@ -670,11 +670,11 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                 <KV label="Growth" value={fmtNum(data.titan.growth, 1)} />
                 <KV label="Piotroski" value={fmtNum(data.titan.piotroski, 1)} />
                 <KV label="Revisions" value={fmtNum(data.revisions?.score, 1)}
-                    tone={data.revisions?.score >= 70 ? '#4ade80' :
-                          data.revisions?.score < 30 ? '#f87171' : undefined} />
+                    tone={data.revisions?.score >= 70 ? 'var(--success-soft)' :
+                          data.revisions?.score < 30 ? 'var(--danger-soft)' : undefined} />
                 <KV label="Insider" value={fmtNum(data.insider?.score, 1)}
-                    tone={data.insider?.score >= 70 ? '#4ade80' :
-                          data.insider?.score < 40 ? '#f87171' : undefined} />
+                    tone={data.insider?.score >= 70 ? 'var(--success-soft)' :
+                          data.insider?.score < 40 ? 'var(--danger-soft)' : undefined} />
               </Grid>
             </Section>
 
@@ -696,7 +696,7 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                   <KV label="TITAN entry" value={fmtNum(data.drift.entry_titan, 1)}
                       hint={data.drift.warning} />
                   <KV label="TITAN now" value={fmtNum(data.titan.composite, 1)}
-                      tone={data.drift.entry_titan && data.titan.composite < data.drift.entry_titan - 10 ? '#f87171' : undefined} />
+                      tone={data.drift.entry_titan && data.titan.composite < data.drift.entry_titan - 10 ? 'var(--danger-soft)' : undefined} />
                   {data.drift.entry_f_score != null && (
                     <KV label="F-Score entry" value={`${data.drift.entry_f_score} / 9`} />
                   )}
@@ -706,7 +706,7 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                   )}
                 </Grid>
                 {data.drift.warning && (
-                  <div style={{ marginTop: 8, fontSize: '0.7rem', color: '#fbbf24' }}>
+                  <div style={{ marginTop: 8, fontSize: '0.7rem', color: 'var(--warning-soft)' }}>
                     ⚠️ {data.drift.warning}
                   </div>
                 )}
@@ -739,7 +739,7 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
 
                   {data.support?.level && data.support.level !== 'INSUFFICIENT_DATA' && <>
                     <KV label="Support level" value={data.support.level.replace('_SUPPORT', '')}
-                        tone={data.support.level === 'ON_SUPPORT' ? '#4ade80' : data.support.level === 'NEAR_SUPPORT' ? '#fbbf24' : 'var(--text-muted)'} />
+                        tone={data.support.level === 'ON_SUPPORT' ? 'var(--success-soft)' : data.support.level === 'NEAR_SUPPORT' ? 'var(--warning-soft)' : 'var(--text-muted)'} />
                     <KV label="Score support" value={`${fmtNum(data.support.score, 0)} / 100`} />
                     <KV label="Swing low" value={data.support.nearest_swing_low ? `$${fmtNum(data.support.nearest_swing_low, 2)}` : '—'} />
                     <KV label="Volatility" value={`${fmtNum(data.risk.volatility_pct, 1)}%`} />
@@ -753,15 +753,15 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
               <Section title="Révisions analystes (Seeking Alpha-style)">
                 <Grid cols={4}>
                   <KV label="Score (rank)" value={fmtNum(data.revisions.score, 1)}
-                      tone={data.revisions.score >= 70 ? '#4ade80' :
-                            data.revisions.score < 30 ? '#f87171' : undefined} />
+                      tone={data.revisions.score >= 70 ? 'var(--success-soft)' :
+                            data.revisions.score < 30 ? 'var(--danger-soft)' : undefined} />
                   <KV label="Net score 90j" value={fmtNum(data.revisions.revisions_net_score, 2)}
                       hint="(up - down) / (up + down) sur 90 jours"
                       tone={pctToneSigned(data.revisions.revisions_net_score)} />
                   <KV label="Upgrades 30j" value={fmtNum(data.revisions.upgrades_30d, 0)}
-                      tone={data.revisions.upgrades_30d > 0 ? '#4ade80' : undefined} />
+                      tone={data.revisions.upgrades_30d > 0 ? 'var(--success-soft)' : undefined} />
                   <KV label="Downgrades 30j" value={fmtNum(data.revisions.downgrades_30d, 0)}
-                      tone={data.revisions.downgrades_30d > 0 ? '#f87171' : undefined} />
+                      tone={data.revisions.downgrades_30d > 0 ? 'var(--danger-soft)' : undefined} />
 
                   <KV label="Upgrades 90j" value={fmtNum(data.revisions.upgrades_90d, 0)} />
                   <KV label="Downgrades 90j" value={fmtNum(data.revisions.downgrades_90d, 0)} />
@@ -775,12 +775,12 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
               <Section title="🏛️ Insider Activity (SEC EDGAR Form 4)">
                 <Grid cols={4}>
                   <KV label="Score" value={fmtNum(data.insider.score, 1)}
-                      tone={data.insider.score >= 70 ? '#4ade80' :
-                            data.insider.score < 40 ? '#f87171' : undefined} />
+                      tone={data.insider.score >= 70 ? 'var(--success-soft)' :
+                            data.insider.score < 40 ? 'var(--danger-soft)' : undefined} />
                   <KV label="Filings 30j" value={fmtNum(data.insider.buy_count_30d, 0)}
-                      tone={data.insider.buy_count_30d >= 3 ? '#4ade80' : undefined} />
+                      tone={data.insider.buy_count_30d >= 3 ? 'var(--success-soft)' : undefined} />
                   <KV label="Insiders distincts 30j" value={fmtNum(data.insider.distinct_30d, 0)}
-                      tone={data.insider.distinct_30d >= 3 ? '#4ade80' : undefined} />
+                      tone={data.insider.distinct_30d >= 3 ? 'var(--success-soft)' : undefined} />
                   <KV label="Cluster buying" value={data.insider.cluster_buying ? '✅ OUI (3+/7j)' : '—'}
                       tone={data.insider.cluster_buying ? '#22c55e' : undefined} />
 
@@ -806,8 +806,8 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                       tone={SURPRISE_LEVEL_TONE[data.earnings_surprise.level]} />
                   <KV label="Score" value={fmtNum(data.earnings_surprise.score, 0)} />
                   <KV label="Beat rate 8Q" value={fmtPct(data.earnings_surprise.beat_rate_8q, 0)}
-                      tone={data.earnings_surprise.beat_rate_8q > 0.6 ? '#4ade80' :
-                            data.earnings_surprise.beat_rate_8q < 0.4 ? '#f87171' : undefined} />
+                      tone={data.earnings_surprise.beat_rate_8q > 0.6 ? 'var(--success-soft)' :
+                            data.earnings_surprise.beat_rate_8q < 0.4 ? 'var(--danger-soft)' : undefined} />
                   <KV label="Surprise avg 4Q" value={fmtPct(data.earnings_surprise.surprise_avg_4q / 100, 1)}
                       tone={pctToneSigned(data.earnings_surprise.surprise_avg_4q)}
                       hint="Surprise moyenne sur les 4 derniers trimestres" />
@@ -826,8 +826,8 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                   <KV label="Niveau" value={data.dividend_safety.level?.replace('_', ' ') || '—'}
                       tone={DIVIDEND_LEVEL_TONE[data.dividend_safety.level]} />
                   <KV label="Payout ratio" value={fmtPct(data.dividend_safety.raw?.payout_ratio, 0)}
-                      tone={data.dividend_safety.raw?.payout_ratio > 0.8 ? '#fbbf24' :
-                            data.dividend_safety.raw?.payout_ratio < 0.5 ? '#4ade80' : undefined} />
+                      tone={data.dividend_safety.raw?.payout_ratio > 0.8 ? 'var(--warning-soft)' :
+                            data.dividend_safety.raw?.payout_ratio < 0.5 ? 'var(--success-soft)' : undefined} />
                   <KV label="Yield 5Y avg" value={fmtPct(data.dividend_safety.raw?.five_year_avg_dividend_yield, 2)} />
 
                   <KV label="Axe payout" value={fmtNum(data.dividend_safety.components?.payout, 0)} />
@@ -845,14 +845,14 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
             <Section title="Valuation">
               <Grid cols={4}>
                 <KV label="P/E TTM" value={fmtNum(data.valuation.trailing_pe, 1)}
-                    tone={data.valuation.trailing_pe > 30 ? '#fbbf24' : data.valuation.trailing_pe < 0 ? '#f87171' : undefined} />
+                    tone={data.valuation.trailing_pe > 30 ? 'var(--warning-soft)' : data.valuation.trailing_pe < 0 ? 'var(--danger-soft)' : undefined} />
                 <KV label="Fwd P/E" value={fmtNum(data.valuation.forward_pe, 1)} />
                 <KV label="EV/EBITDA" value={fmtNum(data.valuation.ev_to_ebitda, 1)} />
                 <KV label="EV/Revenue" value={fmtNum(data.valuation.ev_to_revenue, 1)} />
 
                 <KV label="P/B" value={fmtNum(data.valuation.price_to_book, 2)} />
                 <KV label="PEG" value={fmtNum(data.valuation.peg_ratio, 2)}
-                    tone={data.valuation.peg_ratio > 0 && data.valuation.peg_ratio < 1 ? '#4ade80' : undefined}
+                    tone={data.valuation.peg_ratio > 0 && data.valuation.peg_ratio < 1 ? 'var(--success-soft)' : undefined}
                     hint="PEG < 1 = potentiellement undervalued vs growth" />
                 <KV label="Div yield" value={fmtPct(data.valuation.dividend_yield, 2)} />
               </Grid>
@@ -862,12 +862,12 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
             <Section title="Profitabilité & Qualité comptable">
               <Grid cols={4}>
                 <KV label="ROE" value={fmtPct(data.quality.return_on_equity, 1)}
-                    tone={data.quality.return_on_equity > 0.15 ? '#4ade80' : data.quality.return_on_equity < 0 ? '#f87171' : undefined} />
+                    tone={data.quality.return_on_equity > 0.15 ? 'var(--success-soft)' : data.quality.return_on_equity < 0 ? 'var(--danger-soft)' : undefined} />
                 <KV label="ROA" value={fmtPct(data.quality.return_on_assets, 1)}
-                    tone={data.quality.return_on_assets > 0.10 ? '#4ade80' : data.quality.return_on_assets < 0 ? '#f87171' : undefined} />
+                    tone={data.quality.return_on_assets > 0.10 ? 'var(--success-soft)' : data.quality.return_on_assets < 0 ? 'var(--danger-soft)' : undefined} />
                 <KV label="ROA Y-1" value={fmtPct(data.quality.return_on_assets_prev_year, 1)} />
                 <KV label="Net margin" value={fmtPct(data.quality.profit_margin, 1)}
-                    tone={data.quality.profit_margin < 0 ? '#f87171' : undefined} />
+                    tone={data.quality.profit_margin < 0 ? 'var(--danger-soft)' : undefined} />
 
                 <KV label="Op margin" value={fmtPct(data.quality.operating_margin, 1)} />
                 <KV label="Gross margin" value={fmtPct(data.quality.gross_margin, 1)} />
@@ -880,10 +880,10 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
             <Section title="Bilan & santé financière">
               <Grid cols={4}>
                 <KV label="Debt/Equity" value={fmtNum(data.health.debt_to_equity, 1)}
-                    tone={data.health.debt_to_equity > 200 ? '#f87171' : data.health.debt_to_equity < 50 ? '#4ade80' : undefined} />
+                    tone={data.health.debt_to_equity > 200 ? 'var(--danger-soft)' : data.health.debt_to_equity < 50 ? 'var(--success-soft)' : undefined} />
                 <KV label="D/E Y-1" value={fmtNum(data.health.debt_to_equity_prev_year, 1)} />
                 <KV label="Current ratio" value={fmtNum(data.health.current_ratio, 2)}
-                    tone={data.health.current_ratio < 1 ? '#f87171' : data.health.current_ratio > 2 ? '#4ade80' : undefined} />
+                    tone={data.health.current_ratio < 1 ? 'var(--danger-soft)' : data.health.current_ratio > 2 ? 'var(--success-soft)' : undefined} />
                 <KV label="Quick ratio" value={fmtNum(data.health.quick_ratio, 2)} />
               </Grid>
             </Section>
@@ -910,8 +910,8 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                 <Grid cols={4}>
                   <KV label="N analystes" value={fmtNum(data.analysts.num_analysts, 0)} />
                   <KV label="Reco" value={data.analysts.recommendation_key?.replace?.('_', ' ') || '—'}
-                      tone={['strong_buy','buy'].includes(data.analysts.recommendation_key) ? '#4ade80' :
-                            ['sell','strong_sell'].includes(data.analysts.recommendation_key) ? '#f87171' : undefined} />
+                      tone={['strong_buy','buy'].includes(data.analysts.recommendation_key) ? 'var(--success-soft)' :
+                            ['sell','strong_sell'].includes(data.analysts.recommendation_key) ? 'var(--danger-soft)' : undefined} />
                   <KV label="Reco mean" value={fmtNum(data.analysts.recommendation_mean, 2)}
                       hint="1=strong buy, 5=strong sell" />
                   <KV label="Target mean" value={data.analysts.price_target_mean ? `$${fmtNum(data.analysts.price_target_mean, 2)}` : '—'} />

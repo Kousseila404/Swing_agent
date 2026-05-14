@@ -31,7 +31,7 @@ function toneFor(value, median, goodHigh, ignoreNegative) {
   const delta = value - median;
   if (Math.abs(delta) / Math.max(Math.abs(median), 1e-9) < 0.05) return undefined; // ~ médiane → neutre
   const isBetter = goodHigh ? delta > 0 : delta < 0;
-  return isBetter ? '#4ade80' : '#f87171';
+  return isBetter ? 'var(--success-soft)' : 'var(--danger-soft)';
 }
 
 export default function PeerComparison({ ticker }) {
@@ -47,7 +47,7 @@ export default function PeerComparison({ ticker }) {
 
   if (!ticker) return null;
   if (peersQ.isLoading) return <div style={{ padding: '0.5rem 0', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Chargement peers…</div>;
-  if (peersQ.isError) return <div style={{ padding: '0.5rem 0', fontSize: '0.7rem', color: '#fbbf24' }}>Peers indisponibles : {peersQ.error?.message || 'erreur'}</div>;
+  if (peersQ.isError) return <div style={{ padding: '0.5rem 0', fontSize: '0.7rem', color: 'var(--warning-soft)' }}>Peers indisponibles : {peersQ.error?.message || 'erreur'}</div>;
   const data = peersQ.data;
   if (!data) return null;
 
@@ -81,7 +81,7 @@ export default function PeerComparison({ ticker }) {
             <th style={{
               ...headerStyle,
               background: 'rgba(96,165,250,0.08)',
-              color: '#60a5fa',
+              color: 'var(--accent-soft)',
             }}>{target.ticker}</th>
             <th style={headerStyle}>Médiane</th>
             {peers.map((p) => (
@@ -92,7 +92,7 @@ export default function PeerComparison({ ticker }) {
             <th style={{ ...cellStyle, textAlign: 'left', color: 'var(--text-muted)', fontSize: '0.6rem' }}>
               Market Cap
             </th>
-            <th style={{ ...cellStyle, color: '#60a5fa', background: 'rgba(96,165,250,0.06)' }}>
+            <th style={{ ...cellStyle, color: 'var(--accent-soft)', background: 'rgba(96,165,250,0.06)' }}>
               {fmtMarketCap(target.market_cap)}
             </th>
             <th style={{ ...cellStyle, color: 'var(--text-muted)' }}>—</th>
@@ -113,7 +113,7 @@ export default function PeerComparison({ ticker }) {
                 <td style={{
                   ...cellStyle,
                   background: 'rgba(96,165,250,0.06)',
-                  color: toneFor(tv, mv, row.goodHigh, row.ignoreNegative) || '#60a5fa',
+                  color: toneFor(tv, mv, row.goodHigh, row.ignoreNegative) || 'var(--accent-soft)',
                   fontWeight: 700,
                 }}>
                   {row.fmt(tv)}

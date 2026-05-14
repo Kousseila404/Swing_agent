@@ -548,7 +548,7 @@ function ProposalRow({
           {alreadyHeld && (
             <span style={{
               fontSize: '0.6rem', padding: '0.08rem 0.4rem', borderRadius: 4,
-              background: 'rgba(59,130,246,0.15)', color: '#60a5fa',
+              background: 'rgba(59,130,246,0.15)', color: 'var(--accent-soft)',
               border: '1px solid rgba(59,130,246,0.4)', fontWeight: 700,
             }} title={`Position déjà OPEN (${ctx.current_shares} shares)`}>
               HELD × {ctx.current_shares || 0}
@@ -748,7 +748,7 @@ function ActionBar({
         <strong>{nSelected}</strong> sélectionnée{nSelected > 1 ? 's' : ''}
       </div>
       {errors.length > 0 && (
-        <div style={{ fontSize: '0.75rem', color: '#f87171', flex: 1 }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--danger-soft)', flex: 1 }}>
           {errors.slice(0, 2).join(' · ')}
           {errors.length > 2 && ` · +${errors.length - 2} autre${errors.length > 3 ? 's' : ''}`}
         </div>
@@ -761,7 +761,7 @@ function ActionBar({
                 marginLeft: 'auto', padding: '0.5rem 1.1rem',
                 background: 'rgba(239,68,68,0.15)',
                 borderColor: 'rgba(239,68,68,0.5)',
-                color: '#f87171',
+                color: 'var(--danger-soft)',
                 opacity: nSelected === 0 ? 0.4 : 1,
               }}>
         {isRejecting ? '⏳…' : `✕ Rejeter${nSelected > 0 ? ` (${nSelected})` : ''}`}
@@ -824,7 +824,7 @@ function ConfirmModal({ items, isPending, onConfirm, onCancel }) {
                 <td style={{ fontWeight: 700 }}>
                   {t.ticker}
                   {t.alreadyHeld && (
-                    <span style={{ marginLeft: 6, fontSize: '0.6rem', color: '#60a5fa' }}>+held</span>
+                    <span style={{ marginLeft: 6, fontSize: '0.6rem', color: 'var(--accent-soft)' }}>+held</span>
                   )}
                   {t.overCap && (
                     <span style={{ marginLeft: 6, fontSize: '0.6rem', color: '#fb923c' }}>
