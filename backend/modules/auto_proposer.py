@@ -82,25 +82,37 @@ def _compute_support_for_ticker(ticker: str, price: float | None) -> dict[str, A
 
 
 def _yf_fallback_ohlcv(ticker: str):
-    """Fallback OHLCV via yfinance, isolé pour clarifier l'error handling.
+    """Fallback OHLCV via yfinance avec breaker + retry backoff.
 
-    Retourne None silencieusement si yfinance échoue — c'est attendu (breaker
-    YF ouvert, rate-limit, ticker inexistant) — mais log un WARN pour qu'on
+    Retourne None silencieusement si yfinance échoue (breaker OPEN, rate-limit,
+    tentatives épuisées, ticker inexistant) MAIS log avec contexte pour qu'on
     voie en prod que le DuckDB cache est vide ET que le fallback live a échoué.
+
+    Note : le retry sert pour les erreurs transitoires (timeout, connection
+    reset). Les rate-limits 429 trippent le breaker dans yf_safe_call et ne
+    sont PAS retentés (ça aggraverait le ban Yahoo).
     """
     try:
         import yfinance as yf
     except ImportError:
         logger.warning("[support_score] %s : yfinance not installed", ticker)
         return None
+    from modules.yf_retry import YFNonRetriable, yf_safe_call
     try:
-        df = yf.download(
-            ticker, period="14mo", interval="1d",
-            progress=False, auto_adjust=True, threads=False,
+        df = yf_safe_call(
+            lambda: yf.download(
+                ticker, period="14mo", interval="1d",
+                progress=False, auto_adjust=True, threads=False,
+            ),
+            label=f"download {ticker}",
+            retries=2,
         )
-    except Exception as e:  # noqa: BLE001 — yfinance lève un zoo d'exceptions
+    except YFNonRetriable:
+        # Déjà loggé par yf_safe_call avec contexte (breaker / tentatives).
+        return None
+    except Exception as e:  # noqa: BLE001 — erreurs non retriables (e.g. JSON parse)
         logger.warning(
-            "[support_score] %s yfinance fallback failed (%s): %s",
+            "[support_score] %s yfinance non-retriable error (%s): %s",
             ticker, type(e).__name__, e,
         )
         return None
@@ -124,6 +136,11 @@ DEFAULT_MIN_FREE_SLOTS = 1
 DEFAULT_MIN_PROPOSAL_USD = 250.0  # plancher : ne propose pas en-dessous
 DEFAULT_TOTAL_CAPITAL = 100_000.0
 UNIVERSE_SEVERE_HOURS = 48.0
+# Staleness ladder — alerte proactive AVANT le hard-block 48h.
+# Permet à l'ops de réagir (relancer scheduler manuellement) avant que les
+# propositions soient bloquées en silence.
+UNIVERSE_WARN_HOURS = 24.0       # WARN log
+UNIVERSE_ELEVATED_HOURS = 36.0   # ERROR log
 
 # Bug #22 fix (audit 2026-05-07) — gate fundamentals freshness.
 # Audit 2026-05-12 — distinction stricte de deux types de "stale" :
@@ -297,10 +314,27 @@ def _gate_universe_freshness() -> GateResult:
     if age_hours is None:
         return GateResult("universe_freshness", False, "updated_at non parsable")
     if age_hours >= UNIVERSE_SEVERE_HOURS:
+        logger.critical(
+            "[universe_freshness] 🚨 stale severe (%.1fh ≥ %.0fh) — propositions BLOQUÉES, "
+            "scheduler probablement arrêté",
+            age_hours, UNIVERSE_SEVERE_HOURS,
+        )
         return GateResult(
             "universe_freshness", False,
             f"stale severe ({age_hours:.1f}h ≥ {UNIVERSE_SEVERE_HOURS}h)",
             value=age_hours,
+        )
+    # Ladder d'alertes proactives — l'ops doit pouvoir réagir AVANT le hard block.
+    if age_hours >= UNIVERSE_ELEVATED_HOURS:
+        logger.error(
+            "[universe_freshness] ⚠️ stale elevated (%.1fh ≥ %.0fh) — "
+            "proche du gate %0.0fh, vérifier scheduler",
+            age_hours, UNIVERSE_ELEVATED_HOURS, UNIVERSE_SEVERE_HOURS,
+        )
+    elif age_hours >= UNIVERSE_WARN_HOURS:
+        logger.warning(
+            "[universe_freshness] stale warn (%.1fh ≥ %.0fh) — cron quotidien manqué ?",
+            age_hours, UNIVERSE_WARN_HOURS,
         )
     return GateResult(
         "universe_freshness", True,
