@@ -22,6 +22,8 @@ Structure de la réponse (minimale mais riche) :
 """
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 import numpy as np
@@ -41,6 +43,18 @@ from modules.thesis_stop import compute_thesis_status
 router = APIRouter(prefix="/api", tags=["ticker_analysis"])
 
 
+# ─────────────────────────────────────────────────────────────
+# Cache TTL price_action — la donnée 300j ne change pas plus d'une fois
+# par minute (intraday) et tout l'historique est stable depuis le close
+# précédent. Sans cache : N users → N fetches DuckDB + N fallbacks yf
+# potentiels par ticker, multiplié par les rafraîchissements navigateur.
+# ─────────────────────────────────────────────────────────────
+_PRICE_ACTION_TTL_SECONDS = 300  # 5 min — intraday "frais", off-hours suffit
+_PRICE_ACTION_CACHE: dict[str, tuple[float, dict[str, Any], Any]] = {}
+_PRICE_ACTION_CACHE_LOCK = threading.Lock()
+_PRICE_ACTION_CACHE_MAX = 1024  # safety net : trim LRU si > 1024 tickers vus
+
+
 def _safe_float(v: Any) -> float | None:
     try:
         f = float(v)
@@ -51,29 +65,85 @@ def _safe_float(v: Any) -> float | None:
         return None
 
 
-def _compute_price_action(ticker: str) -> dict[str, Any]:
-    """Lit OHLCV depuis DuckDB (fallback yfinance si vide). Retourne MA50/MA200,
-    52w high/low, current price, drawdown."""
-    history = None
+def _compute_price_action(ticker: str) -> tuple[dict[str, Any], Any]:
+    """Lit OHLCV depuis DuckDB (fallback yfinance via yf_safe_call si vide).
+    Retourne (price_action_dict, history_df).
+
+    TTL cache 5 min — la donnée 300j ne change pas intraday plus d'une fois
+    par minute, et un user qui ouvre 3-4 factsheets en 30s ne devrait pas
+    déclencher 4 fetches.
+    """
+    now = time.monotonic()
+    with _PRICE_ACTION_CACHE_LOCK:
+        cached = _PRICE_ACTION_CACHE.get(ticker)
+        if cached is not None:
+            ts, pa, hist = cached
+            if now - ts < _PRICE_ACTION_TTL_SECONDS:
+                return pa, hist
+
+    history = _load_price_history(ticker)
+    pa = _build_price_action_dict(history)
+    with _PRICE_ACTION_CACHE_LOCK:
+        # Trim LRU naïf : si on dépasse le max, jeter les 25 % plus anciens.
+        if len(_PRICE_ACTION_CACHE) >= _PRICE_ACTION_CACHE_MAX:
+            stale = sorted(_PRICE_ACTION_CACHE.items(), key=lambda kv: kv[1][0])
+            for k, _ in stale[: _PRICE_ACTION_CACHE_MAX // 4]:
+                _PRICE_ACTION_CACHE.pop(k, None)
+        _PRICE_ACTION_CACHE[ticker] = (now, pa, history)
+    return pa, history
+
+
+def _load_price_history(ticker: str):
+    """DuckDB d'abord, yfinance via yf_safe_call si vide. Erreurs typées + log.
+
+    Refactor de l'ancien `_compute_price_action` qui avait deux `except Exception`
+    nus qui avalaient les erreurs DuckDB ET les bans yfinance silencieusement.
+    """
     try:
         history = read_ohlcv(ticker, days=300)
-    except Exception:
-        pass
-    if history is None or history.empty:
-        try:
-            import yfinance as yf
-            df = yf.download(ticker, period="14mo", interval="1d",
-                             progress=False, auto_adjust=True, threads=False)
-            if df is not None and not df.empty:
-                if hasattr(df.columns, "get_level_values"):
-                    try:
-                        df.columns = df.columns.get_level_values(0)
-                    except Exception:
-                        pass
-                history = df
-        except Exception:
-            history = None
+    except (OSError, ValueError, KeyError) as e:
+        logger.warning(
+            "[ticker_analysis] %s DuckDB read failed (%s): %s",
+            ticker, type(e).__name__, e,
+        )
+        history = None
+    if history is not None and not history.empty:
+        return history
 
+    # Fallback yfinance via le helper V2.1 (breaker + retry).
+    try:
+        import yfinance as yf
+    except ImportError:
+        return None
+    from modules.yf_retry import YFNonRetriable, yf_safe_call
+    try:
+        df = yf_safe_call(
+            lambda: yf.download(
+                ticker, period="14mo", interval="1d",
+                progress=False, auto_adjust=True, threads=False,
+            ),
+            label=f"price_action {ticker}",
+            retries=2,
+        )
+    except YFNonRetriable:
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "[ticker_analysis] %s yfinance fallback failed (%s): %s",
+            ticker, type(e).__name__, e,
+        )
+        return None
+    if df is None or df.empty:
+        return None
+    if hasattr(df.columns, "get_level_values"):
+        try:
+            df.columns = df.columns.get_level_values(0)
+        except (AttributeError, IndexError):
+            pass
+    return df
+
+
+def _build_price_action_dict(history) -> dict[str, Any]:
     if history is None or history.empty or "Close" not in history.columns:
         return {"available": False}
 
@@ -103,7 +173,13 @@ def _compute_price_action(ticker: str) -> dict[str, Any]:
         "drawdown_from_high_pct": round(drawdown_pct, 2) if drawdown_pct is not None else None,
         "momentum_6m_pct": round(momentum_6m_pct, 2) if momentum_6m_pct is not None else None,
         "history_days": len(closes),
-    }, history
+    }
+
+
+def _clear_price_action_cache() -> None:
+    """Helper test/admin — vide le cache TTL price_action."""
+    with _PRICE_ACTION_CACHE_LOCK:
+        _PRICE_ACTION_CACHE.clear()
 
 
 def _compute_drift(ticker: str, scored: dict[str, Any] | None = None) -> dict[str, Any] | None:
