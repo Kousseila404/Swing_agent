@@ -13,6 +13,7 @@ import PresetBar from './common/PresetBar';
 import LastUpdated from './common/LastUpdated';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { readJSON, writeJSON } from '../utils/storage';
+import { useHashSearchParams } from '../utils/preferences';
 
 // Seuils de la règle d'achat manuelle (cf. memory user_buy_rule_manual.md) :
 // TITAN ≥ 80 nominal, override possible si TITAN ∈ [70, 80[ + signal externe.
@@ -88,25 +89,28 @@ export default function UniverseManagerPage() {
   // full = rebuild intégral (~1500 calls FMP) ; staggered (défaut) = budget 50/j.
   const [optFull, setOptFull]       = useState(false);
 
-  // Hydrate depuis localStorage au mount (sinon defaults). Le searchText est
-  // volontairement EXCLU de la persistance (saisie volatile, source de bruit).
+  // Hydrate : query params URL prioritaires, sinon localStorage, sinon defaults.
+  // Permet de partager une vue (link `#/universe?sector=tech&sort=drift`) et
+  // de F5 sans perte. searchText reste local (saisie volatile, pas d'intérêt
+  // à le partager). Pattern Seeking Alpha / Koyfin.
+  const [hashParams, setHashParams] = useHashSearchParams();
   const persistedFilters = loadPersistedFilters() || {};
-  const [sectorFilter, setSectorFilter] = useState(persistedFilters.sectorFilter ?? 'ALL');
+  const _initial = (key, fallback) => hashParams[key] ?? persistedFilters[key] ?? fallback;
+  const [sectorFilter, setSectorFilter] = useState(() => _initial('sector', 'ALL'));
   const [searchText, setSearchText]     = useState('');
-  const [sortBy, setSortBy]             = useState(persistedFilters.sortBy ?? 'titan');
+  const [sortBy, setSortBy]             = useState(() => _initial('sort', 'titan'));
   // Direction : par défaut 'desc' pour les scores (qui ont du sens en top-down).
   // Les colonnes "ascendantes par nature" (reco mean, forward_pe) inversent
   // automatiquement leur sens dans le comparateur ci-dessous.
-  const [sortDir, setSortDir]           = useState(persistedFilters.sortDir ?? 'desc');
+  const [sortDir, setSortDir]           = useState(() => _initial('dir', 'desc'));
   // 'all' = pas de filtre TITAN ; 'buy_strict' = ≥ 80 ; 'buy_override' = ≥ 70 ;
   // 'buy_strict_fscore' = ≥ 80 ET F-Score ≥ 7 (règle compound).
-  const [buyFilter, setBuyFilter]       = useState(persistedFilters.buyFilter ?? 'all');
+  const [buyFilter, setBuyFilter]       = useState(() => _initial('buy', 'all'));
   // Filtre status portefeuille : 'all' | 'held' | 'proposed' | 'free'.
-  const [statusFilter, setStatusFilter] = useState(persistedFilters.statusFilter ?? 'all');
+  const [statusFilter, setStatusFilter] = useState(() => _initial('status', 'all'));
 
-  // Persistance des filtres — debouncée 400ms pour éviter le sync localStorage
-  // à chaque keystroke (5 setState peuvent se déclencher en cascade sur un
-  // preset apply). Filtres rares (sector, sort, buy, status) → 400ms suffisent.
+  // Snapshot pour persistance (localStorage + URL). Debouncé 400ms : sync
+  // localStorage à chaque keystroke = stutter, URL replaceState coûte aussi.
   const filtersSnapshot = useMemo(
     () => ({ sectorFilter, sortBy, sortDir, buyFilter, statusFilter }),
     [sectorFilter, sortBy, sortDir, buyFilter, statusFilter],
@@ -114,6 +118,17 @@ export default function UniverseManagerPage() {
   const debouncedFilters = useDebouncedValue(filtersSnapshot, 400);
   useEffect(() => {
     savePersistedFilters(debouncedFilters);
+    // Sync URL — les défauts ('ALL', 'titan', 'desc', 'all', 'all') sont
+    // implicites → on supprime ces clés pour garder l'URL courte.
+    setHashParams({
+      sector: debouncedFilters.sectorFilter === 'ALL' ? '' : debouncedFilters.sectorFilter,
+      sort:   debouncedFilters.sortBy === 'titan' ? '' : debouncedFilters.sortBy,
+      dir:    debouncedFilters.sortDir === 'desc' ? '' : debouncedFilters.sortDir,
+      buy:    debouncedFilters.buyFilter === 'all' ? '' : debouncedFilters.buyFilter,
+      status: debouncedFilters.statusFilter === 'all' ? '' : debouncedFilters.statusFilter,
+    });
+    // setHashParams identité stable (useState setter pattern)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedFilters]);
   const [analysisTicker, setAnalysisTicker] = useState(null);
   // Trace par ticker des push manuels en cours (pour disable + spinner).

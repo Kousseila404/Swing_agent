@@ -58,6 +58,71 @@ export function loadProposalDefaults() {
   };
 }
 
+// ─────────────────────────────────────────────────────────────
+// useHashSearchParams — query-params dans le fragment URL pour rendre
+// les vues bookmarkables / partageables (pattern Seeking Alpha).
+//
+// Format URL : `#/<page>?<query>` (ex: `#/universe?sector=tech&sort=titan`).
+// Le fragment évite un re-render serveur (le serveur n'a jamais le `#`).
+//
+// Diff vs query params standards : on reste en hash routing pour
+// rétrocompat avec useHashRoute. Migration vers HTML5 history API → plus
+// tard si on lâche le hash routing.
+//
+// Le hook retourne (params, setParams) où params est un objet plat
+// `{ key: string }` (lecture) et setParams accepte un objet partiel
+// (merge non destructif — les clés non listées sont conservées).
+// ─────────────────────────────────────────────────────────────
+export function useHashSearchParams() {
+  const _read = () => {
+    if (typeof window === 'undefined') return {};
+    const h = window.location.hash || '';
+    const qIdx = h.indexOf('?');
+    if (qIdx < 0) return {};
+    const usp = new URLSearchParams(h.slice(qIdx + 1));
+    const out = {};
+    for (const [k, v] of usp.entries()) out[k] = v;
+    return out;
+  };
+
+  const [params, setParamsState] = useState(_read);
+
+  useEffect(() => {
+    const onHashChange = () => setParamsState(_read());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  // setParams : merge partiel. Les valeurs falsy ('', null, undefined)
+  // suppriment la clé pour garder l'URL courte.
+  const setParams = (patch) => {
+    if (typeof window === 'undefined') return;
+    const h = window.location.hash || '#/';
+    const qIdx = h.indexOf('?');
+    const base = qIdx >= 0 ? h.slice(0, qIdx) : h;
+    const usp = new URLSearchParams(qIdx >= 0 ? h.slice(qIdx + 1) : '');
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === '' || v === null || v === undefined) {
+        usp.delete(k);
+      } else {
+        usp.set(k, String(v));
+      }
+    }
+    const qs = usp.toString();
+    const next = qs ? `${base}?${qs}` : base;
+    if (window.location.hash !== next) {
+      // replaceState évite de polluer l'historique navigateur avec un entry
+      // par keystroke filtre. push uniquement sur changement de PAGE
+      // (useHashRoute), pas sur changement de filtres.
+      window.history.replaceState(null, '', next);
+      setParamsState(_read());
+    }
+  };
+
+  return [params, setParams];
+}
+
+
 // Sync activePage avec window.location.hash (#/<page>). Permet :
 //  - rafraîchissement F5 sans perdre l'onglet
 //  - back/forward navigateur entre pages
