@@ -19,7 +19,7 @@ import subprocess
 import sys
 import uuid
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psutil
@@ -345,7 +345,9 @@ def launch_job(cmd: list[str], name: str) -> dict:
     meta = {
         "job_id": job_id, "name": name,
         "cmd": " ".join(cmd), "pid": proc.pid,
-        "started": datetime.now().strftime("%H:%M:%S"),
+        # ISO 8601 UTC (convention CONVENTIONS.md — temps machine-readable +
+        # comparable / triable / fuseaux-safe). Avant : "%H:%M:%S" naïve local.
+        "started": datetime.now(UTC).isoformat(timespec="seconds"),
         "log_path": str(log_path),
     }
     meta_path.write_text(json.dumps(meta, indent=2))
