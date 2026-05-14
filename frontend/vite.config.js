@@ -18,4 +18,11 @@ export default defineConfig({
       },
     },
   },
+  // Vitest — la majorité des tests utils tournent en node, mais les tests
+  // de hooks (useHashSearchParams, etc.) ont besoin de window/document.
+  // jsdom est plus léger que happy-dom et suffisant pour notre surface.
+  test: {
+    environment: 'jsdom',
+    globals: false,
+  },
 })
