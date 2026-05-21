@@ -379,7 +379,8 @@ def send_health_check() -> bool:
         if upcoming:
             upcoming.sort()
             d, lbl = upcoming[0]
-            next_event_str = f"{'Aujourd\'hui' if d == 0 else f'Dans {d}j'} : <b>{lbl}</b>"
+            when = "Aujourd'hui" if d == 0 else f"Dans {d}j"
+            next_event_str = f"{when} : <b>{lbl}</b>"
     except Exception:
         pass
 

@@ -267,8 +267,8 @@ def test_include_held_flag_keeps_held_tickers(
 
     from modules import sector_metrics
     monkeypatch.setattr(sector_metrics, "get_scored_universe", lambda: {
-        "AAPL": {"sector": "Technology"},
-        "MSFT": {"sector": "Technology"},
+        "AAPL": {"sector": "Technology", "titan_composite_score": 72.0},
+        "MSFT": {"sector": "Technology", "titan_composite_score": 72.0},
     })
 
     from modules.portfolio_engine import PortfolioManager
@@ -304,7 +304,7 @@ def test_over_cap_ticker_is_exposed_not_filtered(
     # 5 tickers tous Technology → projected sector pct sera ~100% > cap 30%
     tickers = ["A", "B", "C", "D", "E"]
     monkeypatch.setattr(sector_metrics, "get_scored_universe", lambda: {
-        t: {"sector": "Technology"} for t in tickers
+        t: {"sector": "Technology", "titan_composite_score": 72.0} for t in tickers
     })
 
     from modules.portfolio_engine import PortfolioManager
@@ -360,7 +360,7 @@ def test_top_n_mode_max_holdings_exceeds_free_slots(
     from modules import sector_metrics
     tickers = [f"NEW{i}" for i in range(20)]
     monkeypatch.setattr(sector_metrics, "get_scored_universe", lambda: {
-        t: {"sector": "Industrials"} for t in tickers
+        t: {"sector": "Industrials", "titan_composite_score": 72.0} for t in tickers
     })
 
     from modules.portfolio_engine import PortfolioManager

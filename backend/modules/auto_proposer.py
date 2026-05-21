@@ -337,17 +337,17 @@ def _gate_fundamentals_staleness() -> GateResult:
         f"fallback={n_fallback}/{total} ({ratio_fallback:.0%}) | "
         f"report={n_report}/{total} ({ratio_report:.0%})"
     )
-    if ratio_fallback >= FUNDAMENTALS_STALE_MAX_RATIO:
+    if ratio_fallback > FUNDAMENTALS_STALE_MAX_RATIO:
         return GateResult(
             "fundamentals_staleness", False,
-            f"{diag} — fallback ratio ≥ "
+            f"{diag} — fallback ratio > "
             f"{FUNDAMENTALS_STALE_MAX_RATIO:.0%} (live providers down)",
             value={"fallback": ratio_fallback, "report": ratio_report},
         )
-    if ratio_report >= FUNDAMENTALS_REPORT_STALE_MAX_RATIO:
+    if ratio_report > FUNDAMENTALS_REPORT_STALE_MAX_RATIO:
         return GateResult(
             "fundamentals_staleness", False,
-            f"{diag} — report ratio ≥ "
+            f"{diag} — report ratio > "
             f"{FUNDAMENTALS_REPORT_STALE_MAX_RATIO:.0%} "
             "(blackout fundamentals provider Y-1)",
             value={"fallback": ratio_fallback, "report": ratio_report},
@@ -841,6 +841,20 @@ def plan_proposals(
             buy_input, confidence_score=_conf_score,
         ).to_dict()
 
+        # Gate buy_signal verdict : les verdicts négatifs durs (SKIP, CHEAP_JUNK,
+        # FALLING_KNIFE, NO_DATA, EARNINGS_BLACKOUT) ne doivent jamais générer
+        # de proposition — le scoring TITAN peut passer les gates mais le signal
+        # buy final doit être cohérent. WATCH est proposé pour information.
+        _bs_verdict = buy_signal_data.get("verdict", "")
+        _BS_HARD_REJECT = {"SKIP", "CHEAP_JUNK", "FALLING_KNIFE", "NO_DATA", "EARNINGS_BLACKOUT"}
+        if _bs_verdict in _BS_HARD_REJECT:
+            skipped.append({
+                "ticker": ticker,
+                "reason": f"buy_signal_{_bs_verdict.lower()}",
+                "buy_signal_verdict": _bs_verdict,
+            })
+            continue
+
         alloc = {
             **alloc,
             "suggested_sl":     levels["sl"],
@@ -883,7 +897,7 @@ def plan_proposals(
             earnings_blackout_days is not None
             and earnings_blackout_days > 0
             and days_to_e is not None
-            and 0 <= days_to_e < earnings_blackout_days
+            and -3 <= days_to_e < earnings_blackout_days
         ):
             skipped.append({
                 "ticker": ticker, "reason": "earnings_blackout",
