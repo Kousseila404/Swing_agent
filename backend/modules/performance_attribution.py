@@ -17,15 +17,23 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 import pandas as pd
 
 from modules.duckdb_journal import read_journal_df
 from modules.log import logger
 
+
 # Buckets de score (0-100). 4 quartiles classiques.
-SCORE_BUCKETS = [
+class _Bucket(TypedDict):
+    name: str
+    min: float
+    max: float
+    tone: str
+
+
+SCORE_BUCKETS: list[_Bucket] = [
     {"name": "<50",    "min":  0, "max":  50, "tone": "var(--danger)"},
     {"name": "50-70",  "min": 50, "max":  70, "tone": "var(--warning)"},
     {"name": "70-85",  "min": 70, "max":  85, "tone": "var(--accent-primary)"},
@@ -136,9 +144,9 @@ def _attribute_pillar(df: pd.DataFrame, col: str, label: str) -> dict[str, Any]:
 
     by_bucket: dict[str, list[dict[str, Any]]] = {b["name"]: [] for b in SCORE_BUCKETS}
     for row in rows:
-        b = _bucket_for(row["score"])
-        if b is not None:
-            by_bucket[b].append(row)
+        bucket_name = _bucket_for(row["score"])
+        if bucket_name is not None:
+            by_bucket[bucket_name].append(row)
 
     buckets_out: list[dict[str, Any]] = []
     for b in SCORE_BUCKETS:
@@ -317,12 +325,12 @@ def compute_attribution() -> dict[str, Any]:
 
 def _f_score_attribution(df: pd.DataFrame) -> dict[str, Any]:
     """F-Score Piotroski : champ "8/9" string. Bucketing 0-3 / 4-6 / 7-9."""
-    buckets_def = [
+    buckets_def: list[_Bucket] = [
         {"name": "0-3",  "min": 0, "max": 4, "tone": "var(--danger)"},
         {"name": "4-6",  "min": 4, "max": 7, "tone": "var(--warning)"},
         {"name": "7-9",  "min": 7, "max": 10, "tone": "var(--success)"},
     ]
-    rows = []
+    rows: list[dict[str, Any]] = []
     if "F_Score_Entry" not in df.columns:
         return {"label": "F-Score", "buckets": [], "n_total": 0}
     for _, r in df.iterrows():

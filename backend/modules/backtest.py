@@ -29,7 +29,7 @@ import math
 import statistics
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import Any, TypedDict
 
 from modules import universe_history
 from modules.log import logger
@@ -381,11 +381,24 @@ def _compute_period(
     )
 
 
+class _StatsDict(TypedDict):
+    """Sortie de `_compute_stats` — sharpe_* nullable, le reste toujours float."""
+    total_return: float
+    avg_period_return: float
+    avg_daily_return: float
+    sharpe_period: float | None
+    sharpe_daily: float | None
+    sharpe_annual: float | None
+    max_drawdown: float
+    hit_rate: float
+    annualization_factor: float
+
+
 def _compute_stats(
     periods: list[PeriodResult],
     *,
     period_days: float = 7.0,
-) -> dict[str, float]:
+) -> _StatsDict:
     """Agrège stats à partir des returns par période.
 
     Phase 3 audit (2026-05-06) — Sharpe annualisé adapté à la fréquence des
@@ -942,7 +955,8 @@ def _main() -> int:
     print(f"Hit rate          : {result.hit_rate*100:.1f}%")
     if result.benchmark_return is not None:
         print(f"Benchmark {bench:<5}   : {result.benchmark_return*100:+.2f}%")
-        print(f"Alpha             : {result.alpha*100:+.2f}% {'✅' if result.alpha > 0 else '🔴'}")
+        if result.alpha is not None:
+            print(f"Alpha             : {result.alpha*100:+.2f}% {'✅' if result.alpha > 0 else '🔴'}")
     print()
     print("=== Equity curve ===")
     for d, eq in result.equity_curve:
