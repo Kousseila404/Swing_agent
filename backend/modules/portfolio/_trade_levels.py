@@ -84,13 +84,13 @@ def suggest_trade_levels(
     if direction not in ("LONG", "SHORT"):
         return {"sl": None, "tp": None, "sl_pct": None, "tp_pct": None, "method": "unsupported_direction"}
 
-    vol_usable = (
+    # Condition inline (pas de variable intermédiaire) pour que mypy narrow
+    # `volatility_pct` à float dans la branche — sinon il reste float | None.
+    if (
         volatility_pct is not None
         and math.isfinite(volatility_pct)
         and volatility_pct > 0
-    )
-
-    if vol_usable:
+    ):
         # Vol sur horizon LT = vol_annuelle × √(horizon / 252)
         horizon_vol_frac = (volatility_pct / 100.0) * math.sqrt(
             holding_days / _TRADING_DAYS_PER_YEAR
