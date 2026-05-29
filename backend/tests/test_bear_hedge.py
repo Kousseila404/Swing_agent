@@ -27,8 +27,11 @@ def _macro(regime: str, since_days_ago: int, today: date) -> dict:
 
 
 class TestDisabled:
-    def test_skip_when_disabled(self):
-        # Default = False → toujours SKIP
+    def test_skip_when_disabled(self, monkeypatch):
+        # Depuis 2026-05-12 le défaut prod est True (config.BEAR_HEDGE_ENABLED).
+        # On force False explicitement pour tester le court-circuit "désactivé",
+        # sans dépendre du défaut de config (qui a changé et cassait ce test).
+        monkeypatch.setattr(bear_hedge, "BEAR_HEDGE_ENABLED", False, raising=False)
         d = bear_hedge.decide(macro={"confirmed_regime": "BEAR_MARKET"})
         assert d.action == "SKIP"
         assert "BEAR_HEDGE_ENABLED=False" in d.reason
