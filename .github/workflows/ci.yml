@@ -39,13 +39,16 @@ jobs:
           cp tests/fixtures/universe_minimal.json data/universe.json
 
       - name: Ruff lint
-        run: ruff check modules/ tests/ api.py tracker.py
+        # Tout le repo backend (0 erreur au 2026-05-29). Couvre désormais
+        # routers/, data_providers/, config.py, main.py — plus seulement
+        # modules/+api.py+tracker.py.
+        run: ruff check .
 
-      - name: Mypy strict (modules whitelistés dans mypy.ini)
-        # Hard fail : tout module ajouté à la section [mypy-modules.X] strict
-        # de mypy.ini doit rester sans erreur. Élargir la liste à mesure que
-        # les modules sont nettoyés.
-        run: mypy --config-file mypy.ini modules/portfolio/_utils.py
+      - name: Mypy (tout le backend — 0 erreur depuis 2026-05-29)
+        # Hard fail sur la totalité du backend. Le repo est mypy-clean ; ce gate
+        # bloque toute régression de typage (les sections strict de mypy.ini
+        # ajoutent en plus disallow_untyped_defs sur portfolio/).
+        run: mypy --config-file mypy.ini .
 
       - name: Pytest (avec seuil coverage 55%)
         run: pytest tests/ --cov=modules --cov-config=.coveragerc --cov-report=term --cov-report=xml
