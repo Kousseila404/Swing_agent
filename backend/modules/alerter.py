@@ -508,6 +508,9 @@ def _send_telegram_message_raw(
     text: str, max_retries: int = 3, retry_delay: float = 5.0,
 ) -> None:
     """Envoi brut (sans queue) — utilisé par _drain_queue et _send_telegram_message."""
+    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+        logger.warning("[Telegram] BOT_TOKEN/CHAT_ID absent — envoi ignoré")
+        return
     if len(text) > _TELEGRAM_MAX_LEN:
         logger.warning(
             f"[Telegram] Message tronqué : {len(text)} → {_TELEGRAM_MAX_LEN} caractères"

@@ -51,9 +51,12 @@ def _safe_float(v: Any) -> float | None:
         return None
 
 
-def _compute_price_action(ticker: str) -> dict[str, Any]:
+def _compute_price_action(ticker: str) -> tuple[dict[str, Any], Any]:
     """Lit OHLCV depuis DuckDB (fallback yfinance si vide). Retourne MA50/MA200,
-    52w high/low, current price, drawdown."""
+    52w high/low, current price, drawdown.
+
+    Renvoie toujours un tuple (payload, history) — l'appelant unpacke les deux.
+    history vaut None quand les données sont indisponibles (available=False)."""
     history = None
     try:
         history = read_ohlcv(ticker, days=300)
@@ -75,11 +78,11 @@ def _compute_price_action(ticker: str) -> dict[str, Any]:
             history = None
 
     if history is None or history.empty or "Close" not in history.columns:
-        return {"available": False}
+        return {"available": False}, None
 
     closes = history["Close"].dropna().astype(float).to_numpy()
     if len(closes) < 20:
-        return {"available": False}
+        return {"available": False}, None
 
     current = float(closes[-1])
     ma50 = float(np.mean(closes[-50:])) if len(closes) >= 50 else None

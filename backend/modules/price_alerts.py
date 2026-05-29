@@ -293,16 +293,18 @@ def compute_stats() -> dict[str, Any]:
         n = len(s)
         return s[n // 2] if n % 2 == 1 else (s[n // 2 - 1] + s[n // 2]) / 2.0
 
+    # _median peut renvoyer None même sur liste non-vide (valeurs non finies) —
+    # on garde la valeur calculée avant de round, pas la liste.
+    med_days = _median(days_to_fire)
+    med_disc = _median(discounts)
     return {
         "n_total":            n_total,
         "n_fired":            n_fired,
         "n_active":           n_active,
         "n_expired_unfired":  n_expired_unfired,
         "hit_rate_pct":       round(n_fired / n_total * 100.0, 1) if n_total else None,
-        "median_days_to_fire": round(_median(days_to_fire), 1)
-            if days_to_fire else None,
-        "median_discount_captured_pct": round(_median(discounts), 2)
-            if discounts else None,
+        "median_days_to_fire": round(med_days, 1) if med_days is not None else None,
+        "median_discount_captured_pct": round(med_disc, 2) if med_disc is not None else None,
     }
 
 
