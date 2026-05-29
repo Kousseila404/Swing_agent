@@ -334,7 +334,7 @@ def fetch_recent_filings(
 
     cik = ticker_to_cik(t)
     if not cik:
-        out = {"ticker": t, "cik": None, "filings": [],
+        out: dict[str, Any] = {"ticker": t, "cik": None, "filings": [],
                "n_filings": 0, "error": "cik_unknown"}
         _write_filings_cache(t, out)
         return out

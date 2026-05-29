@@ -175,8 +175,8 @@ def refresh_universe_staggered(
     existing = load_universe()
     existing_tickers: dict[str, dict[str, Any]] = existing.get("tickers") or {}
     existing_sources: dict[str, list[str]] = {}
-    for t, f in existing_tickers.items():
-        existing_sources[t] = list(f.get("source_indices") or [])
+    for t, fdata in existing_tickers.items():
+        existing_sources[t] = list(fdata.get("source_indices") or [])
 
     # 2. Tickers connus = union(existing, scraping Wikipedia actuel)
     live_sources = _collect_tickers(indices)
@@ -273,20 +273,20 @@ def refresh_universe_staggered(
     kept: dict[str, dict[str, Any]] = {}
     rejected_low_cap = 0
     rejected_no_cap = 0
-    for t, f in merged_tickers.items():
-        mc = f.get("market_cap")
+    for t, fdata in merged_tickers.items():
+        mc = fdata.get("market_cap")
         if mc is None:
             rejected_no_cap += 1
             continue
         if mc < min_market_cap:
             rejected_low_cap += 1
             continue
-        kept[t] = f
+        kept[t] = fdata
 
     # 8. Sectors : recalcul d'index inverse
     sectors: dict[str, list[str]] = {}
-    for t, f in kept.items():
-        sec = f.get("sector") or "Unknown"
+    for t, fdata in kept.items():
+        sec = fdata.get("sector") or "Unknown"
         sectors.setdefault(sec, []).append(t)
     for sec in sectors:
         sectors[sec].sort()

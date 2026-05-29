@@ -19,7 +19,7 @@ trancher automatiquement. Le tag remonte dans `/api/data_health`.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from data_providers.base import FinancialRatios
 
@@ -157,7 +157,10 @@ def sanitize_ratios(r: FinancialRatios) -> tuple[FinancialRatios, list[str]]:
       - "mcap_mismatch" si cross-check échoue
     """
     flags: list[str] = []
-    updates: dict[str, float | None] = {}
+    # dict[str, Any] (et non float | None) : les valeurs alimentent
+    # dataclasses.replace(**updates) dont les champs ont des types variés —
+    # mypy ne peut pas matcher **dict[str, float|None] contre str/int/list.
+    updates: dict[str, Any] = {}
     sector = getattr(r, "sector", None)
 
     for field, _bound in _BOUNDS.items():

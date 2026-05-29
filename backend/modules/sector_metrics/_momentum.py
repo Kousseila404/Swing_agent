@@ -123,9 +123,8 @@ def _compute_momentum_stats(close_series: Any) -> dict[str, float | None]:
 
     # Approximation Sharpe 12M-1M : les deux termes sont en % → ratio sans unité.
     # Pas de taux sans risque soustrait — cohérent avec un Momentum Score pur.
-    ra = ret_pct / vol_ann_pct
-    if not math.isfinite(ra):
-        ra = None
+    ra_val = ret_pct / vol_ann_pct
+    ra: float | None = ra_val if math.isfinite(ra_val) else None
 
     # 52-week high ratio : prix actuel (iloc[-1]) / max rolling des dernières
     # ~252 closes. Proche de 1.0 = stock près de son plus haut → anti-reversal

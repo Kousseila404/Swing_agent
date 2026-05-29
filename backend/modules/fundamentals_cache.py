@@ -256,13 +256,13 @@ class CachedFundamentalProvider(FundamentalProviderBase):
         """Si on a un cache < stale_max, le sert avec flag stale ; sinon raise."""
         entry = _store.get(ticker)
         if entry is None:
-            raise original_exc  # type: ignore[misc]
+            raise original_exc
         age = _now() - entry.get("cached_at_epoch", 0)
         if age >= self._stale_max:
-            raise original_exc  # type: ignore[misc]
+            raise original_exc
         cached = _entry_to_ratios(entry)
         if cached is None:
-            raise original_exc  # type: ignore[misc]
+            raise original_exc
         # Tag explicite : la donnée vient du cache après échec fresh, l'utilisateur
         # doit savoir qu'elle est potentiellement stale.
         cached.source_provider = f"{self.name}/stale"

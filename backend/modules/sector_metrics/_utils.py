@@ -36,21 +36,21 @@ def _safe_float(v: Any) -> float | None:
         return None
 
 
-def _median(values: list[float]) -> float | None:
+def _median(values: list[float | None]) -> float | None:
     vals = [v for v in values if v is not None and math.isfinite(v)]
     if not vals:
         return None
     return float(statistics.median(vals))
 
 
-def _stdev(values: list[float]) -> float | None:
+def _stdev(values: list[float | None]) -> float | None:
     vals = [v for v in values if v is not None and math.isfinite(v)]
     if len(vals) < 2:
         return None
     return float(statistics.pstdev(vals))
 
 
-def _mean(values: list[float]) -> float | None:
+def _mean(values: list[float | None]) -> float | None:
     vals = [v for v in values if v is not None and math.isfinite(v)]
     if not vals:
         return None

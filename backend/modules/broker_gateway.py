@@ -294,7 +294,7 @@ class PaperBroker(BrokerGateway):
         """Lit les positions OPEN depuis trade_journal.csv."""
         import pandas as pd
 
-        positions = []
+        positions: list[BrokerPosition] = []
         if not CSV_PATH.exists():
             return positions
         try:

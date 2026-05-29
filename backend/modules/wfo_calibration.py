@@ -283,9 +283,9 @@ def _optimal_weights(
     best_w_vec: tuple[float, ...] = tuple()
     for pt in _enum_simplex(len(valid_pillars), grid_step):
         w = {p: pt[i] for i, p in enumerate(valid_pillars)}
-        ic = _composite_ic(rows, w)
-        if ic is not None and ic > best_ic:
-            best_ic = ic
+        cand_ic = _composite_ic(rows, w)
+        if cand_ic is not None and cand_ic > best_ic:
+            best_ic = cand_ic
             best_w_vec = pt
 
     # Reconstitue le dict complet (piliers exclus → 0)
@@ -558,9 +558,9 @@ def _main() -> int:
 
     print("=== Poids optimaux moyens (validation OOS) ===")
     sorted_w = sorted(result.avg_weights.items(), key=lambda kv: -kv[1])
-    for p, w in sorted_w:
+    for pillar, w in sorted_w:
         bar = "█" * int(w * 60 + 0.5)
-        print(f"  {p:<20} {w:.3f}  {bar}")
+        print(f"  {pillar:<20} {w:.3f}  {bar}")
     print()
     print(f"IC moyenne TEST (out-of-sample) : {result.avg_ic_test:+.4f}")
     print()

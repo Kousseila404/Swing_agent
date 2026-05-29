@@ -37,7 +37,7 @@ from modules.log import logger
 # yfinance ≥ 0.2.x expose cette classe ; on l'importe paresseusement pour rester
 # compatible avec les versions antérieures (fallback sur détection regex).
 try:
-    from yfinance.exceptions import YFRateLimitError  # type: ignore
+    from yfinance.exceptions import YFRateLimitError
 except Exception:  # pragma: no cover — defensive
     class YFRateLimitError(Exception):  # type: ignore[no-redef]
         """Shim si la classe n'existe pas dans la version installée."""

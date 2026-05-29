@@ -93,7 +93,7 @@ def enrich_universe_with_insider(
     tmp.replace(_UNIVERSE_PATH)
 
     elapsed = time.time() - t0
-    diag = {
+    diag: dict[str, object] = {
         "n_total":    len(tickers),
         "n_enriched": n_enriched,
         "n_errors":   n_errors,

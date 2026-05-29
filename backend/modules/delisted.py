@@ -157,7 +157,7 @@ def record_diff(
                 sample_str += f", … (+{len(summary['removed']) - 10} autres)"
             # On joint le secteur quand connu pour distinguer un reshuffle
             # sectoriel (mass exit Tech ?) d'un événement diffus.
-            sectors = {}
+            sectors: dict[str, int] = {}
             for t in summary["removed"]:
                 sec = ((prev_tickers or {}).get(t) or {}).get("sector") or "?"
                 sectors[sec] = sectors.get(sec, 0) + 1

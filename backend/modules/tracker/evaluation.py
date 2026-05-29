@@ -590,9 +590,9 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                 _next_earn = (scored_universe.get(ticker) or {}).get("next_earnings_date")
             if _next_earn and pct_gain >= 10.0:
                 from datetime import date as _date
-                _s = str(_next_earn)[:10]
+                _earn_str = str(_next_earn)[:10]
                 try:
-                    _ed = _date.fromisoformat(_s)
+                    _ed = _date.fromisoformat(_earn_str)
                     _days_to_earn = (_ed - _date.today()).days
                 except ValueError:
                     _days_to_earn = None

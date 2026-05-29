@@ -210,7 +210,9 @@ api_core.CHARTS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/charts", StaticFiles(directory=str(api_core.CHARTS_DIR)), name="charts")
 
 # Exception handler typé pour les caches JSON corrompus — exposé en 503.
-app.add_exception_handler(CorruptedCacheError, api_core.corrupted_cache_handler)
+# Starlette type le handler avec Exception en base ; le nôtre est typé sur la
+# sous-classe CorruptedCacheError → faux positif connu, d'où le ignore ciblé.
+app.add_exception_handler(CorruptedCacheError, api_core.corrupted_cache_handler)  # type: ignore[arg-type]
 
 
 # ─────────────────────────────────────────────────────────────────

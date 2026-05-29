@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, TypedDict
 
 import pandas as pd
 import yfinance as yf
@@ -115,7 +115,31 @@ def _col_date(df: Any | None, idx: int) -> str | None:
         return None
 
 
-def _prev_year_ratios(tk: yf.Ticker) -> dict[str, float | None]:
+class _PrevYear(TypedDict):
+    """Sortie de `_prev_year_ratios` — ratios float nullable + 2 dates ISO str."""
+    return_on_assets_prev_year: float | None
+    debt_to_equity_prev_year: float | None
+    current_ratio_prev_year: float | None
+    shares_outstanding_prev_year: float | None
+    gross_margin_prev_year: float | None
+    fundamentals_period_end: str | None
+    fundamentals_period_end_y1: str | None
+
+
+def _empty_prev_year() -> _PrevYear:
+    """_PrevYear tout-None — init de _prev_year_ratios et fallback fail-open."""
+    return {
+        "return_on_assets_prev_year":   None,
+        "debt_to_equity_prev_year":     None,
+        "current_ratio_prev_year":      None,
+        "shares_outstanding_prev_year": None,
+        "gross_margin_prev_year":       None,
+        "fundamentals_period_end":      None,
+        "fundamentals_period_end_y1":   None,
+    }
+
+
+def _prev_year_ratios(tk: yf.Ticker) -> _PrevYear:
     """Extrait les ratios Piotroski Y-1 + dates de période fiscale depuis
     les annuels yfinance.
 
@@ -137,15 +161,7 @@ def _prev_year_ratios(tk: yf.Ticker) -> dict[str, float | None]:
     Fail-open : si un appel yfinance pète, on renvoie {} (scoring retombe
     sur le cas 4 critères absolus — pas de régression).
     """
-    out: dict[str, float | str | None] = {
-        "return_on_assets_prev_year":   None,
-        "debt_to_equity_prev_year":     None,
-        "current_ratio_prev_year":      None,
-        "shares_outstanding_prev_year": None,
-        "gross_margin_prev_year":       None,
-        "fundamentals_period_end":      None,
-        "fundamentals_period_end_y1":   None,
-    }
+    out: _PrevYear = _empty_prev_year()
     try:
         bs = tk.balance_sheet            # DataFrame annuel (cols = years desc)
         fin = tk.financials              # P&L annuel
@@ -537,7 +553,7 @@ class YFinanceProvider(FundamentalProviderBase, MarketDataProviderBase):
         # Piotroski Y-1 : un seul appel tk.balance_sheet + tk.financials qui
         # hit yfinance 1× de plus. Fail-open → pas de régression si les
         # annuels sont absents (ex: nouvelles IPOs < 1 an).
-        prev = _prev_year_ratios(tk) if tk is not None else {}
+        prev = _prev_year_ratios(tk) if tk is not None else _empty_prev_year()
         # Lot 16 — Revisions / Earnings Surprise / Dividend Safety. Fail-open.
         rev_data = _scrape_revisions_and_earnings(tk) if tk is not None else {}
         div_safety = _scrape_dividend_safety(tk, info) if tk is not None else {}
