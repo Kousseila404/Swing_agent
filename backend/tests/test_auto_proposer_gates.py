@@ -63,9 +63,11 @@ def fresh_universe_json(tmp_path, monkeypatch):
 
 @pytest.fixture
 def bull_macro(monkeypatch):
-    """load_macro renvoie BULL_MARKET / VIX bas."""
+    """load_macro renvoie BULL_MARKET / VIX bas, fraîchement daté (last_update=now)."""
     monkeypatch.setattr(api_core, "load_macro",
-                        lambda: {"confirmed_regime": "BULL_MARKET", "vix": 17.0})
+                        lambda: {"confirmed_regime": "BULL_MARKET", "vix": 17.0,
+                                 "last_update": datetime.now(UTC).replace(microsecond=0)
+                                 .isoformat().replace("+00:00", "Z")})
 
 
 @pytest.fixture
@@ -141,9 +143,13 @@ def test_regime_not_in_allowed_blocks(monkeypatch, isolated_proposals,
 def test_regime_multiplier_zero_blocks(monkeypatch, isolated_proposals,
                                         trading_allowed, cb_clean,
                                         fresh_universe_json, empty_portfolio):
-    # CRASH_PANIC accepté côté allowed_regimes mais multiplier=0 doit bloquer
+    # CRASH_PANIC accepté côté allowed_regimes mais multiplier=0 doit bloquer.
+    # last_update=now pour passer le gate de fraîcheur macro et atteindre
+    # regime_multiplier.
     monkeypatch.setattr(api_core, "load_macro",
-                        lambda: {"confirmed_regime": "CRASH_PANIC", "vix": 50.0})
+                        lambda: {"confirmed_regime": "CRASH_PANIC", "vix": 50.0,
+                                 "last_update": datetime.now(UTC).replace(microsecond=0)
+                                 .isoformat().replace("+00:00", "Z")})
     result = auto_proposer.plan_proposals(allowed_regimes=("CRASH_PANIC",))
     assert result.ok is False
     g = next(g for g in result.gates if g.name == "regime_multiplier")
@@ -162,6 +168,20 @@ def test_universe_severe_stale_blocks(tmp_path, monkeypatch, isolated_proposals,
     result = auto_proposer.plan_proposals()
     assert result.ok is False
     g = next(g for g in result.gates if g.name == "universe_freshness")
+    assert "stale severe" in g.detail
+
+
+def test_macro_stale_blocks(monkeypatch, isolated_proposals, trading_allowed,
+                            cb_clean, fresh_universe_json, empty_portfolio):
+    # Régime valide (BULL) mais macro_state périmé (last_update 72h) → bloque.
+    stale = (datetime.now(UTC) - timedelta(hours=72)).replace(microsecond=0)
+    monkeypatch.setattr(api_core, "load_macro",
+                        lambda: {"confirmed_regime": "BULL_MARKET", "vix": 17.0,
+                                 "last_update": stale.isoformat().replace("+00:00", "Z")})
+    result = auto_proposer.plan_proposals()
+    assert result.ok is False
+    g = next(g for g in result.gates if g.name == "macro_freshness")
+    assert g.ok is False
     assert "stale severe" in g.detail
 
 

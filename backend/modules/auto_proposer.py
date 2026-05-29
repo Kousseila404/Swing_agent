@@ -6,8 +6,9 @@ sous condition que **toutes** les gates de sécurité soient au vert :
     1. Killswitch nuclear non posé
     2. Circuit breaker drawdown pas en pause
     3. Régime macro ∈ liste autorisée (défaut ["BULL_MARKET"])
-    4. Multiplier macro > 0 (donc pas CRASH_PANIC)
-    5. Univers pas en stale severe (> 48 h)
+    4. macro_state pas périmé (last_update < 48 h — VIX/régime à jour)
+    5. Multiplier macro > 0 (donc pas CRASH_PANIC)
+    6. Univers pas en stale severe (> 48 h)
     6. Slots libres = max_holdings − len(open_positions) ≥ min_free_slots
     7. Cash dispo ≥ MIN_PROPOSAL_USD
 
@@ -20,6 +21,7 @@ Pure : pas d'I/O HTTP. Persiste les propositions via `proposals.enqueue_batch`.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -87,6 +89,12 @@ DEFAULT_MIN_FREE_SLOTS = 1
 DEFAULT_MIN_PROPOSAL_USD = 250.0  # plancher : ne propose pas en-dessous
 DEFAULT_TOTAL_CAPITAL = 100_000.0
 UNIVERSE_SEVERE_HOURS = 48.0
+# macro_state.json (régime + VIX) est rafraîchi par run_titan.sh step 0 chaque
+# matin. _gate_regime lit le régime/VIX mais ne vérifiait PAS leur fraîcheur :
+# si le cron macro échoue (yfinance down, host éteint), on proposait des trades
+# sur un VIX/régime périmé sans le savoir (fail-open). 48 h = tolère 1 run
+# quotidien manqué, bloque au 2e. Fail-closed comme l'univers.
+MACRO_SEVERE_HOURS = 48.0
 
 # Bug #22 fix (audit 2026-05-07) — gate fundamentals freshness.
 # Audit 2026-05-12 — distinction stricte de deux types de "stale" :
@@ -268,6 +276,51 @@ def _gate_universe_freshness() -> GateResult:
     return GateResult(
         "universe_freshness", True,
         f"age={age_hours:.1f}h",
+        value=age_hours,
+    )
+
+
+def _gate_macro_freshness() -> GateResult:
+    """Gate fraîcheur du régime macro (VIX + régime).
+
+    Complète `_gate_regime` qui valide le *contenu* (régime ∈ allowed) mais
+    pas l'*âge* : un macro_state.json figé (cron macro KO) laissait proposer
+    sur un VIX/régime périmé. Fail-closed au-delà de MACRO_SEVERE_HOURS.
+
+    Âge calculé sur `last_update`/`updated_at` (date ISO), avec fallback sur
+    le mtime du fichier si le champ est absent ou non-parsable.
+    """
+    path = api_core.MACRO_PATH
+    if not path.exists():
+        return GateResult("macro_freshness", False, "macro_state.json absent")
+
+    macro_raw = api_core.load_macro()
+    field = None
+    if isinstance(macro_raw, dict):
+        field = macro_raw.get("last_update") or macro_raw.get("updated_at")
+    _, age_days = api_core.parse_updated_at(field)
+    age_hours = age_days * 24.0 if age_days is not None else None
+
+    # Fallback mtime fichier si le champ date est absent/non-parsable.
+    if age_hours is None:
+        try:
+            age_hours = max(0.0, (time.time() - path.stat().st_mtime) / 3600.0)
+            source = "mtime"
+        except OSError as e:
+            return GateResult("macro_freshness", False, f"stat_failed: {e}")
+    else:
+        source = "last_update"
+
+    if age_hours >= MACRO_SEVERE_HOURS:
+        return GateResult(
+            "macro_freshness", False,
+            f"stale severe ({age_hours:.1f}h ≥ {MACRO_SEVERE_HOURS}h, src={source}) "
+            "— régime/VIX périmés, cron macro à vérifier",
+            value=age_hours,
+        )
+    return GateResult(
+        "macro_freshness", True,
+        f"age={age_hours:.1f}h (src={source})",
         value=age_hours,
     )
 
@@ -544,6 +597,12 @@ def plan_proposals(
     g_regime, macro_meta = _gate_regime(allowed_regimes)
     gates.append(g_regime)
     if not g_regime.ok:
+        return ProposerResult(False, gates, [], diagnostics)
+
+    # Le régime est valide en contenu — vérifier qu'il n'est pas périmé.
+    g_macro_fresh = _gate_macro_freshness()
+    gates.append(g_macro_fresh)
+    if not g_macro_fresh.ok:
         return ProposerResult(False, gates, [], diagnostics)
 
     g_mult, regime_multiplier = _gate_regime_multiplier(macro_meta)
