@@ -392,10 +392,14 @@ def decide(
     # état courant = dégradation des sources data sur ce name (delisting,
     # fournisseur en panne, fraud disclosure). Signal Buffett : *« If the
     # data goes dark, the thesis can't be trusted anymore. »*
-    confidence_drop = (
-        entry_confidence is not None and confidence_score is not None
-        and (entry_confidence - confidence_score) >= 30
+    # Delta précalculé (None si une borne manque) pour que mypy narrow le calcul
+    # ici plutôt que dans le message plus bas (où le garde booléen ne narrow pas).
+    confidence_delta = (
+        entry_confidence - confidence_score
+        if entry_confidence is not None and confidence_score is not None
+        else None
     )
+    confidence_drop = confidence_delta is not None and confidence_delta >= 30
     # Insider net sells persistent — signal Buffett-pure : les dirigeants ont
     # de l'information avant les chiffres. insider_score ≤ 20 = pression
     # vendeuse soutenue → TRIM.
@@ -411,7 +415,7 @@ def decide(
         if confidence_drop:
             reasons.append(
                 f"Chute de confiance des données : {entry_confidence}→{confidence_score}"
-                f" (-{entry_confidence - confidence_score} pts) — sources peut-être dégradées"
+                f" (-{confidence_delta} pts) — sources peut-être dégradées"
             )
         if insider_warn:
             reasons.append(

@@ -1418,21 +1418,24 @@ def _score_universe(
     # post-dq_coef) pour refléter le ranking effectif.
     #   • σ = 0 (universe dégénéré, < 2 tickers) → z = 0 pour tout le monde.
     #   • Round à 3 décimales — un z=0.000 vs 0.001 n'a pas de signification.
-    composites = [r["titan_composite_score"] for r in scored.values()]
+    # NB : `rec` (record scoré) et non `r` — `r` est déjà lié plus haut au
+    # score du pilier Risk (float), le réutiliser ici ferait croire à mypy que
+    # ces enregistrements sont des float.
+    composites = [rec["titan_composite_score"] for rec in scored.values()]
     if len(composites) >= 2:
         mu = statistics.fmean(composites)
         sigma = statistics.pstdev(composites)
         if sigma > 0:
-            for r in scored.values():
-                r["titan_composite_z"] = round(
-                    (r["titan_composite_score"] - mu) / sigma, 3
+            for rec in scored.values():
+                rec["titan_composite_z"] = round(
+                    (rec["titan_composite_score"] - mu) / sigma, 3
                 )
         else:
-            for r in scored.values():
-                r["titan_composite_z"] = 0.0
+            for rec in scored.values():
+                rec["titan_composite_z"] = 0.0
     else:
-        for r in scored.values():
-            r["titan_composite_z"] = 0.0
+        for rec in scored.values():
+            rec["titan_composite_z"] = 0.0
 
     # ── Phase 7 audit — Sector-relative composite metrics ────────────────
     # Pour la construction de portefeuille diversifié : ranker un ticker contre
@@ -1449,15 +1452,15 @@ def _score_universe(
     # de manière équitable — pas dominé par les Tech qui ont des composites
     # globalement plus élevés.
     by_sector_scored: dict[str, list[tuple[str, float]]] = {}
-    for k_, r in scored.items():
-        sec = r.get("sector") or "Unknown"
-        by_sector_scored.setdefault(sec, []).append((k_, r["titan_composite_score"]))
+    for k_, rec in scored.items():
+        sec = rec.get("sector") or "Unknown"
+        by_sector_scored.setdefault(sec, []).append((k_, rec["titan_composite_score"]))
 
     for items in by_sector_scored.values():
         n_sec = len(items)
         scores_sec = [v for _, v in items]
         # Percentile rank intra-secteur via _percentile_rank.
-        rank_input = {k_: v for k_, v in items}
+        rank_input: dict[str, float | None] = {k_: v for k_, v in items}
         sec_pct = _percentile_rank(rank_input, higher_is_better=True)
         # z-score intra-secteur (μ_sector, σ_sector).
         if n_sec >= 2:
@@ -1466,8 +1469,9 @@ def _score_universe(
         else:
             mu_sec, sig_sec = 0.0, 0.0
         for k_, score in items:
+            pct_val = sec_pct[k_]
             scored[k_]["titan_composite_sector_pct"] = (
-                round(sec_pct[k_], 2) if sec_pct[k_] is not None else None
+                round(pct_val, 2) if pct_val is not None else None
             )
             if sig_sec > 0:
                 scored[k_]["titan_composite_sector_z"] = round(

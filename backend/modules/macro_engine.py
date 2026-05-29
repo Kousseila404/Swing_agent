@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -791,7 +791,7 @@ def _load_macro_calendar() -> list:
 
 
 def is_blackout_zone(
-    check_date: datetime | None = None,
+    check_date: datetime | date | None = None,
     days_before: int = 1,
     days_after: int = 0,
 ) -> tuple[bool, str]:
@@ -813,10 +813,14 @@ def is_blackout_zone(
         - event_label → nom de l'événement le plus proche
     """
     from datetime import timedelta as _td
+    # Normalise vers un `date` pur (isinstance plutôt que hasattr pour que mypy
+    # narrow correctement et écarte le None).
     if check_date is None:
-        check_date = datetime.now().date()
-    elif hasattr(check_date, 'date'):
-        check_date = check_date.date()
+        day = datetime.now().date()
+    elif isinstance(check_date, datetime):
+        day = check_date.date()
+    else:
+        day = check_date
 
     events = _load_macro_calendar()
     for evt in events:
@@ -824,7 +828,7 @@ def is_blackout_zone(
             evt_date = datetime.strptime(evt["date"], "%Y-%m-%d").date()
             window_start = evt_date - _td(days=days_before)
             window_end   = evt_date + _td(days=days_after)
-            if window_start <= check_date <= window_end:
+            if window_start <= day <= window_end:
                 label = evt.get("label", evt.get("type", "Macro Event"))
                 logger.info(f"[MacroEngine] Zone de blackout : {label} ({evt['date']})")
                 return True, label

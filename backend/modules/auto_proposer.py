@@ -205,8 +205,9 @@ def _gate_regime(allowed_regimes: tuple[str, ...]) -> tuple[GateResult, dict[str
             or macro_raw.get("regime")
             or macro_raw.get("candidate_regime")
         )
+        vix_raw = macro_raw.get("vix")
         try:
-            vix = float(macro_raw.get("vix")) if macro_raw.get("vix") is not None else None
+            vix = float(vix_raw) if vix_raw is not None else None
         except (TypeError, ValueError):
             vix = None
 

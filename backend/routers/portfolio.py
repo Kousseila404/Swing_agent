@@ -254,8 +254,9 @@ def get_portfolio_recommendations(
             or macro_raw.get("regime")
             or macro_raw.get("candidate_regime")
         )
+        vix_raw = macro_raw.get("vix")
         try:
-            vix_value = float(macro_raw.get("vix")) if macro_raw.get("vix") is not None else None
+            vix_value = float(vix_raw) if vix_raw is not None else None
         except (TypeError, ValueError):
             vix_value = None
         if regime_label:

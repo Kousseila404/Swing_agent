@@ -175,7 +175,10 @@ def _fetch_benchmark_curve(dates: list[str], ticker: str = "SPY") -> list[dict[s
         date_to_norm: list[dict[str, Any]] = []
         for d in dates:
             try:
-                row = closes.loc[:d]
+                # Masque booléen (≤ d) plutôt que slice par label `.loc[:d]` :
+                # même résultat (forward-fill), mais évite le faux positif
+                # pandas-stubs « slice index must be an integer ».
+                row = closes[closes.index <= d]
                 if row.empty:
                     date_to_norm.append({"date": d, "spy": None})
                     continue
@@ -295,8 +298,10 @@ def _build_backtest_checks(bt: dict[str, Any]) -> list[dict[str, Any]]:
 
     # 1. Alpha net (vs SPY)
     alpha = bt.get("alpha")
-    bench = bt.get("benchmark_return")
-    total = bt.get("total_return")
+    # bench/total : défaut 0.0 (branche backtest OK — devraient exister ;
+    # défaut sûr pour l'affichage, évite un None * 100 si un champ manque).
+    bench = bt.get("benchmark_return") or 0.0
+    total = bt.get("total_return") or 0.0
     if alpha is None:
         out.append(_check(
             name="alpha_net", category=cat, status="na",
@@ -661,8 +666,8 @@ def _compute_global_verdict(
         }
 
     alpha = alpha_chk.get("value") or 0.0
-    bench = bt.get("benchmark_return")
-    total = bt.get("total_return")
+    bench = bt.get("benchmark_return") or 0.0
+    total = bt.get("total_return") or 0.0
     n_periods = bt.get("n_periods", 0)
 
     # Audit S4 (Lot 16) — gate de robustesse statistique. Tant qu'on n'a pas
