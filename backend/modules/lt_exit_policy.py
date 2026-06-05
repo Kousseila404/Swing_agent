@@ -70,6 +70,15 @@ ADD_ON_DRAWDOWN_THRESHOLD = -12.0
 # attend la stabilisation plutôt que de doubler le losing trade).
 ADD_ON_DRAWDOWN_FLOOR = -25.0
 
+# Garde-fou proximité stop (audit 2026-06-05). ADD_ON_DRAWDOWN_FLOOR raisonne
+# en drawdown depuis ENTRÉE, mais le catastrophe floor (SL technique) est
+# position-relatif et peut tomber AVANT −25 % (ex. NEM : SL à −20 % d'entrée).
+# Sans ce garde-fou, on suggérait un renfort à −17 % alors que le stop était à
+# 3 % en dessous → empiler la perte sur l'add + l'original juste avant un
+# stop-out probable. On exige une marge minimale au-dessus du SL pour renforcer.
+# Mesuré comme (current − SL) / current × 100, cohérent avec `pct_to_sl` ailleurs.
+ADD_ON_MIN_BUFFER_TO_SL_PCT = 5.0
+
 # Drawdown depuis entrée déclenchant EXIT_CATASTROPHE même si SL pas
 # touché (clamp gap overnight + conviction perdue). Aligné sur _MAX_SL_PCT.
 CATASTROPHE_DRAWDOWN_THRESHOLD = -35.0
@@ -434,9 +443,31 @@ def decide(
 
     # ── 5. ADD_ON (« Be greedy when others are fearful ») ─────────
     # Thèse INTACT + correction modérée + Support ON/NEAR → renfort.
-    if (thesis_status == "INTACT"
-            and ADD_ON_DRAWDOWN_FLOOR <= drawdown <= ADD_ON_DRAWDOWN_THRESHOLD
-            and (support_level in ("ON_SUPPORT", "NEAR_SUPPORT") or support_level is None)):
+    add_on_zone = (
+        thesis_status == "INTACT"
+        and ADD_ON_DRAWDOWN_FLOOR <= drawdown <= ADD_ON_DRAWDOWN_THRESHOLD
+        and (support_level in ("ON_SUPPORT", "NEAR_SUPPORT") or support_level is None)
+    )
+    # Garde-fou proximité stop : si le prix est trop près du catastrophe floor,
+    # on ne renforce pas (un stop-out probable emporterait l'add + l'original).
+    pct_to_sl: float | None = None
+    if stop_loss is not None and math.isfinite(stop_loss) and stop_loss > 0:
+        pct_to_sl = (current_price - stop_loss) / current_price * 100.0
+    if add_on_zone and pct_to_sl is not None and pct_to_sl < ADD_ON_MIN_BUFFER_TO_SL_PCT:
+        return LTDecision(
+            ticker=ticker, action="HOLD", severity=0,
+            reasons=[
+                f"Zone de renfort (drawdown {drawdown:+.1f}%, thèse INTACT) mais "
+                f"prix à {pct_to_sl:.1f}% du stop {stop_loss:.2f} "
+                f"(< marge mini {ADD_ON_MIN_BUFFER_TO_SL_PCT:.0f}%) — pas de "
+                f"renfort avant un stop-out probable",
+            ],
+            pct_gain=round(pct_gain, 2),
+            drawdown_from_entry_pct=round(drawdown, 2),
+            thesis_status=thesis_status, valuation_drift=valuation_drift,
+            peg_ratio=current_peg_ratio, catastrophe_hit=False,
+        )
+    if add_on_zone:
         reasons = [
             f"Thèse INTACT, drawdown {drawdown:+.1f}% sans cassure fondamentale",
         ]

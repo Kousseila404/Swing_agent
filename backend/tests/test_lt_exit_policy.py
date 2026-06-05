@@ -171,6 +171,32 @@ def test_add_on_unknown_support_still_suggested():
     assert any("inconnu" in r.lower() for r in d.reasons)
 
 
+def test_no_add_on_when_too_close_to_stop():
+    """Audit 2026-06-05 (cas NEM réel) — zone de renfort MAIS prix à <5 % du
+    stop catastrophe → HOLD, pas ADD_ON (renforcer juste avant un stop-out
+    probable empilerait la perte sur l'add)."""
+    # entry 118.07, current 97.695, SL 94.456 → drawdown −17.3 %, 3.3 % du stop.
+    d = decide(
+        ticker="NEM", entry_price=118.07, current_price=97.695,
+        stop_loss=94.456,
+        thesis={"status": "INTACT", "reasons_break": [], "reasons_warn": []},
+        support_level=None,
+    )
+    assert d.action == "HOLD"
+    assert any("stop" in r.lower() for r in d.reasons)
+
+
+def test_add_on_fires_when_stop_is_far():
+    """Même drawdown que NEM mais stop lointain (29 % en dessous) → la marge
+    est suffisante, ADD_ON doit bien se déclencher."""
+    d = decide(
+        ticker="X", entry_price=118.07, current_price=97.695, stop_loss=70.0,
+        thesis={"status": "INTACT", "reasons_break": [], "reasons_warn": []},
+        support_level="ON_SUPPORT",
+    )
+    assert d.action == "ADD_ON"
+
+
 def test_no_add_on_when_drawdown_floor_exceeded():
     """Drawdown < −25 % → on n'ajoute plus, on attend."""
     d = decide(
