@@ -400,3 +400,79 @@ def test_top_n_mode_max_holdings_exceeds_free_slots(
         max_holdings=20, min_proposal_usd=100, top_n_mode="max_holdings",
     )
     assert len(r_max.proposals) == 20
+
+
+# ─────────────────────────────────────────────────────────────────
+# Gate fundamentals_staleness — distinction latest_stale / y1_only
+# (régression 2026-06-05 : 98 % report_stale bloquait 100 % des props)
+# ─────────────────────────────────────────────────────────────────
+
+def _write_universe(tmp_path, monkeypatch, rows):
+    """rows: list de dicts {source_provider, error}. Écrit un universe.json
+    au format {tickers: {TICK: row}} et patche le chemin."""
+    p = tmp_path / "universe.json"
+    p.write_text(json.dumps({
+        "updated_at": datetime.now(UTC).replace(microsecond=0)
+            .isoformat().replace("+00:00", "Z"),
+        "tickers": {f"T{i}": row for i, row in enumerate(rows)},
+    }))
+    monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", p)
+    return p
+
+
+def test_staleness_y1_only_does_not_block(tmp_path, monkeypatch):
+    """82 % de l'univers en `period_end_y1=` (latest frais) = cas réel du
+    2026-06-05. Doit PASSER : le comparable Y-1 manquant est bénin."""
+    rows = [{
+        "source_provider": "yfinance/stale_report",
+        "error": "report_stale=fundamentals_period_end_y1=517d",
+    } for _ in range(82)]
+    rows += [{"source_provider": "yfinance", "error": ""} for _ in range(18)]
+    _write_universe(tmp_path, monkeypatch, rows)
+    g = auto_proposer._gate_fundamentals_staleness()
+    assert g.ok is True, g.detail
+    assert g.value["report_y1"] >= 0.80
+    assert g.value["report_latest"] == 0.0
+
+
+def test_staleness_latest_blackout_blocks(tmp_path, monkeypatch):
+    """90 % de l'univers avec le LATEST period_end vieux (>200j) = vrai
+    blackout provider Q-latest. Doit BLOQUER."""
+    rows = [{
+        "source_provider": "yfinance/stale_report",
+        "error": "report_stale=fundamentals_period_end=240d,"
+                 "fundamentals_period_end_y1=606d",
+    } for _ in range(90)]
+    rows += [{"source_provider": "yfinance", "error": ""} for _ in range(10)]
+    _write_universe(tmp_path, monkeypatch, rows)
+    g = auto_proposer._gate_fundamentals_staleness()
+    assert g.ok is False, g.detail
+    assert "report_latest" in g.detail
+    assert g.value["report_latest"] >= 0.85
+
+
+def test_staleness_fallback_blocks(tmp_path, monkeypatch):
+    """40 % en stale_fallback (échec live fetch) = vrai problème op. Bloque."""
+    rows = [{
+        "source_provider": "yfinance/stale_fallback", "error": "",
+    } for _ in range(40)]
+    rows += [{"source_provider": "yfinance", "error": ""} for _ in range(60)]
+    _write_universe(tmp_path, monkeypatch, rows)
+    g = auto_proposer._gate_fundamentals_staleness()
+    assert g.ok is False, g.detail
+    assert "fallback" in g.detail
+    assert g.value["fallback"] >= 0.30
+
+
+def test_staleness_y1_total_blackout_blocks(tmp_path, monkeypatch):
+    """99 % en y1_only = scénario catastrophe (total-blackout). Le garde-fou
+    à 98 % doit déclencher même pour le bucket bénin."""
+    rows = [{
+        "source_provider": "yfinance/stale_report",
+        "error": "report_stale=fundamentals_period_end_y1=517d",
+    } for _ in range(99)]
+    rows += [{"source_provider": "yfinance", "error": ""}]
+    _write_universe(tmp_path, monkeypatch, rows)
+    g = auto_proposer._gate_fundamentals_staleness()
+    assert g.ok is False, g.detail
+    assert "report_y1" in g.detail

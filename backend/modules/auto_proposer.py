@@ -21,6 +21,7 @@ Pure : pas d'I/O HTTP. Persiste les propositions via `proposals.enqueue_batch`.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -107,8 +108,22 @@ MACRO_SEVERE_HOURS = 48.0
 #     individuellement via `confidence_score` au scoring, pas un gate.
 # Avant le fix : 303/494 (61%) tickers en `report_stale_y1=494d` (cycle
 # fiscal annuel normal) bloquaient TOUTES les propositions.
+#
+# Audit 2026-06-05 — RÉGRESSION du bug ci-dessus : le bucket `report_stale`
+# mélangeait deux sous-cas radicalement différents, ce qui a re-bloqué 100 %
+# des propositions pendant ~3 semaines (98 % ≥ 85 %) :
+#   • period_end_y1=XXXd  → SEUL le comparable année-précédente manque ; le
+#     latest est FRAIS. yfinance ne sert pas d'historique annuel profond → 82 %
+#     de l'univers est dans ce cas en permanence. Totalement bénin (le scoring
+#     dégrade déjà Piotroski Y/Y et Growth YoY). NE DOIT PAS bloquer.
+#   • period_end=XXXd     → le latest LUI-MÊME est vieux (>200j). Vraie
+#     préoccupation de fraîcheur → c'est ça qu'on plafonne.
+# Fix : seul `latest_stale` compte dans le ratio bloquant ; `y1_only` n'a qu'un
+# garde-fou catastrophe (total-blackout du provider).
 FUNDAMENTALS_STALE_MAX_RATIO = 0.30        # cap stale_fallback (vrai stale)
-FUNDAMENTALS_REPORT_STALE_MAX_RATIO = 0.85 # cap report_stale (Y/Y manquant) — large car cycle fiscal normal
+FUNDAMENTALS_REPORT_STALE_MAX_RATIO = 0.85 # cap report_stale LATEST (>200j) — blackout provider Q-latest
+FUNDAMENTALS_REPORT_Y1_MAX_RATIO = 0.98    # cap report_stale Y-1 seul — garde-fou catastrophe uniquement
+_RE_LATEST_STALE = re.compile(r"period_end=\d+d")  # latest period_end vieux (≠ period_end_y1=)
 
 # Top-N mode — pilote le nombre de candidats retenus :
 #   "free_slots"   → min(max_holdings - n_open, n_bullish) — cron quotidien (défaut).
@@ -359,8 +374,9 @@ def _gate_fundamentals_staleness() -> GateResult:
             "skip (univers vide ou format inattendu)",
         )
     total = 0
-    n_fallback = 0   # vrai stale (échec live)
-    n_report = 0     # report_stale Y/Y (cycle fiscal normal)
+    n_fallback = 0       # vrai stale (échec live)
+    n_report_latest = 0  # report_stale du LATEST period_end (>200j) — vraie fraîcheur
+    n_report_y1 = 0      # report_stale du SEUL comparable Y-1 — bénin (latest frais)
     for row in tickers.values():
         if not isinstance(row, dict):
             continue
@@ -380,35 +396,58 @@ def _gate_fundamentals_staleness() -> GateResult:
         if is_fallback:
             n_fallback += 1
         elif is_report_stale:
-            n_report += 1
+            # Distinguer "latest vieux" (period_end=XXXd) de "Y-1 seul manquant"
+            # (period_end_y1=XXXd, latest frais). Seul le premier est bloquant.
+            if _RE_LATEST_STALE.search(err):
+                n_report_latest += 1
+            elif "period_end_y1=" in err:
+                n_report_y1 += 1
+            else:
+                # tag report_stale sans détail parsable → conservateur : latest.
+                n_report_latest += 1
     if total == 0:
         return GateResult(
             "fundamentals_staleness", True, "skip (aucun ticker)",
         )
     ratio_fallback = n_fallback / total
-    ratio_report = n_report / total
+    ratio_report_latest = n_report_latest / total
+    ratio_report_y1 = n_report_y1 / total
+    value = {
+        "fallback": ratio_fallback,
+        "report": ratio_report_latest,   # back-compat : "report" = bucket bloquant
+        "report_latest": ratio_report_latest,
+        "report_y1": ratio_report_y1,
+    }
     diag = (
         f"fallback={n_fallback}/{total} ({ratio_fallback:.0%}) | "
-        f"report={n_report}/{total} ({ratio_report:.0%})"
+        f"report_latest={n_report_latest}/{total} ({ratio_report_latest:.0%}) | "
+        f"report_y1={n_report_y1}/{total} ({ratio_report_y1:.0%}, bénin)"
     )
     if ratio_fallback >= FUNDAMENTALS_STALE_MAX_RATIO:
         return GateResult(
             "fundamentals_staleness", False,
             f"{diag} — fallback ratio ≥ "
             f"{FUNDAMENTALS_STALE_MAX_RATIO:.0%} (live providers down)",
-            value={"fallback": ratio_fallback, "report": ratio_report},
+            value=value,
         )
-    if ratio_report >= FUNDAMENTALS_REPORT_STALE_MAX_RATIO:
+    if ratio_report_latest >= FUNDAMENTALS_REPORT_STALE_MAX_RATIO:
         return GateResult(
             "fundamentals_staleness", False,
-            f"{diag} — report ratio ≥ "
+            f"{diag} — report_latest ratio ≥ "
             f"{FUNDAMENTALS_REPORT_STALE_MAX_RATIO:.0%} "
-            "(blackout fundamentals provider Y-1)",
-            value={"fallback": ratio_fallback, "report": ratio_report},
+            "(blackout provider Q-latest)",
+            value=value,
+        )
+    if ratio_report_y1 >= FUNDAMENTALS_REPORT_Y1_MAX_RATIO:
+        return GateResult(
+            "fundamentals_staleness", False,
+            f"{diag} — report_y1 ratio ≥ "
+            f"{FUNDAMENTALS_REPORT_Y1_MAX_RATIO:.0%} "
+            "(total-blackout fundamentals provider)",
+            value=value,
         )
     return GateResult(
-        "fundamentals_staleness", True, diag,
-        value={"fallback": ratio_fallback, "report": ratio_report},
+        "fundamentals_staleness", True, diag, value=value,
     )
 
 
