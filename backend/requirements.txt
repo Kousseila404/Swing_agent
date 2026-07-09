@@ -1,3 +1,4 @@
+alpaca-py==0.43.2
 alembic==1.16.5
 anyio==4.12.1
 asttokens==3.0.1

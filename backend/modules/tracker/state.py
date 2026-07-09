@@ -241,6 +241,7 @@ def save_equity_state(starting_equity: float) -> None:
         "starting_equity": starting_equity,
         "date": _date.today().isoformat(),
     }
-    with open(EQUITY_STATE_PATH, "w", encoding="utf-8") as fh:
-        json.dump(state, fh, indent=2)
+    tmp = EQUITY_STATE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp.replace(EQUITY_STATE_PATH)
     logger.info(f"[Killswitch] STARTING_EQUITY enregistré : ${starting_equity:,.2f}")

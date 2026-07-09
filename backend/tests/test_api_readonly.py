@@ -16,8 +16,13 @@ import api
 from modules import api_core
 
 
+_TEST_TOKEN = "test-readonly-token"
+_AUTH_HEADERS = {"Authorization": f"Bearer {_TEST_TOKEN}"}
+
+
 def _redirect_paths_to_tmp(monkeypatch, tmp_path: Path) -> None:
     """Redirige tous les caches JSON critiques vers tmp_path (état vide)."""
+    monkeypatch.setattr(api_core, "API_TOKEN", _TEST_TOKEN)
     for attr, name in [
         ("EQUITY_PATH", "equity_state.json"),
         ("TRADING_PATH", "trading_state.json"),
@@ -121,7 +126,7 @@ def test_macro_happy_path(monkeypatch, tmp_path: Path):
 
 def test_portfolio_empty_journal(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/portfolio").json()
+    body = TestClient(api.app).get("/api/portfolio", headers=_AUTH_HEADERS).json()
     assert body["journal"] == []
     assert body["open_positions"] == []
     assert body["closed_trades"] == []
@@ -135,7 +140,7 @@ def test_portfolio_empty_journal(monkeypatch, tmp_path: Path):
 
 def test_equity_curve_empty_journal(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/equity_curve").json()
+    body = TestClient(api.app).get("/api/equity_curve", headers=_AUTH_HEADERS).json()
     assert body["curve"] == []
     assert body["initial_equity"] == api_core.INITIAL_CAPITAL
     assert body["final_equity"] == api_core.INITIAL_CAPITAL
@@ -147,7 +152,7 @@ def test_equity_curve_empty_journal(monkeypatch, tmp_path: Path):
 
 def test_performance_metrics_empty_journal(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/performance_metrics").json()
+    body = TestClient(api.app).get("/api/performance_metrics", headers=_AUTH_HEADERS).json()
     assert body["total_closed"] == 0
     assert body["wins"] == 0
     assert body["losses"] == 0

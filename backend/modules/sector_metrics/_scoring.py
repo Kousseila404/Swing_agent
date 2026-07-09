@@ -131,14 +131,23 @@ _NEUTRAL_SCORE = 50.0
 #   Growth    0.14 → 0.13
 #   Revisions 0.12 → 0.11
 #   Insider   ----  → 0.08 (NEW)
+#
+# Lot 18 (2026-07-09) — IC diagnostic empirique sur 44 snapshots (2026-04-22→06-05).
+# Sentiment IC20j = −0.108 (19 % fenêtres positives) → seul pilier activement
+# nuisible à tous les horizons. Neutralisé : poids 3 % → 0 %.
+# Redistribution : Momentum +2 % (IC=+0.119, meilleur prédicteur), Revisions +1 %
+# (IC=+0.075, le plus stable, 100 % fenêtres positives).
+# Guard : Quality/Value NON réduits — IC négatif régime-bull (tautologique),
+# protection bear prouvée académiquement. Un re-rééquilibrage durable requiert
+# ≥ 60 jours + plusieurs régimes via WFO.
 _W_TITAN_QUALITY    = 0.18
 _W_TITAN_VALUE      = 0.13
 _W_TITAN_RISK       = 0.10
-_W_TITAN_SENTIMENT  = 0.03
-_W_TITAN_MOMENTUM   = 0.15
+_W_TITAN_SENTIMENT  = 0.00   # neutralisé — IC −0.108 (Lot 18)
+_W_TITAN_MOMENTUM   = 0.17   # +0.02 (Lot 18, IC +0.119)
 _W_TITAN_PIOTROSKI  = 0.09
 _W_TITAN_GROWTH     = 0.13
-_W_TITAN_REVISIONS  = 0.11
+_W_TITAN_REVISIONS  = 0.12   # +0.01 (Lot 18, IC +0.075 stable)
 _W_TITAN_INSIDER    = 0.08
 
 # Pansement Sentiment — si reco+upside tous deux absents (FMP stable), on

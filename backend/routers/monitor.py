@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api", tags=["monitor"])
 
 
 @router.get("/monitor/preview")
-def preview_alerts() -> dict[str, Any]:
+def preview_alerts(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
     """Dry run : scanne positions OPEN et retourne les signaux sans envoyer."""
     return monitor_alerts.run_daily_monitor(dry_run=True)
 
@@ -44,7 +44,7 @@ def run_alerts(
 
 
 @router.get("/thesis_status")
-def thesis_status_all() -> dict[str, Any]:
+def thesis_status_all(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
     """Vue cockpit : thesis_status pour toutes les positions OPEN.
 
     Permet à la UI Portfolio de surfacer en un coup d'œil les positions BROKEN
@@ -353,7 +353,7 @@ def _build_decisions_for_open_positions() -> tuple[list[dict[str, Any]], dict[st
 
 
 @router.get("/lt_decision")
-def lt_decision_all() -> dict[str, Any]:
+def lt_decision_all(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
     """Décisions LT (refonte 2026-04-29) pour toutes les positions OPEN.
 
     Agrège thesis_stop + drawdown + survalorisation + signal Buffett d'ADD_ON
@@ -387,7 +387,7 @@ def lt_decision_all() -> dict[str, Any]:
 
 
 @router.get("/lt_decision/{ticker}")
-def lt_decision_one(ticker: str) -> dict[str, Any]:
+def lt_decision_one(ticker: str, _auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
     """Décision LT pour un ticker précis (pour TickerAnalysisModal)."""
     ticker = (ticker or "").upper().strip()
     if not ticker:

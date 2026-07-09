@@ -55,7 +55,7 @@ def _journal_etag() -> str | None:
 
 
 @router.get("/portfolio", response_model=PortfolioResponse)
-def get_portfolio(request: Request, response: Response):
+def get_portfolio(request: Request, response: Response, _auth: None = Security(api_core.require_auth)):
     """Journal CSV complet + equity state + positions ouvertes."""
     etag = _journal_etag()
     if etag:
@@ -90,7 +90,7 @@ def get_portfolio(request: Request, response: Response):
 
 
 @router.get("/equity_curve", response_model=EquityCurveResponse)
-def get_equity_curve(request: Request, response: Response):
+def get_equity_curve(request: Request, response: Response, _auth: None = Security(api_core.require_auth)):
     """Courbe d'équité calculée depuis le journal des trades clôturés."""
     etag = _journal_etag()
     if etag:
@@ -121,7 +121,7 @@ def get_equity_curve(request: Request, response: Response):
 
 
 @router.get("/performance_metrics", response_model=PerformanceMetricsResponse)
-def get_performance_metrics(request: Request, response: Response):
+def get_performance_metrics(request: Request, response: Response, _auth: None = Security(api_core.require_auth)):
     """Agrégats PnL réalisés + ratios (Sharpe/Sortino/Calmar/DD/Expectancy)."""
     etag = _journal_etag()
     if etag:
@@ -173,6 +173,7 @@ def get_portfolio_recommendations(
     max_holdings: int = 20,
     allow_fractional_shares: bool = False,
     sector: str | None = None,
+    _auth: None = Security(api_core.require_auth),
 ):
     """
     Plan d'achat recommandé — top `max_holdings` actions en tendance haussière

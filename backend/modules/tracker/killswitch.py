@@ -171,8 +171,9 @@ def _set_trading_blocked(blocked: bool, *, peak_equity: float | None = None) -> 
                 state["peak_equity"] = float(old["peak_equity"])
         except Exception:
             pass
-    with open(TRADING_STATE_PATH, "w", encoding="utf-8") as fh:
-        json.dump(state, fh, indent=2)
+    tmp = TRADING_STATE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp.replace(TRADING_STATE_PATH)
 
 
 def estimate_portfolio_equity(df: pd.DataFrame) -> float:
