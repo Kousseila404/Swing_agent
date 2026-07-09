@@ -157,8 +157,9 @@ def write_heartbeat(cycle_status: str = "ok") -> None:
             "pid":       os.getpid(),
             "status":    cycle_status,
         }
-        with open(HEARTBEAT_PATH, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
+        tmp = HEARTBEAT_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(HEARTBEAT_PATH)
     except Exception as exc:
         logger.debug(f"[Heartbeat] Erreur écriture : {exc}")
 
@@ -196,8 +197,9 @@ def save_cb_state(cb: DrawdownCircuitBreaker, multiplier: float) -> None:
             "updated_at":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         CB_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(CB_STATE_PATH, "w", encoding="utf-8") as fh:
-            json.dump(state, fh, indent=2)
+        tmp = CB_STATE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        tmp.replace(CB_STATE_PATH)
     except Exception as exc:
         logger.debug(f"[CircuitBreaker] Erreur sauvegarde état : {exc}")
 

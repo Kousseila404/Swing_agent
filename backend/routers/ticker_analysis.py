@@ -26,8 +26,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Security
 
+from modules import api_core
 from modules.buy_signal import compute_buy_signal
 from modules.dividend_safety import compute_dividend_safety
 from modules.earnings_surprise import compute_earnings_surprise_score
@@ -462,7 +463,7 @@ def _compute_flags(scored: dict[str, Any], price_action: dict[str, Any]) -> list
 
 
 @router.get("/ticker_analysis/{ticker}")
-def ticker_analysis(ticker: str) -> dict[str, Any]:
+def ticker_analysis(ticker: str, _auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
     """Factsheet structurée d'un ticker — 100 % données existantes, no IA."""
     ticker = ticker.upper().strip()
     if not ticker or not ticker.isalnum():

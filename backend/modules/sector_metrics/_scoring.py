@@ -140,15 +140,24 @@ _NEUTRAL_SCORE = 50.0
 # Guard : Quality/Value NON réduits — IC négatif régime-bull (tautologique),
 # protection bear prouvée académiquement. Un re-rééquilibrage durable requiert
 # ≥ 60 jours + plusieurs régimes via WFO.
+#
+# Lot 19 (2026-07-09) — IC diagnostic sur 78 snapshots (2026-04-22→07-09).
+# Insider : IC20j = −0.033 (20 % positif), IC30j = −0.040 (4 % positif) →
+# nuisible aux deux horizons, même profil que Sentiment. 8 % → 4 %.
+# Piotroski : IC20j = +0.028 (74 % positif), IC30j = +0.038 (98 % positif) →
+# le signal le plus STABLE de l'univers (near-zero variance d'IC entre fenêtres).
+# Signal fondamental académique robuste (Piotroski 2000, répliqué 20+ ans).
+# 9 % → 13 % (+4 % récupérés de Insider).
+# Composite IC ≈ 0 (20j) / −0.010 (30j) → Insider le diluait autant que Sentiment.
 _W_TITAN_QUALITY    = 0.18
 _W_TITAN_VALUE      = 0.13
 _W_TITAN_RISK       = 0.10
 _W_TITAN_SENTIMENT  = 0.00   # neutralisé — IC −0.108 (Lot 18)
 _W_TITAN_MOMENTUM   = 0.17   # +0.02 (Lot 18, IC +0.119)
-_W_TITAN_PIOTROSKI  = 0.09
+_W_TITAN_PIOTROSKI  = 0.13   # +0.04 (Lot 19, IC +0.038, 98 % fenêtres+)
 _W_TITAN_GROWTH     = 0.13
 _W_TITAN_REVISIONS  = 0.12   # +0.01 (Lot 18, IC +0.075 stable)
-_W_TITAN_INSIDER    = 0.08
+_W_TITAN_INSIDER    = 0.04   # −0.04 (Lot 19, IC −0.040, 4 % fenêtres+)
 
 # Pansement Sentiment — si reco+upside tous deux absents (FMP stable), on
 # renormalise Q/V/R/M/P/G/Revisions/Insider en préservant leur ratio relatif.
