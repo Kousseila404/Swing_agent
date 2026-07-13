@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 import api
 from modules import api_core
 
-
 _TEST_TOKEN = "test-readonly-token"
 _AUTH_HEADERS = {"Authorization": f"Bearer {_TEST_TOKEN}"}
 
