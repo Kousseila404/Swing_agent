@@ -197,6 +197,98 @@ def test_expire_pending_idempotent(isolated_proposals):
     assert proposals.expire_pending() == 0
 
 
+# ─────────────────────────────────────────────────────────────────
+# expire_stale_pending — purge par âge (created_at), indépendante de expires_at.
+# Audit 2026-07-16 : sans ça, un pending jamais traité par l'utilisateur bloque
+# indéfiniment son propre ticker (dédup) et fige l'écran Propositions sur les
+# mêmes noms (score/prix figés à la création).
+# ─────────────────────────────────────────────────────────────────
+
+def test_expire_stale_pending_marks_overdue_by_age(isolated_proposals, monkeypatch):
+    monkeypatch.setenv("PENDING_MAX_AGE_DAYS", "7")
+    p = _mk("AAPL")
+    old = datetime.now(UTC) - timedelta(days=8)
+    p.created_at = old.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    proposals.enqueue_batch([p])
+
+    n = proposals.expire_stale_pending()
+    assert n == 1
+    items = proposals.list_all()
+    assert items[0]["status"] == "expired"
+    assert items[0]["decided_by"] == "system"
+    assert items[0]["rejection_reason"] == "stale_max_age"
+
+
+def test_expire_stale_pending_keeps_recent(isolated_proposals, monkeypatch):
+    monkeypatch.setenv("PENDING_MAX_AGE_DAYS", "7")
+    proposals.enqueue_batch([_mk("AAPL")])  # created_at = now
+    assert proposals.expire_stale_pending() == 0
+    assert proposals.list_all(status="pending")[0]["ticker"] == "AAPL"
+
+
+def test_expire_stale_pending_idempotent(isolated_proposals, monkeypatch):
+    monkeypatch.setenv("PENDING_MAX_AGE_DAYS", "7")
+    p = _mk("AAPL")
+    old = datetime.now(UTC) - timedelta(days=10)
+    p.created_at = old.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    proposals.enqueue_batch([p])
+    assert proposals.expire_stale_pending() == 1
+    assert proposals.expire_stale_pending() == 0
+
+
+def test_expire_stale_pending_disabled_when_zero(isolated_proposals, monkeypatch):
+    monkeypatch.setenv("PENDING_MAX_AGE_DAYS", "0")
+    p = _mk("AAPL")
+    old = datetime.now(UTC) - timedelta(days=30)
+    p.created_at = old.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    proposals.enqueue_batch([p])
+    assert proposals.expire_stale_pending() == 0
+    assert proposals.list_all(status="pending")[0]["ticker"] == "AAPL"
+
+
+def test_expire_stale_pending_default_7d_when_env_unset(isolated_proposals, monkeypatch):
+    monkeypatch.delenv("PENDING_MAX_AGE_DAYS", raising=False)
+    p = _mk("AAPL")
+    old = datetime.now(UTC) - timedelta(days=7, hours=1)
+    p.created_at = old.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    proposals.enqueue_batch([p])
+    assert proposals.expire_stale_pending() == 1
+
+
+def test_list_all_triggers_stale_pending_sweep(isolated_proposals, monkeypatch):
+    """`list_all` doit purger les stale au même titre que `expire_pending`."""
+    monkeypatch.setenv("PENDING_MAX_AGE_DAYS", "7")
+    p = _mk("AAPL")
+    old = datetime.now(UTC) - timedelta(days=8)
+    p.created_at = old.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    proposals.enqueue_batch([p])
+
+    items = proposals.list_all()
+    assert items[0]["status"] == "expired"
+
+
+def test_enqueue_batch_purges_stale_pending_before_dedup(isolated_proposals, monkeypatch):
+    """Un ticker resté pending > PENDING_MAX_AGE_DAYS ne doit plus bloquer sa
+    propre case : le prochain enqueue_batch le purge d'abord puis insère la
+    proposition fraîche (score/prix à jour) au lieu de la skipper en dédup.
+    """
+    monkeypatch.setenv("PENDING_MAX_AGE_DAYS", "7")
+    stale = _mk("NVDA", entry=100.0)
+    old = datetime.now(UTC) - timedelta(days=9)
+    stale.created_at = old.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    inserted_stale = proposals.enqueue_batch([stale])
+    assert len(inserted_stale) == 1  # inséré (le sweep tourne AVANT, sur la file encore vide)
+
+    fresh = _mk("NVDA", entry=150.0)  # nouveau prix, cycle du jour
+    inserted = proposals.enqueue_batch([fresh])
+    assert len(inserted) == 1
+    assert inserted[0]["entry"] == 150.0
+
+    pending = proposals.list_all(status="pending")
+    assert len(pending) == 1
+    assert pending[0]["entry"] == 150.0
+
+
 def test_corrupt_file_recovered_with_backup(isolated_proposals):
     p_path, _audit = isolated_proposals
     p_path.parent.mkdir(parents=True, exist_ok=True)

@@ -104,6 +104,61 @@ def _win_cooldown_days() -> float:
         return 14.0
 
 
+# Staleness sweep (audit 2026-07-16) — le TTL classique (`expires_at`) est
+# désactivé par défaut depuis 2026-05-07 (doctrine : ne pas faire disparaître
+# silencieusement un choix). Effet de bord découvert en usage réel : sans
+# aucune limite, les proposals pending s'accumulent indéfiniment (44 pending,
+# la plus vieille à 17j) avec `titan_score`/prix figés à la création — l'écran
+# Propositions se fige sur les mêmes noms au lieu de refléter le scoring du
+# jour. `PENDING_MAX_AGE_DAYS` (défaut 7j, aligné sur le cycle de rotation
+# fondamentaux d'universe_scheduler) purge ces pending par ÂGE (`created_at`),
+# indépendamment de `expires_at` — couvre aussi bien les nouvelles créations
+# que le backlog déjà en file. Le ticker redevient candidat au prochain cycle
+# auto_proposer avec un score/prix frais. 0 = désactivé (legacy strict).
+def _pending_max_age_days() -> float:
+    raw = (os.getenv("PENDING_MAX_AGE_DAYS") or "").strip()
+    if not raw:
+        return 7.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 7.0
+
+
+def expire_stale_pending() -> int:
+    """Expire les propositions pending dont `created_at` dépasse
+    `PENDING_MAX_AGE_DAYS`, sans égard pour `expires_at` (TTL classique).
+
+    Idempotent, sûr à appeler à chaque lecture (`list_all`) ou avant enqueue
+    (`enqueue_batch`) — no-op si rien à expirer. Retourne le nombre expiré.
+    """
+    max_age_days = _pending_max_age_days()
+    if max_age_days <= 0:
+        return 0
+    cutoff_iso = _iso(_now_utc() - timedelta(days=max_age_days))
+    expired_count = 0
+    with FileLock(str(PROPOSALS_LOCK_PATH), timeout=10):
+        items = _read_all_unlocked()
+        changed = False
+        for item in items:
+            if item.get("status") != "pending":
+                continue
+            if (item.get("created_at") or "") < cutoff_iso:
+                item["status"] = "expired"
+                item["decided_at"] = _iso(_now_utc())
+                item["decided_by"] = "system"
+                item["rejection_reason"] = "stale_max_age"
+                expired_count += 1
+                changed = True
+                _append_audit(
+                    "expired", item,
+                    {"decided_by": "system", "reason": "stale_max_age"},
+                )
+        if changed:
+            _write_all_unlocked(_trim_live_history(items))
+    return expired_count
+
+
 def _recently_closed_tickers(cutoff: datetime) -> set[str]:
     """Tickers dont un trade WIN/LOSS a un Exit_Date >= cutoff (local naive).
 
@@ -284,7 +339,11 @@ def make_proposal(
 
 
 def enqueue_batch(proposals: Iterable[Proposal]) -> list[dict[str, Any]]:
-    """Ajoute un lot de propositions à la file. Trois règles de dédup :
+    """Ajoute un lot de propositions à la file.
+
+    Purge d'abord les pending périmés par âge (`expire_stale_pending`,
+    PENDING_MAX_AGE_DAYS défaut 7j — audit 2026-07-16) puis applique trois
+    règles de dédup :
 
     1. **Pending actif** : si un ticker a déjà une proposition pending, on skip.
     2. **Cooldown anti-veto** (désactivé par défaut depuis 2026-05-07) : si
@@ -314,6 +373,10 @@ def enqueue_batch(proposals: Iterable[Proposal]) -> list[dict[str, Any]]:
         # Trade journal écrit en local naive (DATE_FMT), on compare en local naive.
         win_cutoff_local = datetime.now() - timedelta(days=win_cooldown_days)
         recent_closed = _recently_closed_tickers(win_cutoff_local)
+
+    # Purge d'abord les pending périmés (âge) — sinon un ticker resté pending
+    # 3 semaines bloque indéfiniment sa propre case via le dédup ci-dessous.
+    expire_stale_pending()
 
     inserted: list[dict[str, Any]] = []
     PROPOSALS_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -365,7 +428,8 @@ def list_all(status: str | None = None) -> list[dict[str, Any]]:
     Effectue un sweep `expire_pending` à la lecture pour qu'une UI qui poll
     régulièrement voie les expirations sans dépendre d'un cron séparé.
     """
-    expire_pending()  # prend son propre lock — non-réentrant
+    expire_pending()        # prend son propre lock — non-réentrant
+    expire_stale_pending()  # idem — purge par âge (created_at)
     with FileLock(str(PROPOSALS_LOCK_PATH), timeout=10):
         items = _read_all_unlocked()
     if status:
