@@ -44,7 +44,7 @@ def is_market_hours() -> bool:
             from zoneinfo import ZoneInfo  # py3.9+
         except ImportError:
             import pytz as _pytz
-            ZoneInfo = _pytz.timezone  # type: ignore[misc]  # noqa: N806  (fallback py<3.9)
+            ZoneInfo = _pytz.timezone  # type: ignore[misc,assignment]  # noqa: N806  (fallback py<3.9)
 
         ny = ZoneInfo("America/New_York")
         now = datetime.now(ny)
