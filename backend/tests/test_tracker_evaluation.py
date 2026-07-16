@@ -28,7 +28,7 @@ def _isolate(monkeypatch, tmp_path: Path):
     # Stub broker (évite dépendance externe)
     class _StubBroker:
         name = "PaperBroker"
-        def close_position(self, *a, **k): pass
+        def close_position(self, *a, **k): return True
         def update_stop_loss(self, *a, **k): pass
     import modules.broker_gateway as bg
     monkeypatch.setattr(bg, "get_broker", lambda: _StubBroker())
@@ -83,6 +83,27 @@ def test_evaluate_long_sl_hit(monkeypatch):
     out, closed, _ = evaluation.evaluate_trades(df)
     assert closed == 1
     assert out.iloc[0]["Status"] == "LOSS"
+
+
+def test_evaluate_long_tp_hit_unconfirmed_fill_stays_open(monkeypatch):
+    """LONG : prix >= TP mais broker.close_position renvoie False (fill non
+    confirmé) -> le journal ne doit PAS marquer la position close. Régression
+    du bug 2026-07-16 : un fill non confirmé était marqué WIN/LOSS immédiatement,
+    créant une exposition réelle non comptabilisée (position toujours ouverte
+    côté broker) + un ré-import fantôme au sync suivant."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 111.0)
+
+    class _UnconfirmedBroker:
+        name = "AlpacaBroker"
+        def close_position(self, *a, **k): return False
+        def update_stop_loss(self, *a, **k): pass
+    import modules.broker_gateway as bg
+    monkeypatch.setattr(bg, "get_broker", lambda: _UnconfirmedBroker())
+
+    df = _df(_open_trade(Ticker="AAPL", Entry=100, Stop_Loss=95, Take_Profit=110))
+    out, closed, _ = evaluation.evaluate_trades(df)
+    assert closed == 0
+    assert out.iloc[0]["Status"] == "OPEN"
 
 
 def test_evaluate_long_in_range_stays_open(monkeypatch):
