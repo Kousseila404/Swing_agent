@@ -629,11 +629,22 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
 
         if days_held >= max_holding_days:
             status = "WIN" if pct_gain > 0 else "LOSS"
+            confirmed = False
             try:
                 from modules.broker_gateway import get_broker
-                get_broker().close_position(ticker, current_price, status, direction, update_csv=False)
+                confirmed = get_broker().close_position(ticker, current_price, status, direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Timeout: {e}")
+            if not confirmed:
+                # Ordre de clôture soumis mais fill non confirmé — la position
+                # reste économiquement OPEN. On ne touche PAS le journal ici ;
+                # sync_fills_from_alpaca la réconciliera au prochain cycle
+                # (tourne avant evaluate_trades, cf. cycle.py).
+                logger.info(
+                    f"⏰ [{ticker}] TIMEOUT déclenché mais fill non confirmé — "
+                    "réconciliation différée au prochain cycle"
+                )
+                continue
             df.at[idx, "Status"]      = status
             df.at[idx, "Exit_Price"]  = round(current_price, 6)
             df.at[idx, "Exit_Date"]   = now_str
@@ -753,11 +764,18 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             is_loss = current_price <= sl
 
         if is_win:
+            confirmed = False
             try:
                 from modules.broker_gateway import get_broker
-                get_broker().close_position(ticker, current_price, "WIN", direction, update_csv=False)
+                confirmed = get_broker().close_position(ticker, current_price, "WIN", direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Win Close: {e}")
+            if not confirmed:
+                logger.info(
+                    f"🎯 [{ticker}] TP_HIT déclenché mais fill non confirmé — "
+                    "réconciliation différée au prochain cycle"
+                )
+                continue
             df.at[idx, "Status"]      = "WIN"
             df.at[idx, "Exit_Price"]  = round(current_price, 6)
             df.at[idx, "Exit_Date"]   = now_str
@@ -804,11 +822,18 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                     f"🔒 [{ticker}] TS PROFIT LOCKED : exit clampé@SL={current_price:.4f} "
                     f"(entry={entry:.4f}, P&L comptable={pct_gain_final:+.2f}%) → WIN"
                 )
+            confirmed = False
             try:
                 from modules.broker_gateway import get_broker
-                get_broker().close_position(ticker, current_price, sl_status, direction, update_csv=False)
+                confirmed = get_broker().close_position(ticker, current_price, sl_status, direction, update_csv=False)
             except Exception as e:
                 logger.error(f"[{ticker}] Erreur Broker Loss Close: {e}")
+            if not confirmed:
+                logger.info(
+                    f"🛑 [{ticker}] SL/TS déclenché mais fill non confirmé — "
+                    "réconciliation différée au prochain cycle"
+                )
+                continue
             df.at[idx, "Status"]      = sl_status
             df.at[idx, "Exit_Price"]  = round(current_price, 6)
             df.at[idx, "Exit_Date"]   = now_str
