@@ -75,6 +75,7 @@ class ApproveBatchItem(BaseModel):
 
 class ApproveBatchRequest(BaseModel):
     items: list[ApproveBatchItem] = Field(default_factory=list)
+    decided_by: str = Field(default="user", max_length=40)
 
 
 class ApproveBatchResult(BaseModel):
@@ -802,7 +803,7 @@ def approve_proposals_batch(
         # qui re-fetch entre-temps de voir l'état intermédiaire.
         try:
             prop = proposals.update_status(
-                entry_req.id, "approved", decided_by="user",
+                entry_req.id, "approved", decided_by=req.decided_by,
             )
         except ValueError as e:
             results.append(ApproveBatchResult(
@@ -889,7 +890,7 @@ def approve_proposals_batch(
         try:
             proposals.update_status(
                 entry_req.id, "executed",
-                decided_by="user", order_id=br.order_id,
+                decided_by=req.decided_by, order_id=br.order_id,
             )
         except ValueError as e:
             logger.error(
