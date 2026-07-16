@@ -589,6 +589,14 @@ class AlpacaBroker(BrokerGateway):
         except Exception as exc:
             logger.warning(f"[AlpacaBroker] _cancel_bracket_children {ticker} : {exc}")
 
+    # Nombre de tentatives / délai pour confirmer le fill réel d'un ordre de
+    # clôture avant de considérer la position comme close. Un market order
+    # Alpaca fill quasi-instantanément en heures de marché (paper ou live) —
+    # cette fenêtre couvre la latence normale sans bloquer le cycle tracker
+    # (appelé toutes les 2 min, cf. crontab).
+    _CLOSE_CONFIRM_ATTEMPTS = 5
+    _CLOSE_CONFIRM_DELAY_SEC = 1.5
+
     def close_position(
         self,
         ticker: str,
@@ -600,9 +608,24 @@ class AlpacaBroker(BrokerGateway):
         """
         Clôture une position Alpaca :
         1. Annule les ordres bracket enfants (SL/TP pending)
-        2. Envoie un market order de clôture
+        2. Envoie un market order de clôture, puis attend la confirmation du fill
         3. Met à jour le CSV (optionnel)
+
+        Retourne True seulement si la clôture est CONFIRMÉE (fill réel obtenu,
+        ou position inexistante côté broker → CANCELED). Retourne False si
+        l'ordre a été soumis mais n'a pas fillé dans la fenêtre d'attente —
+        dans ce cas la position reste économiquement ouverte : l'appelant ne
+        doit PAS la marquer clôturée dans le journal (sync_fills_from_alpaca
+        la réconciliera au cycle suivant une fois le fill confirmé).
+
+        Bug corrigé 2026-07-16 : avant ce fix, un fill non confirmé (filled_avg_price
+        None) tombait silencieusement sur `exit_price` et la position était marquée
+        close immédiatement — alors que les actions restaient parfois ouvertes côté
+        Alpaca pendant plusieurs heures (ordre queued hors séance), créant une
+        exposition réelle non comptabilisée + un "phantom re-import" au sync suivant.
         """
+        import time
+
         import pandas as pd
         from filelock import FileLock
 
@@ -618,12 +641,41 @@ class AlpacaBroker(BrokerGateway):
             client = self._get_client()
             real_exit = exit_price
             position_existed = True
+            confirmed = True
             try:
                 response = client.close_position(ticker)
-                real_exit = float(getattr(response, "filled_avg_price", None) or exit_price)
-                logger.info(
-                    f"[AlpacaBroker] Position {ticker} clôturée → {status} @ {real_exit:.4f}"
-                )
+                filled_px = getattr(response, "filled_avg_price", None)
+                order_id = getattr(response, "id", None)
+
+                if not filled_px and order_id is not None:
+                    # Pas encore fillé dans la réponse immédiate — on poll
+                    # l'ordre quelques secondes avant d'abandonner.
+                    for attempt in range(self._CLOSE_CONFIRM_ATTEMPTS):
+                        time.sleep(self._CLOSE_CONFIRM_DELAY_SEC)
+                        try:
+                            order = client.get_order_by_id(order_id)
+                        except Exception as poll_exc:
+                            logger.debug(
+                                f"[AlpacaBroker] poll fill {ticker} tentative "
+                                f"{attempt + 1} : {poll_exc}"
+                            )
+                            continue
+                        filled_px = getattr(order, "filled_avg_price", None)
+                        if filled_px:
+                            break
+
+                if filled_px:
+                    real_exit = float(filled_px)
+                    logger.info(
+                        f"[AlpacaBroker] Position {ticker} clôturée → {status} @ {real_exit:.4f}"
+                    )
+                else:
+                    confirmed = False
+                    logger.warning(
+                        f"[AlpacaBroker] Position {ticker} : ordre de clôture soumis "
+                        f"mais fill non confirmé après {self._CLOSE_CONFIRM_ATTEMPTS * self._CLOSE_CONFIRM_DELAY_SEC:.0f}s "
+                        "— position laissée OPEN, sera réconciliée par sync_fills_from_alpaca"
+                    )
             except Exception as close_exc:
                 msg = str(close_exc).lower()
                 # APIError 404 = pas de position → on réconcilie le CSV en CANCELED.
@@ -636,6 +688,11 @@ class AlpacaBroker(BrokerGateway):
                     position_existed = False
                 else:
                     raise  # autre erreur → remonte
+
+            if not confirmed:
+                # Ordre soumis, fill non confirmé : ne rien écrire, laisser
+                # sync_fills_from_alpaca finaliser au prochain cycle.
+                return False
 
             # 3. Mettre à jour le CSV (CLOSED ou CANCELED).
             if update_csv:
