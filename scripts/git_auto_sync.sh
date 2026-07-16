@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Auto-pull main from origin if remote moved ahead AND CI on that commit is green.
-# Triggered by cron every minute. Fast-forward only — never overwrites local work.
+# Auto-sync bidirectionnel de main avec origin. Triggered par cron chaque minute.
 #
-# CI gate (2026-05-06) :
+#   - Changements locaux non commit  → auto-commit ("auto: sync ...")
+#   - Local en avance (rien de neuf en amont)     → push direct
+#   - Remote en avance, local propre              → pull gated CI (cf. plus bas)
+#   - Divergé (les deux ont bougé)                → rebase local sur remote puis push
+#                                                    (abort + log si conflit — jamais
+#                                                    de résolution automatique de conflit)
+#
+# CI gate sur pull (2026-05-06) :
 #   On interroge GitHub Actions /commits/<sha>/check-runs sur le commit remote.
 #   - Tous les check-runs success     → on pull.
 #   - Au moins 1 in_progress/queued   → WAIT (on retry au prochain tick).
@@ -10,7 +16,7 @@
 #                                       qu'il n'est pas remplacé par un commit
 #                                       vert ou que le check est rejoué).
 #   - 0 check_runs (commit sans CI)   → WAIT (GHA peut prendre 30-60s à enqueuer
-#                                       après un push). Après _MAX_NO_CHECK_AGE
+#                                       après un push). Après MAX_NO_CHECK_MINUTES
 #                                       minutes, on tire quand même (filet pour
 #                                       les commits qui ne déclenchent pas la CI,
 #                                       ex: tag, doc-only sur path filtré).
@@ -28,9 +34,6 @@ LOG="$REPO/logs/git_auto_pull.log"
 LOCK="/tmp/swingquant_git_auto_pull.lock"
 GH_OWNER="Kousseila404"
 GH_REPO="Swing_agent"
-# Si un commit n'a aucun check_run après ce délai, on tire quand même (commits
-# doc-only / tag qui ne déclenchent pas la CI). 10 min = sweet spot : laisse à
-# GHA le temps d'enqueuer, sans bloquer indéfiniment des commits sans CI.
 MAX_NO_CHECK_MINUTES=10
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
@@ -43,8 +46,16 @@ cd "$REPO" || { log "ERR cd $REPO failed"; exit 1; }
 
 current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
 if [ "$current_branch" != "$BRANCH" ]; then
-  log "SKIP on branch=$current_branch (auto-pull only on $BRANCH)"
+  log "SKIP on branch=$current_branch (auto-sync only on $BRANCH)"
   exit 0
+fi
+
+# ─── Auto-commit des changements locaux ─────────────────────────────
+if [ -n "$(git status --porcelain)" ]; then
+  git add -A
+  stat_line="$(git diff --cached --shortstat | sed 's/^ *//')"
+  git commit --quiet -m "auto: sync $(ts) — ${stat_line:-no stat}"
+  log "OK auto-commit $(git rev-parse --short HEAD) ($stat_line)"
 fi
 
 if ! git fetch --quiet origin "$BRANCH" 2>>"$LOG"; then
@@ -60,12 +71,32 @@ if [ "$local_sha" = "$remote_sha" ]; then
   exit 0
 fi
 
-if [ "$local_sha" != "$base_sha" ]; then
-  log "SKIP local diverged from origin/$BRANCH (local=$local_sha remote=$remote_sha) — resolve manually"
+# ─── Local en avance, rien de neuf en amont → push direct ──────────
+if [ "$remote_sha" = "$base_sha" ]; then
+  if out="$(git push --quiet origin "$BRANCH" 2>&1)"; then
+    log "OK pushed $base_sha -> $local_sha"
+  else
+    log "ERR push failed: $out"
+  fi
   exit 0
 fi
 
-# ─── CI gate ───────────────────────────────────────────────────────
+# ─── Divergé : local ET remote ont bougé → rebase puis push ────────
+if [ "$local_sha" != "$base_sha" ]; then
+  if out="$(git pull --rebase --quiet origin "$BRANCH" 2>&1)"; then
+    if out2="$(git push --quiet origin "$BRANCH" 2>&1)"; then
+      log "OK rebased+pushed -> $(git rev-parse --short HEAD)"
+    else
+      log "ERR push after rebase failed: $out2"
+    fi
+  else
+    git rebase --abort 2>/dev/null
+    log "ERR rebase conflict — résolution manuelle requise (local=$local_sha remote=$remote_sha)"
+  fi
+  exit 0
+fi
+
+# ─── Remote en avance, local propre → pull gated CI ─────────────────
 TOKEN=""
 if [ -f ~/.git-credentials ]; then
   TOKEN="$(awk -F'[:@]' '/github\.com/ {print $3; exit}' ~/.git-credentials 2>/dev/null || true)"
@@ -145,7 +176,7 @@ except Exception:
   esac
 fi
 
-# ─── Pull ───────────────────────────────────────────────────────────
+# ─── Pull ─────────────────────────────────────────────────────────
 if out="$(git pull --ff-only --quiet origin "$BRANCH" 2>&1)"; then
   log "OK pulled $local_sha -> $remote_sha"
 else
