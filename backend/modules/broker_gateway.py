@@ -836,6 +836,7 @@ class AlpacaBroker(BrokerGateway):
                         status_code = "WIN"
                         any_filled = False
                         any_expired = False
+                        order_type = ""
                         for o in sorted(closed_orders, key=lambda x: str(x.filled_at or x.submitted_at or ""), reverse=True):
                             o_status = str(getattr(o, "status", "")).lower()
                             if "expired" in o_status or "canceled" in o_status:
@@ -855,6 +856,7 @@ class AlpacaBroker(BrokerGateway):
                             df.at[idx, "Status"] = "CANCELED"
                             df.at[idx, "Exit_Price"] = df.at[idx, "Entry"]  # PnL=0
                             df.at[idx, "Exit_Date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            df.at[idx, "Close_Reason"] = "ENTRY_EXPIRED"
                             synced += 1
                             logger.warning(
                                 f"[AlpacaBroker][Sync] {ticker} → CANCELED "
@@ -878,13 +880,27 @@ class AlpacaBroker(BrokerGateway):
                         else:
                             status_code = "WIN" if exit_price < entry_price else "LOSS"
 
+                        # Close_Reason best-effort depuis le type d'ordre broker —
+                        # ce chemin réconcilie soit un bracket SL/TP fillé nativement
+                        # côté Alpaca, soit une clôture evaluate_trades dont le fill
+                        # n'a pas confirmé dans la fenêtre d'attente (cf. close_position).
+                        # Dans les deux cas, mieux vaut une raison approximative que
+                        # Close_Reason vide (bug corrigé 2026-07-16).
+                        if "stop" in order_type:
+                            close_reason = "SL_HIT"
+                        elif "limit" in order_type:
+                            close_reason = "TP_HIT"
+                        else:
+                            close_reason = "BROKER_SYNC"
+
                         df.at[idx, "Status"]     = status_code
                         df.at[idx, "Exit_Price"] = str(round(exit_price, 6))
                         df.at[idx, "Exit_Date"]  = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        df.at[idx, "Close_Reason"] = close_reason
                         synced += 1
                         logger.info(
                             f"[AlpacaBroker][Sync] {ticker} → {status_code} @ {exit_price:.4f} "
-                            f"(bracket fermé par Alpaca)"
+                            f"(bracket fermé par Alpaca, reason={close_reason})"
                         )
                     except Exception as exc:
                         logger.warning(f"[AlpacaBroker][Sync] Erreur {ticker} : {exc}")
