@@ -605,6 +605,43 @@ def _capm_alpha_beta(
     }
 
 
+def _resample_snapshots(
+    snapshots: list[tuple[date, dict[str, Any]]],
+    min_period_days: float,
+) -> list[tuple[date, dict[str, Any]]]:
+    """Sous-échantillonne les snapshots pour espacer deux dates retenues d'au
+    moins `min_period_days` jours.
+
+    Audit 2026-07-16 — `universe_scheduler` ne rafraîchit `current_price` et
+    le momentum que pour ~100 tickers/jour (budget quota, rotation ~7j) : sur
+    des snapshots QUOTIDIENS, ~65-70 % des tickers d'un rebalance donné ont un
+    prix figé (0 % de retour artificiel) tandis que les ~35 % rafraîchis ce
+    jour-là encaissent d'un coup jusqu'à 7 jours de mouvement réel, comptés
+    comme "1 jour" dans le calcul du retour ET dans l'annualisation Sharpe
+    (`√365`). Résultat observé en prod : +51 % / 3 mois, Sharpe annualisé
+    7.25, alpha annualisé +615 % — non crédible.
+
+    En resamplant à ~7j (durée du cycle de rotation complet), chaque période
+    couvre une fenêtre où la quasi-totalité de l'univers a été rafraîchie au
+    moins une fois, ce qui aligne le backtest sur l'hypothèse déjà documentée
+    dans `_compute_stats` ("snapshots hebdo, factor=√52").
+
+    Glouton : garde toujours le premier ET le dernier snapshot disponibles ;
+    entre les deux, avance jusqu'à la prochaine date qui dépasse le seuil.
+    `min_period_days <= 0` désactive (comportement legacy = tous les
+    snapshots consécutifs).
+    """
+    if min_period_days <= 0 or len(snapshots) < 2:
+        return snapshots
+    out = [snapshots[0]]
+    for d, s in snapshots[1:]:
+        if (d - out[-1][0]).days >= min_period_days:
+            out.append((d, s))
+    if out[-1][0] != snapshots[-1][0]:
+        out.append(snapshots[-1])
+    return out
+
+
 def run_titan_top_n(
     top_n: int = 20,
     benchmark: str | None = "SPY",
@@ -618,6 +655,7 @@ def run_titan_top_n(
     impact_coef: float = 0.0,
     fallback_turnover_ratio: float = 0.005,
     restrict_to: list[str] | None = None,
+    min_period_days: float = 7.0,
 ) -> BacktestResult:
     """Backtest complet du pipeline TITAN sur l'historique disponible.
 
@@ -632,6 +670,9 @@ def run_titan_top_n(
             T+5). 90 j = lag 10-K typique pour un backtest production-grade.
             À signal_date d_i, on utilisera le snapshot le plus récent < d_i
             - lag pour ranker, mais le return reste mesuré sur (d_i, d_{i+1}).
+        min_period_days: espacement minimum entre deux rebalances (défaut 7 —
+            audit 2026-07-16, cf. `_resample_snapshots`). 0/1 = legacy
+            (rebalance sur chaque snapshot quotidien disponible).
     """
     dates = universe_history.list_snapshots()
     if len(dates) < 2:
@@ -661,6 +702,13 @@ def run_titan_top_n(
             f"vers le haut. Pour un backtest as-reported, utiliser des snapshots "
             f"matérialisés en live (cron quotidien)."
         )
+
+    # Audit 2026-07-16 — resample AVANT le reste du pipeline (point-in-time,
+    # lag, période médiane) pour qu'un rebalance ne tombe jamais entre deux
+    # jours où la majorité de l'univers n'a pas été rafraîchie (cf.
+    # `_resample_snapshots`).
+    n_snapshots_raw = len(snapshots)
+    snapshots = _resample_snapshots(snapshots, min_period_days)
 
     # Audit S1.1 — filtre point-in-time : à chaque date, on ne ranke que
     # les tickers qui étaient actifs à ce moment (registry delisted). Sans
@@ -829,6 +877,8 @@ def run_titan_top_n(
     total_costs = sum(p.cost_pct for p in periods)
     result.diagnostics = {
         "n_snapshots":          len(snapshots),
+        "n_snapshots_raw":      n_snapshots_raw,
+        "min_period_days":      min_period_days,
         "n_periods":            len(periods),
         "n_skipped_lag":        n_skipped_periods,
         "n_skipped_low_dq":     n_low_quality_snapshots,
@@ -896,6 +946,14 @@ def _main() -> int:
                    help="Si avg_volume_3m absent du snapshot, on estime "
                         "ADTV_$ = market_cap × ratio (défaut 0.5 %%, "
                         "typique large-cap US).")
+    p.add_argument("--min-period-days", type=float, default=7.0,
+                   help="Espacement minimum entre deux rebalances (défaut 7). "
+                        "Audit 2026-07-16 : universe_scheduler ne rafraîchit "
+                        "current_price/momentum que pour ~100 tickers/jour "
+                        "(rotation 7j) — un rebalance quotidien mélange des "
+                        "prix figés et des sauts de plusieurs jours comptés "
+                        "comme '1 jour', ce qui fausse Sharpe/alpha. "
+                        "0 ou 1 = legacy (un rebalance par snapshot dispo).")
     p.add_argument("--json", action="store_true",
                    help="Sortie JSON brut (sinon : tableau lisible humain)")
     args = p.parse_args()
@@ -913,6 +971,7 @@ def _main() -> int:
             book_size_usd=args.book_size_usd,
             impact_coef=args.impact_coef,
             fallback_turnover_ratio=args.fallback_turnover,
+            min_period_days=args.min_period_days,
         )
     except ValueError as e:
         print(f"ERROR: {e}")

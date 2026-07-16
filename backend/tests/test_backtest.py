@@ -409,7 +409,58 @@ def test_run_titan_top_n_publication_lag_skips_periods_when_history_short(monkey
 
     result = bt.run_titan_top_n(
         top_n=10, benchmark=None, point_in_time=False,
-        publication_lag_days=90,
+        publication_lag_days=90, min_period_days=1,
     )
     assert result.diagnostics["n_skipped_lag"] >= 2
     assert result.diagnostics["n_periods"] == 0
+
+
+# ─────────────────────────────────────────────────────────────────
+# _resample_snapshots — audit 2026-07-16 (staleness du refresh partiel).
+# ─────────────────────────────────────────────────────────────────
+
+def test_resample_snapshots_keeps_all_when_disabled():
+    snaps = [(date(2026, 4, d), {}) for d in range(22, 26)]
+    assert bt._resample_snapshots(snaps, 0) == snaps
+
+
+def test_resample_snapshots_keeps_both_when_only_two():
+    """Avec 2 snapshots seulement, on garde toujours les deux (premier+dernier)
+    même si l'écart est < min_period_days — sinon plus aucune période n'est
+    calculable."""
+    snaps = [(date(2026, 4, 22), {}), (date(2026, 4, 23), {})]
+    assert bt._resample_snapshots(snaps, 7) == snaps
+
+
+def test_resample_snapshots_weekly_spacing():
+    """10 snapshots quotidiens (22/04 → 01/05), min_period_days=7 → ne garde
+    que les dates espacées d'au moins 7j, plus la dernière disponible."""
+    snaps = [(date(2026, 4, 22) + __import__("datetime").timedelta(days=i), {})
+             for i in range(10)]
+    out = bt._resample_snapshots(snaps, 7)
+    kept_dates = [d for d, _ in out]
+    assert kept_dates[0] == date(2026, 4, 22)
+    assert kept_dates[-1] == date(2026, 5, 1)  # dernier snapshot dispo, toujours gardé
+    # Chaque écart consécutif (sauf potentiellement le dernier) respecte le seuil.
+    for a, b in zip(kept_dates[:-2], kept_dates[1:-1], strict=False):
+        assert (b - a).days >= 7
+
+
+def test_run_titan_top_n_default_resamples_daily_snapshots(monkeypatch):
+    """Avec le défaut min_period_days=7 sur 10 snapshots quotidiens, le
+    backtest ne doit PAS produire 9 périodes journalières mais un nombre
+    réduit de rebalances espacés — c'est le fix du bug de staleness."""
+    import datetime as _dt
+    fake_dates = [date(2026, 4, 22) + _dt.timedelta(days=i) for i in range(10)]
+    snap = _mk_snap({"AAPL": {"titan_composite_score": 80.0,
+                              "current_price": 100.0, "market_cap": 1e12}})
+    monkeypatch.setattr(bt.universe_history, "list_snapshots", lambda: fake_dates)
+    monkeypatch.setattr(bt.universe_history, "read_snapshot", lambda d: snap)
+
+    result = bt.run_titan_top_n(
+        top_n=10, benchmark=None, point_in_time=False, publication_lag_days=0,
+    )
+    assert result.diagnostics["n_snapshots_raw"] == 10
+    assert result.diagnostics["n_snapshots"] < 10
+    assert result.diagnostics["min_period_days"] == 7.0
+    assert result.diagnostics["median_period_days"] >= 5.0
