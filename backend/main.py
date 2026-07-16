@@ -100,6 +100,12 @@ Exemples :
             _run_alpaca_test()
         elif getattr(args, "alpaca_sync", False):
             _run_alpaca_sync()
+        elif getattr(args, "auto_approve_proposals", False):
+            from modules.auto_approve import run_auto_approve
+            run_auto_approve()
+        elif getattr(args, "daily_digest", False):
+            from modules.daily_digest import send_daily_digest
+            send_daily_digest()
 
     except KeyboardInterrupt:
         logger.info("⚠️  Arrêt demandé par l'utilisateur (Ctrl+C)")
