@@ -929,6 +929,7 @@ def plan_proposals(
             "support": support,
             "next_earnings_date": scored_row.get("next_earnings_date"),
         }
+<<<<<<< Updated upstream
         # Audit 2026-05-12 — passe confidence pour gate STRONG_BUY/BUY.
         try:
             from modules.data_confidence import compute_confidence
@@ -939,6 +940,9 @@ def plan_proposals(
         buy_signal_data = compute_buy_signal(
             buy_input, confidence_score=_conf_score,
         ).to_dict()
+=======
+        buy_signal_data = compute_buy_signal(buy_input).to_dict()
+>>>>>>> Stashed changes
 
         alloc = {
             **alloc,

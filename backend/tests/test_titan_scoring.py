@@ -179,11 +179,18 @@ def test_lot3_sector_relative_levels_playing_field():
     """Un secteur 'low ROE par nature' (Utilities ROE ~10%) doit pouvoir
     placer son meilleur élément au top, même si en absolu ses ROE sont bas
     vs Tech."""
+<<<<<<< Updated upstream
     # Audit S3.2 (2026-04-27) — _MIN_SECTOR_SIZE_FOR_RELATIVE = 8.
     # Phase 4 audit (2026-05-06) — relevé à 12 (résolution 8.3% au lieu de
     # 12.5%, alignement académique AQR/Fama-French ≥10).
     universe = _build_universe([
         # Tech : ROE haut par nature (12 tickers)
+=======
+    # Audit S3.2 — _MIN_SECTOR_SIZE_FOR_RELATIVE relevé de 5 à 8 ; il faut
+    # au moins 8 tickers par secteur pour que le rank intra-secteur s'applique.
+    universe = _build_universe([
+        # Tech : ROE haut par nature (8 tickers)
+>>>>>>> Stashed changes
         ("T1", "Technology", {"roe": 0.30}),
         ("T2", "Technology", {"roe": 0.40}),
         ("T3", "Technology", {"roe": 0.50}),
@@ -192,6 +199,7 @@ def test_lot3_sector_relative_levels_playing_field():
         ("T6", "Technology", {"roe": 0.65}),
         ("T7", "Technology", {"roe": 0.55}),
         ("T8", "Technology", {"roe": 0.45}),
+<<<<<<< Updated upstream
         ("T9", "Technology", {"roe": 0.42}),
         ("T10", "Technology", {"roe": 0.48}),
         ("T11", "Technology", {"roe": 0.52}),
@@ -209,6 +217,17 @@ def test_lot3_sector_relative_levels_playing_field():
         ("U10", "Utilities",  {"roe": 0.06}),
         ("U11", "Utilities",  {"roe": 0.07}),
         ("U12", "Utilities",  {"roe": 0.08}),
+=======
+        # Utilities : ROE bas par nature (8 tickers)
+        ("U1", "Utilities",  {"roe": 0.05}),
+        ("U2", "Utilities",  {"roe": 0.07}),
+        ("U3", "Utilities",  {"roe": 0.09}),
+        ("U4", "Utilities",  {"roe": 0.11}),
+        ("U5", "Utilities",  {"roe": 0.15}),  # top de son secteur
+        ("U6", "Utilities",  {"roe": 0.06}),
+        ("U7", "Utilities",  {"roe": 0.08}),
+        ("U8", "Utilities",  {"roe": 0.10}),
+>>>>>>> Stashed changes
     ])
     scored = _score_universe(universe)
     # En sector-relative, U5 (top des Utilities) doit avoir un Quality_score
@@ -244,9 +263,15 @@ def test_lot3_small_sector_falls_back_to_global():
     out = _percentile_rank_by_sector(values, sectors, higher_is_better=True)
     # E1/E2/E3 fallback global → leurs valeurs (0.10/0.15/0.20) sont les
     # 3 plus basses sur 9 → percentile-rank ~5/16/27
+<<<<<<< Updated upstream
     assert out["E1"] < 30, "E1 (smallest sector, lowest value) should be low globally"
     # T6 est le max global → top quartile
     assert out["T6"] > 80, "T6 (largest value) should be top globally"
+=======
+    assert out["E1"] < 30, f"E1 (smallest sector, lowest value) should be low globally"
+    # T6 est le max global → top quartile
+    assert out["T6"] > 80, f"T6 (largest value) should be top globally"
+>>>>>>> Stashed changes
 
 
 def test_lot3_per_sector_ranking_independent_per_metric():

@@ -131,6 +131,7 @@ _NEUTRAL_SCORE = 50.0
 #   Growth    0.14 → 0.13
 #   Revisions 0.12 → 0.11
 #   Insider   ----  → 0.08 (NEW)
+<<<<<<< Updated upstream
 #
 # Lot 18 (2026-07-09) — IC diagnostic empirique sur 44 snapshots (2026-04-22→06-05).
 # Sentiment IC20j = −0.108 (19 % fenêtres positives) → seul pilier activement
@@ -158,6 +159,17 @@ _W_TITAN_PIOTROSKI  = 0.13   # +0.04 (Lot 19, IC +0.038, 98 % fenêtres+)
 _W_TITAN_GROWTH     = 0.13
 _W_TITAN_REVISIONS  = 0.12   # +0.01 (Lot 18, IC +0.075 stable)
 _W_TITAN_INSIDER    = 0.04   # −0.04 (Lot 19, IC −0.040, 4 % fenêtres+)
+=======
+_W_TITAN_QUALITY    = 0.18
+_W_TITAN_VALUE      = 0.13
+_W_TITAN_RISK       = 0.10
+_W_TITAN_SENTIMENT  = 0.03
+_W_TITAN_MOMENTUM   = 0.15
+_W_TITAN_PIOTROSKI  = 0.09
+_W_TITAN_GROWTH     = 0.13
+_W_TITAN_REVISIONS  = 0.11
+_W_TITAN_INSIDER    = 0.08
+>>>>>>> Stashed changes
 
 # Pansement Sentiment — si reco+upside tous deux absents (FMP stable), on
 # renormalise Q/V/R/M/P/G/Revisions/Insider en préservant leur ratio relatif.
@@ -183,6 +195,7 @@ _W_TITAN_IN_NO_SENTIMENT = _W_TITAN_INSIDER   / _SENTIMENT_FALLBACK_SUM
 # dessus du gate, pénaliser linéairement -15 pts entre DQ=0.70 et DQ=1.0
 # avantageait systématiquement les mega-caps US (couverture yfinance/FMP
 # parfaite) au détriment de mid-caps légitimes — biais structurel vers le
+<<<<<<< Updated upstream
 # top du SP500.
 #
 # Bug #24 fix (audit 2026-05-07 — cf. backend/docs/titan/audit_2026-05-07.md#bug-24) — 0.95 était quasi-neutre (1.5 pts d'écart)
@@ -254,6 +267,11 @@ _PEG_SANITY_MIN = 0.10
 # imputée), on flag le ticker comme "low_signal" pour que l'aval puisse trier.
 # 4/9 = quasi la moitié du composite est synthétique → ranking peu fiable.
 _LOW_SIGNAL_NEUTRAL_PILLAR_THRESHOLD = 4
+=======
+# top du SP500. Le coef est désormais quasi-neutre : 0.95 à 0.70 → 1.00 à
+# 1.00 (5 pts d'écart max), juste assez pour départager des ex-aequo.
+_DQ_MIN_COEF = 0.95
+>>>>>>> Stashed changes
 
 # Champs fondamentaux utilisés dans le scoring TITAN (métriques réparties
 # sur les 6 piliers). data_quality = fraction non-None sur ces champs.
@@ -378,6 +396,7 @@ def _percentile_rank(
 # qu'un rank global avec ties. n=8 donne au minimum 8 buckets (12.5 % de
 # résolution) — pas idéal mais signal moins bruité sur les petits secteurs
 # (Real Estate, Utilities tournent autour de 10-15 tickers dans l'univers).
+<<<<<<< Updated upstream
 #
 # Phase 4 audit (2026-05-06) — relevé à 12. À n=8 la résolution était encore
 # 12.5% avec ties écrasants sur Utilities (≈12 tickers SP500), Materials,
@@ -386,6 +405,9 @@ def _percentile_rank(
 # au-dessous (rares, ex: Communication Services minoritaire), le fallback
 # global reste actif.
 _MIN_SECTOR_SIZE_FOR_RELATIVE = 12
+=======
+_MIN_SECTOR_SIZE_FOR_RELATIVE = 8
+>>>>>>> Stashed changes
 
 
 def _percentile_rank_by_sector(
@@ -465,7 +487,11 @@ _FUNDAMENTAL_PUBLICATION_LAG_DAYS = 90
 def _lookup_yoy_snapshot(
     ticker: str,
     *,
+<<<<<<< Updated upstream
     as_of: date | None = None,
+=======
+    as_of: "date | None" = None,
+>>>>>>> Stashed changes
     publication_lag_days: int = _FUNDAMENTAL_PUBLICATION_LAG_DAYS,
 ) -> dict[str, Any] | None:
     """Retourne le row du ticker dans le snapshot Y-1 (~365 jours avant `as_of`).
@@ -652,8 +678,12 @@ def _piotroski_f_score_absolute(
 def _piotroski_score_pillar(
     row: dict[str, Any],
     *,
+<<<<<<< Updated upstream
     ticker: str | None = None,
     as_of: date | None = None,
+=======
+    as_of: "date | None" = None,
+>>>>>>> Stashed changes
     publication_lag_days: int = _FUNDAMENTAL_PUBLICATION_LAG_DAYS,
 ) -> tuple[float, dict[str, Any]]:
     """Convertit le F-Score brut en score 0-100 normalisé par #critères évalués.
@@ -682,6 +712,7 @@ def _piotroski_score_pillar(
         # `fundamentals_period_end_y1`. Si la période fiscale Y-1 + LAG
         # n'était pas encore publiée à `as_of` (cas backtest), on refuse
         # ce Y-1 — sinon look-ahead silencieux.
+<<<<<<< Updated upstream
         # Phase 1 audit (2026-05-06) — gate strict : as_of=None → today() pour
         # que la prod live valide toujours (filet anti-cache corrompu).
         from datetime import date as _date
@@ -695,11 +726,16 @@ def _piotroski_score_pillar(
             "gross_margin":       row.get("gross_margin_prev_year"),
         }
         if publication_lag_days > 0:
+=======
+        if as_of is not None and publication_lag_days > 0:
+            from datetime import date as _date, timedelta as _td
+>>>>>>> Stashed changes
             period_end_y1 = row.get("fundamentals_period_end_y1")
             if isinstance(period_end_y1, str):
                 try:
                     pe = _date.fromisoformat(period_end_y1[:10])
                     publish_date = pe + _td(days=publication_lag_days)
+<<<<<<< Updated upstream
                     if publish_date > as_of_eff:
                         # Y-1 pas encore publiable → fallback sur lookup snapshot
                         # (peut retourner None ; dans ce cas Y/Y simplement non
@@ -707,10 +743,20 @@ def _piotroski_score_pillar(
                         yoy_row = (
                             _lookup_yoy_snapshot(
                                 ticker, as_of=as_of_eff,
+=======
+                    if publish_date > as_of:
+                        # Y-1 pas encore publiable → fallback sur lookup snapshot
+                        # (qui peut lui-même retourner None si la fenêtre est
+                        # fermée).
+                        yoy_row = (
+                            _lookup_yoy_snapshot(
+                                ticker, as_of=as_of,
+>>>>>>> Stashed changes
                                 publication_lag_days=publication_lag_days,
                             ) if ticker else None
                         )
                     else:
+<<<<<<< Updated upstream
                         yoy_row = prev_year_yoy_row
                 except ValueError:
                     # Date corrompue → on refuse plutôt que d'accepter en aveugle.
@@ -725,6 +771,40 @@ def _piotroski_score_pillar(
                 yoy_row = prev_year_yoy_row
         else:
             yoy_row = prev_year_yoy_row
+=======
+                        yoy_row = {
+                            "return_on_assets":   row.get("return_on_assets_prev_year"),
+                            "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                            "current_ratio":      row.get("current_ratio_prev_year"),
+                            "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                            "gross_margin":       row.get("gross_margin_prev_year"),
+                        }
+                except ValueError:
+                    yoy_row = {
+                        "return_on_assets":   row.get("return_on_assets_prev_year"),
+                        "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                        "current_ratio":      row.get("current_ratio_prev_year"),
+                        "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                        "gross_margin":       row.get("gross_margin_prev_year"),
+                    }
+            else:
+                # Pas de date fiscale → comportement legacy (accept).
+                yoy_row = {
+                    "return_on_assets":   row.get("return_on_assets_prev_year"),
+                    "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                    "current_ratio":      row.get("current_ratio_prev_year"),
+                    "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                    "gross_margin":       row.get("gross_margin_prev_year"),
+                }
+        else:
+            yoy_row = {
+                "return_on_assets":   row.get("return_on_assets_prev_year"),
+                "debt_to_equity":     row.get("debt_to_equity_prev_year"),
+                "current_ratio":      row.get("current_ratio_prev_year"),
+                "shares_outstanding": row.get("shares_outstanding_prev_year"),
+                "gross_margin":       row.get("gross_margin_prev_year"),
+            }
+>>>>>>> Stashed changes
     else:
         # Fallback legacy : snapshot universe_history Y-1 (anti-lookahead).
         yoy_row = (
@@ -1207,7 +1287,19 @@ def _score_universe(
             ins = _NEUTRAL_SCORE
             ins_count = 0
 
+        # REVISIONS — Lot 16. Pilier dédié (poids 12 %). Capture upgrades/
+        # downgrades 90j + beat rate 8Q + surprise avg 4Q.
+        rev_pack = revisions_pillar.get(k) or {}
+        rv = float(rev_pack.get("revisions_score") or _NEUTRAL_SCORE)
+
+        # INSIDER — Lot 17. Pilier C-level/director smart money (poids 8 %).
+        # Lit `insider_score` directement depuis le row si déjà enrichi par
+        # `enrich_universe_with_insider()`. Sinon neutre 50.
+        ins_raw = _safe_float(t_base.get("insider_score"))
+        ins = ins_raw if ins_raw is not None else _NEUTRAL_SCORE
+
         if sentiment_available:
+<<<<<<< Updated upstream
             s, s_count = _pillar_score_with_count([reco_r[k], upside_r[k]])
         else:
             # Pansement : Sentiment indisponible → exclu (renorm dynamique
@@ -1245,6 +1337,35 @@ def _score_universe(
         else:
             composite = _NEUTRAL_SCORE
             weight_mode = "all_empty"
+=======
+            s = _pillar_score([reco_r[k], upside_r[k]])
+            composite = (
+                _W_TITAN_QUALITY   * q
+                + _W_TITAN_VALUE     * v
+                + _W_TITAN_RISK      * r
+                + _W_TITAN_SENTIMENT * s
+                + _W_TITAN_MOMENTUM  * m
+                + _W_TITAN_PIOTROSKI * p
+                + _W_TITAN_GROWTH    * g
+                + _W_TITAN_REVISIONS * rv
+                + _W_TITAN_INSIDER   * ins
+            )
+            weight_mode = "full"
+        else:
+            # Pansement : Sentiment indisponible → renormalisation 8 piliers.
+            s = _NEUTRAL_SCORE  # reporté pour traçabilité, non utilisé dans composite
+            composite = (
+                _W_TITAN_Q_NO_SENTIMENT  * q
+                + _W_TITAN_V_NO_SENTIMENT  * v
+                + _W_TITAN_R_NO_SENTIMENT  * r
+                + _W_TITAN_M_NO_SENTIMENT  * m
+                + _W_TITAN_P_NO_SENTIMENT  * p
+                + _W_TITAN_G_NO_SENTIMENT  * g
+                + _W_TITAN_RV_NO_SENTIMENT * rv
+                + _W_TITAN_IN_NO_SENTIMENT * ins
+            )
+            weight_mode = "no_sentiment"
+>>>>>>> Stashed changes
 
         # ── Lot 14.1 — Cross-signal adjustments ────────────────────────────
         # Signaux composites typiques de la littérature LT (QARP/GARP, value

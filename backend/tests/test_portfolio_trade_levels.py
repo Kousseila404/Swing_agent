@@ -48,11 +48,19 @@ def test_invalid_price_returns_none():
 
 
 def test_clamp_high_volatility():
+<<<<<<< Updated upstream
     """Penny σ=300 % → SL brut ≈ 362 % clampé à 35 %, TP brut ≈ 620 % clampé à 500 %."""
     r = suggest_trade_levels(10.0, 300.0)
     assert r["method"] == "catastrophe_floor"
     assert r["sl_pct"] == 35.0    # _MAX_SL_PCT (refonte 2026-04-29)
     assert r["tp_pct"] == 500.0   # _MAX_TP_PCT (refonte 2026-04-29)
+=======
+    """Penny stock σ=300 % → sl_pct brut ≈ 207 % doit être clampé à 30 %."""
+    r = suggest_trade_levels(10.0, 300.0)
+    assert r["method"] == "sigma_scaled"
+    assert r["sl_pct"] == 30.0    # _MAX_SL_PCT (LT, recalibré 2026-04-27)
+    assert r["tp_pct"] == 100.0   # _MAX_TP_PCT (LT, recalibré 2026-04-27)
+>>>>>>> Stashed changes
 
 
 def test_clamp_low_volatility():

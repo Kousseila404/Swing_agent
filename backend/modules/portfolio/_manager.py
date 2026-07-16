@@ -23,6 +23,12 @@ from modules.correlation_check import (
 )
 from modules.log import logger
 
+from modules.correlation_check import (
+    DEFAULT_MAX_AVG_CORR,
+    compute_correlation,
+    downsize_over_correlated,
+)
+
 from ._caches import (
     _MOMENTUM_LIVE_TTL_SECONDS as MOMENTUM_LIVE_TTL_SECONDS,  # noqa: F401 (re-export)
 )
@@ -311,6 +317,7 @@ class PortfolioManager:
         else:
             weights, vol_diag, eq_fallback = compute_weights(priced, scored=scored_view)
             hrp_diag = {"applied": False, "reason": "weighting_method=risk_parity"}
+<<<<<<< Updated upstream
 
         # 5b. Tilt Buffett-style — concentre sur les compounders (Q≥85+P≥8 → ×1.5),
         #     dilue les juniors (Q<50 ou P<4 → ×0.7). S'applique APRÈS risk-parity
@@ -318,6 +325,8 @@ class PortfolioManager:
         #     Refonte 2026-04-29 (étape 3).
         from ._sizing_buffett import apply_buffett_tilt
         weights, buffett_tilt_diag = apply_buffett_tilt(weights, scored_view)
+=======
+>>>>>>> Stashed changes
 
         # 6. Sector cap 30 % — après risk parity, avant vol-targeting.
         sector_by_ticker = {

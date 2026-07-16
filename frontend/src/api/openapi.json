@@ -1474,6 +1474,7 @@
           }
         }
       }
+<<<<<<< Updated upstream
     },
     "/api/watchlist": {
       "get": {
@@ -2308,6 +2309,8 @@
           }
         }
       }
+=======
+>>>>>>> Stashed changes
     }
   },
   "components": {

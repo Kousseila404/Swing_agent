@@ -237,7 +237,11 @@ export const useDelisted = (opts = {}) =>
   useQuery({
     queryKey: ['delisted'],
     queryFn: fetchDelisted,
+<<<<<<< Updated upstream
     staleTime: STALE.DELISTED,
+=======
+    staleTime: 5 * 60_000,
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -245,8 +249,13 @@ export const useWfoWeights = (opts = {}) =>
   useQuery({
     queryKey: ['wfo_weights'],
     queryFn: fetchWfoWeights,
+<<<<<<< Updated upstream
     staleTime: STALE.WFO,    // poids changent au plus mensuellement (cron)
     retry: false,             // 404 si jamais lancé → pas de retry
+=======
+    staleTime: 60 * 60_000, // poids changent au plus mensuellement (cron)
+    retry: false,            // 404 si jamais lancé → pas de retry
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -254,7 +263,11 @@ export const useWfoHistory = (limit = 50, opts = {}) =>
   useQuery({
     queryKey: ['wfo_history', limit],
     queryFn: () => fetchWfoHistory({ limit }),
+<<<<<<< Updated upstream
     staleTime: STALE.WFO,
+=======
+    staleTime: 60 * 60_000,
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -262,7 +275,11 @@ export const useAuditFull = (opts = {}) =>
   useQuery({
     queryKey: ['audit_full'],
     queryFn: () => fetchAuditFull(),
+<<<<<<< Updated upstream
     staleTime: STALE.AUDIT_FULL, // backend cache 24h ; on rafraîchit rarement
+=======
+    staleTime: 30 * 60_000, // backend cache 24h ; on rafraîchit rarement
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -284,7 +301,11 @@ export const useNews = (ticker, days = 14, opts = {}) =>
     queryKey: ['news', ticker, days],
     queryFn: () => fetchNews(ticker, days),
     enabled: !!ticker,
+<<<<<<< Updated upstream
     staleTime: STALE.NEWS,    // news cache backend = 1h ; UI stale = 30min
+=======
+    staleTime: 30 * 60_000,   // news cache backend = 1h ; UI stale = 30min
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -292,7 +313,11 @@ export const useNewsFirehose = (days = 7, maxPerTicker = 5, opts = {}) =>
   useQuery({
     queryKey: ['news_firehose', days, maxPerTicker],
     queryFn: () => fetchNewsFirehose(days, maxPerTicker),
+<<<<<<< Updated upstream
     staleTime: STALE.NEWS_FIREHOSE,
+=======
+    staleTime: 10 * 60_000,
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -300,7 +325,11 @@ export const useAttribution = (opts = {}) =>
   useQuery({
     queryKey: ['attribution'],
     queryFn: fetchAttribution,
+<<<<<<< Updated upstream
     staleTime: STALE.ATTRIBUTION,
+=======
+    staleTime: 5 * 60_000,
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -308,7 +337,11 @@ export const useSectorBenchmarkPortfolio = (opts = {}) =>
   useQuery({
     queryKey: ['sector_benchmark_portfolio'],
     queryFn: fetchSectorBenchmarkPortfolio,
+<<<<<<< Updated upstream
     staleTime: STALE.SECTOR_BENCH,  // backend cache 1h, UI 30min
+=======
+    staleTime: 30 * 60_000,  // backend cache 1h, UI 30min
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -317,7 +350,11 @@ export const useSecFilings = (ticker, limit = 30, opts = {}) =>
     queryKey: ['sec_filings', ticker, limit],
     queryFn: () => fetchSecFilings(ticker, limit),
     enabled: !!ticker,
+<<<<<<< Updated upstream
     staleTime: STALE.SEC_FILINGS,   // backend cache 6h, UI 1h
+=======
+    staleTime: 60 * 60_000,  // backend cache 6h, UI 1h
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -325,7 +362,11 @@ export const useCatalystCalendar = (days = 30, opts = {}) =>
   useQuery({
     queryKey: ['calendar', days],
     queryFn: () => fetchCatalystCalendar(days),
+<<<<<<< Updated upstream
     staleTime: STALE.CALENDAR,
+=======
+    staleTime: 5 * 60_000,
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -333,7 +374,11 @@ export const useWatchlist = (opts = {}) =>
   useQuery({
     queryKey: ['watchlist'],
     queryFn: fetchWatchlist,
+<<<<<<< Updated upstream
     staleTime: STALE.WATCHLIST,
+=======
+    staleTime: 30_000,
+>>>>>>> Stashed changes
     ...opts,
   })
 
@@ -358,7 +403,11 @@ export const useNotes = (ticker, opts = {}) =>
     queryKey: ['notes', ticker],
     queryFn: () => fetchNotes(ticker),
     enabled: !!ticker,
+<<<<<<< Updated upstream
     staleTime: STALE.NOTES,
+=======
+    staleTime: 30_000,
+>>>>>>> Stashed changes
     ...opts,
   })
 

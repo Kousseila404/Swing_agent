@@ -148,6 +148,7 @@ def _extract_prices(snapshot: dict[str, Any], tickers: list[str]) -> dict[str, f
     return out
 
 
+<<<<<<< Updated upstream
 def _count_total_tickers(snapshot: dict[str, Any]) -> int:
     return len(snapshot.get("tickers") or {})
 
@@ -163,6 +164,8 @@ def _count_low_dq_tickers(snapshot: dict[str, Any]) -> int:
     return n
 
 
+=======
+>>>>>>> Stashed changes
 def _compute_weights(
     snapshot: dict[str, Any],
     top: list[tuple[str, float]],
@@ -241,27 +244,39 @@ def _compute_period(
     book_size_usd: float = 100_000.0,
     impact_coef: float = 0.0,
     fallback_turnover_ratio: float = 0.005,
+<<<<<<< Updated upstream
     period_days: float = 7.0,
     risk_free_rate_annual: float = 0.045,
+=======
+>>>>>>> Stashed changes
 ) -> PeriodResult:
     """Simule un rebalance : rank top-N sur t, applique les poids choisis,
     mesure return brut, ponctionne les coûts proportionnels au turnover.
 
     Coûts modélisés :
+<<<<<<< Updated upstream
       • slippage_bps : coût en basis points en one-way (par entrée OU sortie).
         Phase 3 audit (2026-05-06) — fix : on charge `turnover_two_way` au lieu
         de `turnover_one_way` pour comptabiliser entrées + sorties. Avant, un
         full rotation ne payait que la moitié des frais (sortie attribuée à
         la période suivante mais jamais facturée). Round-trip = 2× slippage_bps
         × position_size, naturellement.
+=======
+      • slippage_bps : coût en basis points sur la fraction du book qui
+        tourne (entrée OU sortie). Round-trip = 2× slippage si le ticker
+        est entré ce rebalance ET sortira au prochain.
+>>>>>>> Stashed changes
       • commission_per_share : coût $ par action. Modélisé en bps en
         divisant par le prix moyen de l'entrée (approximation : 0.005 $/sh
         sur action à 100 $ ≈ 0.5 bp). Faute de connaître la taille du book
         en $, on capitalise sur 1.0 USD de book → c'est l'estimation
         relative qu'on cherche.
+<<<<<<< Updated upstream
       • risk_free_rate_annual : taux money market sur la fraction non investie
         (cash drag). Phase 3 audit — avant, la fraction uninvested rapportait
         0% → Sharpe surestimé. Maintenant on crédite (1 - Σw) × rf × period.
+=======
+>>>>>>> Stashed changes
     """
     top = _rank_top_n(snapshot_t, top_n, active_filter=active_filter)
     top_tickers = [t for t, _ in top]
@@ -284,7 +299,11 @@ def _compute_period(
         weights = {}
 
     returns: dict[str, float] = {}
+<<<<<<< Updated upstream
     for t, _w in weights.items():
+=======
+    for t, w in weights.items():
+>>>>>>> Stashed changes
         if t in px_t and t in px_t1:
             returns[t] = (px_t1[t] / px_t[t]) - 1.0
 
@@ -295,6 +314,7 @@ def _compute_period(
     prev = prev_weights or {}
     all_keys = set(weights) | set(prev)
     turnover_two_way = sum(abs(weights.get(t, 0.0) - prev.get(t, 0.0)) for t in all_keys)
+<<<<<<< Updated upstream
     turnover = turnover_two_way / 2.0  # one-way (reporté pour le diagnostic)
 
     # Phase 3 audit (2026-05-06) — coût slippage = bps × turnover_two_way :
@@ -306,11 +326,28 @@ def _compute_period(
     # Commission : approximation. Sans modèle de book size en $, on fixe par
     # convention 1 unité de book = 1 USD ; commission_per_share / px = bps
     # par dollar tourné → multipliée par turnover_two_way (entrées + sorties).
+=======
+    turnover = turnover_two_way / 2.0  # one-way
+
+    # Coût total : slippage + commission proportionnels au turnover.
+    # Convention : turnover=1.0 (full rotation) ponctionne 1× slippage_bps en
+    # one-way. La sortie au rebalance suivant est attribuée à la période
+    # suivante, donc on n'inclut pas le round-trip ici.
+    slip_cost = (slippage_bps / 10_000.0) * turnover
+
+    # Commission : approximation. Sans modèle de book size en $, on fixe par
+    # convention 1 unité de book = 1 USD ; commission_per_share / px = bps
+    # par dollar tourné → multipliée par turnover.
+>>>>>>> Stashed changes
     if commission_per_share > 0 and px_t:
         # Average price of tickers we touched ce rebalance (un proxy raisonnable).
         touched = [px_t[t] for t in all_keys if t in px_t]
         avg_px = sum(touched) / len(touched) if touched else 0.0
+<<<<<<< Updated upstream
         comm_cost = (commission_per_share / avg_px) * turnover_two_way if avg_px > 0 else 0.0
+=======
+        comm_cost = (commission_per_share / avg_px) * turnover if avg_px > 0 else 0.0
+>>>>>>> Stashed changes
     else:
         comm_cost = 0.0
 
@@ -351,6 +388,7 @@ def _compute_period(
             # On rapporte la pénalité au book entier (donc × dw pour pondérer).
             impact_cost += (impact_coef * 1e-4) * (ratio ** 2) * dw
 
+<<<<<<< Updated upstream
     # Phase 3 audit (2026-05-06) — cash drag : la fraction non investie
     # (Σw < 1 car certains tickers droppés faute de px_t) doit rapporter le
     # taux money market, pas 0%. Avant : Sharpe surestimé +200-500 bps/an.
@@ -365,6 +403,10 @@ def _compute_period(
 
     cost_pct = slip_cost + comm_cost + impact_cost
     portfolio_return = portfolio_return_gross + cash_yield - cost_pct
+=======
+    cost_pct = slip_cost + comm_cost + impact_cost
+    portfolio_return = portfolio_return_gross - cost_pct
+>>>>>>> Stashed changes
 
     return PeriodResult(
         signal_date=str(snapshot_t.get("snapshot_date") or ""),
@@ -650,12 +692,19 @@ def run_titan_top_n(
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
     point_in_time: bool = True,
+<<<<<<< Updated upstream
     publication_lag_days: int = 5,
     book_size_usd: float = 100_000.0,
     impact_coef: float = 0.0,
     fallback_turnover_ratio: float = 0.005,
     restrict_to: list[str] | None = None,
     min_period_days: float = 7.0,
+=======
+    publication_lag_days: int = 0,
+    book_size_usd: float = 100_000.0,
+    impact_coef: float = 0.0,
+    fallback_turnover_ratio: float = 0.005,
+>>>>>>> Stashed changes
 ) -> BacktestResult:
     """Backtest complet du pipeline TITAN sur l'historique disponible.
 
@@ -666,6 +715,7 @@ def run_titan_top_n(
         slippage_bps: bps de slippage one-way par turnover (défaut 0).
         commission_per_share: $ par action sur les ordres (défaut 0).
         publication_lag_days: décale le ranking de N jours pour éviter le
+<<<<<<< Updated upstream
             lookahead fondamentaux (défaut 5 = lag minimum FMP/yfinance T+2 à
             T+5). 90 j = lag 10-K typique pour un backtest production-grade.
             À signal_date d_i, on utilisera le snapshot le plus récent < d_i
@@ -673,6 +723,13 @@ def run_titan_top_n(
         min_period_days: espacement minimum entre deux rebalances (défaut 7 —
             audit 2026-07-16, cf. `_resample_snapshots`). 0/1 = legacy
             (rebalance sur chaque snapshot quotidien disponible).
+=======
+            lookahead fondamentaux (défaut 0 = pas de lag, comportement
+            historique). 90 j = lag 10-K typique, recommandé pour un
+            backtest production-grade. À signal_date d_i, on utilisera
+            le snapshot le plus récent < d_i - lag pour ranker, mais le
+            return reste mesuré sur (d_i, d_{i+1}).
+>>>>>>> Stashed changes
     """
     dates = universe_history.list_snapshots()
     if len(dates) < 2:
@@ -764,19 +821,82 @@ def run_titan_top_n(
     if median_period_days <= 0:
         median_period_days = 7.0
 
+    # Audit S1.1 — filtre point-in-time : à chaque date, on ne ranke que
+    # les tickers qui étaient actifs à ce moment (registry delisted). Sans
+    # ça le backtest sur-estime systématiquement l'alpha (survivorship bias).
+    active_per_date: dict[date, set[str]] = {}
+    if point_in_time:
+        try:
+            from modules import delisted as _delisted
+            for d, _ in snapshots:
+                active_per_date[d] = _delisted.get_active_at(d)
+        except Exception as e:
+            logger.warning(f"[Backtest] point-in-time filter disabled: {e}")
+            active_per_date = {}
+
+    # Audit S3.x — Publication lag : pour chaque signal_date d_i, on cherche
+    # le snapshot le plus récent dont la date est ≤ d_i - lag. C'est ce
+    # snapshot ranking-source qui sera utilisé, mais le return reste mesuré
+    # sur (d_i, d_{i+1}) — i.e. on ranke avec des fondamentaux "périmés"
+    # pour éviter d'utiliser des publications postérieures à la décision.
+    from datetime import timedelta as _td
+    def _ranking_snapshot_for(signal_date: date) -> dict[str, Any] | None:
+        if publication_lag_days <= 0:
+            return None  # 0 = pas de shift, callers utiliseront le snapshot natif
+        cutoff = signal_date - _td(days=publication_lag_days)
+        chosen: dict[str, Any] | None = None
+        for d_x, s_x in snapshots:
+            if d_x <= cutoff:
+                chosen = s_x
+            else:
+                break
+        return chosen
+
     periods: list[PeriodResult] = []
     prev_w: dict[str, float] = {}
     n_skipped_periods = 0
+<<<<<<< Updated upstream
     n_low_quality_snapshots = 0
     for (d0, s0), (d1, s1) in zip(snapshots[:-1], snapshots[1:], strict=False):
+=======
+    for (d0, s0), (d1, s1) in zip(snapshots[:-1], snapshots[1:]):
+>>>>>>> Stashed changes
         active = active_per_date.get(d0)
         # Si le registry est vide pour cette date (premier run, pas d'historique
         # de delisting) ⇒ active=set vide ⇒ on désactive le filtre pour ne pas
         # vider artificiellement le ranking.
         active_filter = active if active else None
+<<<<<<< Updated upstream
         # Intersection avec la whitelist demandée (si fournie).
         if restrict_set is not None:
             active_filter = (active_filter & restrict_set) if active_filter else restrict_set
+=======
+
+        ranking_snapshot = _ranking_snapshot_for(d0) if publication_lag_days > 0 else s0
+        if ranking_snapshot is None:
+            # Lag plus large que l'historique disponible avant d0 → skip cette
+            # période (impossible de ranker sans lookahead).
+            n_skipped_periods += 1
+            continue
+
+        period = _compute_period(
+            ranking_snapshot, s1, top_n,
+            weighting=weighting,
+            prev_weights=prev_w,
+            slippage_bps=slippage_bps,
+            commission_per_share=commission_per_share,
+            active_filter=active_filter,
+            book_size_usd=book_size_usd,
+            impact_coef=impact_coef,
+            fallback_turnover_ratio=fallback_turnover_ratio,
+        )
+        # Override les dates : signal_date doit refléter d0, pas la date
+        # du snapshot ranking (sinon l'equity curve est désalignée).
+        period.signal_date = d0.isoformat()
+        period.next_date = d1.isoformat()
+        periods.append(period)
+        prev_w = period.weights
+>>>>>>> Stashed changes
 
         ranking_snapshot = _ranking_snapshot_for(d0) if publication_lag_days > 0 else s0
         if ranking_snapshot is None:
@@ -877,6 +997,7 @@ def run_titan_top_n(
     total_costs = sum(p.cost_pct for p in periods)
     result.diagnostics = {
         "n_snapshots":          len(snapshots),
+<<<<<<< Updated upstream
         "n_snapshots_raw":      n_snapshots_raw,
         "min_period_days":      min_period_days,
         "n_periods":            len(periods),
@@ -884,6 +1005,10 @@ def run_titan_top_n(
         "n_skipped_low_dq":     n_low_quality_snapshots,
         "n_bootstrap_snapshots": n_bootstrap,
         "lookahead_warning":     n_bootstrap > 0,
+=======
+        "n_periods":            len(periods),
+        "n_skipped_lag":        n_skipped_periods,
+>>>>>>> Stashed changes
         "benchmark":            benchmark,
         "weighting":            weighting,
         "slippage_bps":         slippage_bps,
@@ -893,8 +1018,11 @@ def run_titan_top_n(
         "impact_coef":          impact_coef,
         "avg_turnover":         round(avg_turnover, 4),
         "total_costs_pct":      round(total_costs, 5),
+<<<<<<< Updated upstream
         "median_period_days":   round(median_period_days, 1),
         "annualization_factor": stats.get("annualization_factor", 1.0),
+=======
+>>>>>>> Stashed changes
         "date_range": {
             "start": snapshots[0][0].isoformat(),
             "end":   snapshots[-1][0].isoformat(),
@@ -929,11 +1057,18 @@ def _main() -> int:
                         "Alpaca = 0 ; Interactive Brokers = 0.005.")
     p.add_argument("--no-point-in-time", action="store_true",
                    help="Désactive le filtre point-in-time (registry delisted).")
+<<<<<<< Updated upstream
     p.add_argument("--publication-lag-days", type=int, default=5,
                    help="Décalage du ranking en jours (anti-lookahead "
                         "fondamentaux). Défaut 5 j = lag minimum FMP/yf T+2 à T+5. "
                         "0 = pas de lag (legacy, lookahead implicite). "
                         "90 = lag 10-K production-grade. "
+=======
+    p.add_argument("--publication-lag-days", type=int, default=0,
+                   help="Décalage du ranking en jours (anti-lookahead "
+                        "fondamentaux). 0 = pas de lag (défaut, comportement "
+                        "historique). 90 = recommandé production, lag 10-K. "
+>>>>>>> Stashed changes
                         "Quand lag > historique → période skippée.")
     p.add_argument("--book-size-usd", type=float, default=100_000.0,
                    help="Taille du book simulé en USD (défaut 100k). Sert "
@@ -946,6 +1081,7 @@ def _main() -> int:
                    help="Si avg_volume_3m absent du snapshot, on estime "
                         "ADTV_$ = market_cap × ratio (défaut 0.5 %%, "
                         "typique large-cap US).")
+<<<<<<< Updated upstream
     p.add_argument("--min-period-days", type=float, default=7.0,
                    help="Espacement minimum entre deux rebalances (défaut 7). "
                         "Audit 2026-07-16 : universe_scheduler ne rafraîchit "
@@ -954,6 +1090,8 @@ def _main() -> int:
                         "prix figés et des sauts de plusieurs jours comptés "
                         "comme '1 jour', ce qui fausse Sharpe/alpha. "
                         "0 ou 1 = legacy (un rebalance par snapshot dispo).")
+=======
+>>>>>>> Stashed changes
     p.add_argument("--json", action="store_true",
                    help="Sortie JSON brut (sinon : tableau lisible humain)")
     args = p.parse_args()
@@ -971,7 +1109,10 @@ def _main() -> int:
             book_size_usd=args.book_size_usd,
             impact_coef=args.impact_coef,
             fallback_turnover_ratio=args.fallback_turnover,
+<<<<<<< Updated upstream
             min_period_days=args.min_period_days,
+=======
+>>>>>>> Stashed changes
         )
     except ValueError as e:
         print(f"ERROR: {e}")

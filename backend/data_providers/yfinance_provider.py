@@ -115,6 +115,7 @@ def _col_date(df: Any | None, idx: int) -> str | None:
         return None
 
 
+<<<<<<< Updated upstream
 class _PrevYear(TypedDict):
     """Sortie de `_prev_year_ratios` — ratios float nullable + 2 dates ISO str."""
     return_on_assets_prev_year: float | None
@@ -140,6 +141,9 @@ def _empty_prev_year() -> _PrevYear:
 
 
 def _prev_year_ratios(tk: yf.Ticker) -> _PrevYear:
+=======
+def _prev_year_ratios(tk: "yf.Ticker") -> dict[str, float | None]:
+>>>>>>> Stashed changes
     """Extrait les ratios Piotroski Y-1 + dates de période fiscale depuis
     les annuels yfinance.
 
@@ -161,7 +165,19 @@ def _prev_year_ratios(tk: yf.Ticker) -> _PrevYear:
     Fail-open : si un appel yfinance pète, on renvoie {} (scoring retombe
     sur le cas 4 critères absolus — pas de régression).
     """
+<<<<<<< Updated upstream
     out: _PrevYear = _empty_prev_year()
+=======
+    out: dict[str, float | str | None] = {
+        "return_on_assets_prev_year":   None,
+        "debt_to_equity_prev_year":     None,
+        "current_ratio_prev_year":      None,
+        "shares_outstanding_prev_year": None,
+        "gross_margin_prev_year":       None,
+        "fundamentals_period_end":      None,
+        "fundamentals_period_end_y1":   None,
+    }
+>>>>>>> Stashed changes
     try:
         bs = tk.balance_sheet            # DataFrame annuel (cols = years desc)
         fin = tk.financials              # P&L annuel
@@ -228,7 +244,11 @@ def _prev_year_ratios(tk: yf.Ticker) -> _PrevYear:
     return out
 
 
+<<<<<<< Updated upstream
 def _scrape_revisions_and_earnings(tk: yf.Ticker) -> dict[str, Any]:
+=======
+def _scrape_revisions_and_earnings(tk: "yf.Ticker") -> dict[str, Any]:
+>>>>>>> Stashed changes
     """Scrape les révisions analyste, l'earnings surprise history et le prochain
     earnings depuis yfinance. Tout fail-open — si une source pète, on retourne
     le dict avec None pour les fields concernés.
@@ -368,7 +388,11 @@ def _scrape_revisions_and_earnings(tk: yf.Ticker) -> dict[str, Any]:
     return out
 
 
+<<<<<<< Updated upstream
 def _scrape_dividend_safety(tk: yf.Ticker, info: dict[str, Any]) -> dict[str, Any]:
+=======
+def _scrape_dividend_safety(tk: "yf.Ticker", info: dict[str, Any]) -> dict[str, Any]:
+>>>>>>> Stashed changes
     """Champs pour le Dividend Safety Score. yfinance.info expose payoutRatio
     et fiveYearAvgDividendYield directement ; dividendsPaid vient du cashflow
     annuel (négatif chez yfinance par convention)."""
@@ -553,7 +577,11 @@ class YFinanceProvider(FundamentalProviderBase, MarketDataProviderBase):
         # Piotroski Y-1 : un seul appel tk.balance_sheet + tk.financials qui
         # hit yfinance 1× de plus. Fail-open → pas de régression si les
         # annuels sont absents (ex: nouvelles IPOs < 1 an).
+<<<<<<< Updated upstream
         prev = _prev_year_ratios(tk) if tk is not None else _empty_prev_year()
+=======
+        prev = _prev_year_ratios(tk) if tk is not None else {}
+>>>>>>> Stashed changes
         # Lot 16 — Revisions / Earnings Surprise / Dividend Safety. Fail-open.
         rev_data = _scrape_revisions_and_earnings(tk) if tk is not None else {}
         div_safety = _scrape_dividend_safety(tk, info) if tk is not None else {}

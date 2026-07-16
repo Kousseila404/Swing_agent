@@ -15,6 +15,7 @@ import {
 import { addTrade, closeTrade, fetchEquityCurve, fetchLtDecision, fetchPortfolio } from '../api/client';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSectorBenchmarkPortfolio } from '../hooks/useApi';
+<<<<<<< Updated upstream
 import { POLL } from '../config/api';
 import ApiErrorBanner from './common/ApiErrorBanner';
 import { PageSkeleton } from './common/Skeleton';
@@ -22,6 +23,10 @@ import PositionCard from './portfolio/PositionCard';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
 import { readString, writeString } from '../utils/storage';
+=======
+import ApiErrorBanner from './common/ApiErrorBanner';
+import { holdingPeriod, parseNum, tradePnL, mergeLivePositions, toCsv } from '../utils/portfolio';
+>>>>>>> Stashed changes
 
 function downloadFile(filename, content, type = 'text/csv') {
   const blob = new Blob([content], { type });
@@ -141,6 +146,7 @@ function ThesisBadge({ thesis }) {
 export default function PortfolioPage() {
   const qc = useQueryClient();
 
+<<<<<<< Updated upstream
   const portfolioQ = useQuery({ queryKey: ['portfolio'],     queryFn: fetchPortfolio,    refetchInterval: POLL.PORTFOLIO });
   const curveQ     = useQuery({ queryKey: ['equity_curve'],  queryFn: fetchEquityCurve,  refetchInterval: POLL.PORTFOLIO });
   const benchQ     = useSectorBenchmarkPortfolio();
@@ -160,6 +166,11 @@ export default function PortfolioPage() {
   }, [ltQ.data]);
 
   const ltSummary = ltQ.data?.summary;
+=======
+  const portfolioQ = useQuery({ queryKey: ['portfolio'], queryFn: fetchPortfolio, refetchInterval: 15_000 });
+  const curveQ     = useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, refetchInterval: 15_000 });
+  const benchQ     = useSectorBenchmarkPortfolio();
+>>>>>>> Stashed changes
 
   const [tab, setTab]                     = useState('open');
   // Refonte UI 2026-04-29 — vue cartes par défaut (4-15 positions),
@@ -517,6 +528,7 @@ export default function PortfolioPage() {
                     return (
                       <tr key={p.Ticker} className="scan-row" id={`open-${p.Ticker}`}
                           data-ticker={p.Ticker}>
+<<<<<<< Updated upstream
                         <td>
                           <strong
                             onClick={() => setAnalysisTicker(p.Ticker)}
@@ -527,6 +539,9 @@ export default function PortfolioPage() {
                               Catégorie + thèse sont surfacées dans la vue cartes. */}
                           <LtDecisionBadge decision={ltByTicker[String(p.Ticker || '').toUpperCase()]} />
                         </td>
+=======
+                        <td><strong>{p.Ticker}</strong></td>
+>>>>>>> Stashed changes
                         <td>
                           <span className="scan-signal-badge" style={{ color: dirIsLong ? 'var(--success)' : 'var(--danger)', borderColor: (dirIsLong ? 'var(--success)' : 'var(--danger)') + '50' }}>
                             {dirIsLong ? '▲' : '▼'} {p.Direction}

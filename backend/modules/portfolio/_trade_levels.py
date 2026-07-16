@@ -47,6 +47,7 @@ _K_TP = 6.0
 _FALLBACK_SL_PCT = 0.10   # −10 %
 _FALLBACK_TP_PCT = 0.25   # +25 %
 
+<<<<<<< Updated upstream
 # Bornes de sanité — refonte 2026-04-29 (Buffett-LT).
 # SL : floor catastrophe → 35 % (était 30). Wide-net anti black-swan, pas
 # anti-correction ordinaire. La vraie sortie passe par lt_exit_policy.
@@ -59,6 +60,19 @@ _MIN_SL_PCT = 0.05   # −5 % (broker minimum — distance ≥ 0.5 % requise)
 _MAX_SL_PCT = 0.35   # −35 % (catastrophe floor élargi)
 _MIN_TP_PCT = 0.10   # +10 % (sanity broker)
 _MAX_TP_PCT = 5.00   # +500 % (plafond Alpaca uniquement, pas un objectif)
+=======
+# Bornes de sanité — calibrées pour horizon LT (30 j ouvrés). Évite des SL/TP
+# aberrants sur un outlier de vol (ex: penny stock σ annualisée 300 % → SL
+# à −100 % = absurde) tout en laissant respirer un hold 1-3 mois.
+# Recalibrage 2026-04-27 : SL max élargi à −30 % (garde-fou catastrophe, pas
+# anti-bruit) et TP max élargi à +100 % pour ne pas plafonner les vrais winners
+# d'une stratégie factor-based (alpha provient de la queue droite power-law).
+# Le ratio R/R cible reste 2:1 sur la zone non-clampée (k_tp/k_sl = 4/2).
+_MIN_SL_PCT = 0.04   # −4 % (stop minimum — un hold 2 mois mérite +3 % de corde)
+_MAX_SL_PCT = 0.30   # −30 % (garde-fou catastrophe LT — pas anti-bruit)
+_MIN_TP_PCT = 0.10   # +10 % (pas de TP ridicule sur un LT)
+_MAX_TP_PCT = 1.00   # +100 % (laisser courir les vraies winners — power-law alpha)
+>>>>>>> Stashed changes
 
 
 def suggest_trade_levels(
