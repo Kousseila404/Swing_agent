@@ -147,7 +147,7 @@ def run_auto_approve() -> dict[str, Any]:
                 )
                 resp.raise_for_status()
                 result = (resp.json() or {}).get("results", [{}])[0]
-                ticker = prop.get("ticker")
+                ticker = str(prop.get("ticker") or "")
                 if result.get("ok"):
                     approved.append({"ticker": ticker, "id": prop["id"], "reason": reason})
                     logger.info(f"[AutoApprove] {ticker} approuvé automatiquement — {reason}")
