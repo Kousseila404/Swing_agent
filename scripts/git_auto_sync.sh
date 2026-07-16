@@ -50,8 +50,34 @@ if [ "$current_branch" != "$BRANCH" ]; then
   exit 0
 fi
 
-# ─── Auto-commit des changements locaux ─────────────────────────────
+# ─── Garde-fou 2026-07-16 : jamais committer un état cassé ──────────
+# Incident : un git stash pop malheureux a laissé des marqueurs de conflit
+# dans 20 fichiers, et l'ancienne version de ce script les a committés +
+# pushés tels quels → API cassée en prod (SyntaxError au reload). On
+# vérifie maintenant, AVANT tout commit, qu'aucun fichier modifié ne
+# contient de marqueur de conflit ni de .py invalide.
 if [ -n "$(git status --porcelain)" ]; then
+  bad=0
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    if grep -qE '^(<{7}|={7}|>{7})( |$)' "$f" 2>/dev/null; then
+      log "ERR marqueur de conflit détecté dans $f — commit annulé, résolution manuelle requise"
+      bad=1
+    fi
+    case "$f" in
+      *.py)
+        if ! python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$f" 2>>"$LOG"; then
+          log "ERR $f invalide (SyntaxError) — commit annulé"
+          bad=1
+        fi
+        ;;
+    esac
+  done <<< "$(git status --porcelain | awk '{print $2}')"
+
+  if [ "$bad" -eq 1 ]; then
+    exit 1
+  fi
+
   git add -A
   stat_line="$(git diff --cached --shortstat | sed 's/^ *//')"
   git commit --quiet -m "auto: sync $(ts) — ${stat_line:-no stat}"
