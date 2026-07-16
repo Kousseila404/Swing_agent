@@ -192,7 +192,7 @@ export default function TickerDetailPage() {
           </div>
 
           <div style={{ display: 'grid',
-                        gridTemplateColumns: 'repeat(7, 1fr)', gap: 12,
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 12,
                         fontSize: '0.85rem' }}>
             {PILLAR_FIELDS.map(f => (
               <div key={f.id}>

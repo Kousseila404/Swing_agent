@@ -11,6 +11,8 @@
  */
 import { useMemo, useState } from 'react';
 
+import { useIsMobile } from '../../hooks/useMediaQuery';
+
 const ACTION_PALETTE = {
   HOLD:              { label: 'CONSERVER',     border: 'rgba(148,163,184,0.35)', bg: 'rgba(148,163,184,0.06)', accent: '#94a3b8', cta: 'Position stable, rien à faire pour l\'instant.' },
   ADD_ON:            { label: 'RENFORCER',     border: 'rgba(59,130,246,0.55)',  bg: 'rgba(59,130,246,0.08)',  accent: '#60a5fa', cta: 'Buffett-style averaging-down — vérifier sizing avant d\'agir.' },
@@ -60,6 +62,10 @@ function PriceRow({ icon, label, value, pctVs, color }) {
 
 // ─── Matrice de prix : 3 colonnes propres, zéro chevauchement ─
 function PriceMatrix({ entry, current, sl, tp, buffett_sl, buffett_tp, let_it_ride }) {
+  // Audit 2026-07-16 — 3 colonnes (2×min 180px + centre) ≈ 480px minimum :
+  // déborde sur un modal/carte téléphone (~340-375px), forçant un scroll
+  // horizontal du body. Empilé verticalement sous 767px.
+  const isMobile = useIsMobile();
   if (!entry) return null;
 
   // Domaine de la barre — sans le markup absolu, on n'a plus besoin de le serrer.
@@ -87,8 +93,8 @@ function PriceMatrix({ entry, current, sl, tp, buffett_sl, buffett_tp, let_it_ri
       {/* ── Grille 3 cols : downside / now / upside ────────── */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(180px, 1fr) auto minmax(180px, 1fr)',
-        gap: '1rem', alignItems: 'center',
+        gridTemplateColumns: isMobile ? '1fr' : 'minmax(180px, 1fr) auto minmax(180px, 1fr)',
+        gap: isMobile ? '0.5rem' : '1rem', alignItems: 'center',
       }}>
         {/* Downside (gauche, aligné droite) */}
         <div style={{ minWidth: 0 }}>
@@ -107,9 +113,11 @@ function PriceMatrix({ entry, current, sl, tp, buffett_sl, buffett_tp, let_it_ri
 
         {/* Now (centre) — gros indicateur lisible */}
         <div style={{
-          textAlign: 'center', padding: '0 0.6rem',
-          borderLeft: '1px solid rgba(148,163,184,0.18)',
-          borderRight: '1px solid rgba(148,163,184,0.18)',
+          textAlign: 'center', padding: isMobile ? '0.4rem 0' : '0 0.6rem',
+          borderLeft: isMobile ? 'none' : '1px solid rgba(148,163,184,0.18)',
+          borderRight: isMobile ? 'none' : '1px solid rgba(148,163,184,0.18)',
+          borderTop: isMobile ? '1px solid rgba(148,163,184,0.18)' : 'none',
+          borderBottom: isMobile ? '1px solid rgba(148,163,184,0.18)' : 'none',
         }}>
           <div style={{
             fontSize: '0.6rem', color: 'var(--text-muted)',

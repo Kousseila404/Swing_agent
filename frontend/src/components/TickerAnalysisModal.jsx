@@ -53,7 +53,7 @@ function FactorGradesGrid({ grades }) {
   if (!grades) return null;
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
       gap: '0.4rem 0.7rem',
     }}>
       {Object.entries(grades).map(([label, info]) => (
@@ -273,7 +273,10 @@ function EntryPlanSection({ plan, ticker }) {
         )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* overflowX : les 3 colonnes fixes (80+110+90px) + auto ne tiennent pas
+          dans un modal mobile (~340px de large) — on scrolle plutôt que de
+          les écraser illisibles. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, overflowX: 'auto' }}>
         {(plan.tiers || []).map((tier, idx) => {
           const canWatch = tier.limit_price != null && tier.weight_pct > 0
                            && (tier.discount_pct ?? 0) < 0;
@@ -285,6 +288,7 @@ function EntryPlanSection({ plan, ticker }) {
               padding: '0.5rem 0.7rem', borderRadius: 6,
               background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
               fontSize: '0.78rem',
+              minWidth: 380,
             }}>
               <span style={{ fontWeight: 600 }}>{tier.label}</span>
               <span style={{

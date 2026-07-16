@@ -373,6 +373,16 @@
 /* ── PORTFOLIO PAGE ── */
 .portfolio-page { display: flex; flex-direction: column; gap: 1.25rem; }
 .port-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; }
+/* Audit 2026-07-16 — 6 colonnes fixes = ~50px/tuile sur téléphone (illisible).
+   Aucune media query n'existait pour le contenu de page (seul le shell nav
+   avait un breakpoint) — d'où la demande "adaptation téléphone". */
+@media (max-width: 900px) {
+  .port-kpis { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 560px) {
+  .port-kpis { grid-template-columns: repeat(2, 1fr); }
+  .port-kpi strong { font-size: 1.15rem; }
+}
 .port-kpi {
   background: var(--panel-bg); border: 1px solid var(--panel-border);
   border-radius: 14px; padding: 1rem; backdrop-filter: var(--glass-blur);

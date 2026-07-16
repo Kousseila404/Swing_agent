@@ -53,12 +53,18 @@ export function KV({ label, value, hint, tone }) {
   );
 }
 
-export function Grid({ children, cols = 4 }) {
+export function Grid({ children, cols = 4, minColWidth = 130 }) {
+  // `cols` reste accepté (compat call sites) mais n'est plus un compte figé —
+  // repeat(N, 1fr) débordait sur mobile (4 colonnes fixes dans un modal de
+  // ~340px = colonnes ~55px, illisible). auto-fit laisse le nombre de
+  // colonnes réel dépendre de la largeur dispo : ~4 sur desktop (modal
+  // ~600-680px), 2 sur téléphone, sans media query dédiée par section.
+  void cols;
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+        gridTemplateColumns: `repeat(auto-fit, minmax(${minColWidth}px, 1fr))`,
         gap: '0.6rem 1rem',
       }}
     >
