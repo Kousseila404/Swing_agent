@@ -26,6 +26,7 @@ backend/data/*.json
 backend/data/*.jsonl
 backend/data/*.csv
 backend/data/*.duckdb
+backend/data/*.duckdb.tmp
 backend/data/.jobs/
 backend/data/.universe_backups_quantamental/
 backend/data/charts/
@@ -56,3 +57,6 @@ backend/htmlcov/
 
 # Backups locaux (générés par scripts/backup_journal.sh)
 backups/
+
+# État local Claude Code (locks de tâches planifiées, etc.)
+.claude/

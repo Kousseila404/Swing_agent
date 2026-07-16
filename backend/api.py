@@ -52,7 +52,6 @@ from modules import api_core  # noqa: E402
 from modules.log import logger  # noqa: E402
 from routers import (  # noqa: E402
     attribution as attribution_router,
-<<<<<<< Updated upstream
 )
 from routers import (
     audit as audit_router,
@@ -64,11 +63,6 @@ from routers import (
     calendar as calendar_router,
 )
 from routers import (
-=======
-    audit as audit_router,
-    backtest as backtest_router,
-    calendar as calendar_router,
->>>>>>> Stashed changes
     data_health as data_health_router,
 )
 from routers import (
@@ -76,7 +70,6 @@ from routers import (
 )
 from routers import (
     macro as macro_router,
-<<<<<<< Updated upstream
 )
 from routers import (
     monitor as monitor_router,
@@ -88,13 +81,6 @@ from routers import (
     peers as peers_router,
 )
 from routers import (
-=======
-    monitor as monitor_router,
-    news as news_router,
-    peers as peers_router,
-    sec_filings as sec_filings_router,
-    sector_benchmark as sector_benchmark_router,
->>>>>>> Stashed changes
     portfolio as portfolio_router,
 )
 from routers import (
@@ -111,20 +97,15 @@ from routers import (
 )
 from routers import (
     system as system_router,
-<<<<<<< Updated upstream
 )
 from routers import (
     ticker_analysis as ticker_analysis_router,
 )
 from routers import (
-=======
-    ticker_analysis as ticker_analysis_router,
->>>>>>> Stashed changes
     trades as trades_router,
 )
 from routers import (
     universe as universe_router,
-    watchlist as watchlist_router,
 )
 from routers import (
     watchlist as watchlist_router,

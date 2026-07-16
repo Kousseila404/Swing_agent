@@ -6,10 +6,7 @@ import { factorColor } from '../utils/colors';
 import { fmtNum, fmtSignedPct as fmtPct, fmtMarketCap } from '../utils/format';
 import Pagination from './Pagination';
 import PresetBar from './common/PresetBar';
-<<<<<<< Updated upstream
 import { PageSkeleton } from './common/Skeleton';
-=======
->>>>>>> Stashed changes
 
 // SectorsPage — Rotation sectorielle : grille SectorCard + drill-down tickers.
 // Consomme /api/sectors (agrégats GICS + momentum 6M) + /api/sectors/{name}.

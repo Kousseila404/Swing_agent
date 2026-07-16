@@ -142,17 +142,12 @@ fi
 #     trop lâche en yearly). 60j train + 20j test = signal stable.
 rc_wfo=0
 if [[ "$(date +%d)" == "01" ]]; then
-<<<<<<< Updated upstream
     # Audit 2026-05-12 — lag 90→30 explicite. Historique snapshots actuel
     # = ~21j, lag 90 forçait l'auto-reduce (warning log). 30 est cohérent
     # avec un cycle trimestriel earnings + reporting yfinance T+5 à T+30.
     # À remonter vers 60-90 une fois 180+ jours d'historique disponibles.
     echo "── Step 3b/4 : wfo_monitor (mensuel, lag=30)"
     "$PYTHON" -m modules.wfo_monitor --train-days 30 --test-days 10 --publication-lag-days 30
-=======
-    echo "── Step 3b/4 : wfo_monitor (mensuel)"
-    "$PYTHON" -m modules.wfo_monitor --train-days 60 --test-days 20 --publication-lag-days 90
->>>>>>> Stashed changes
     rc_wfo=$?
     if [[ $rc_wfo -ne 0 ]]; then
         echo "WARN: wfo_monitor exit=$rc_wfo (historique probablement insuffisant — non bloquant)"

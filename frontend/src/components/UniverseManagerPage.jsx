@@ -9,7 +9,6 @@ import { fmtNum, fmtMarketCap, fmtSignedPct, safeCompare } from '../utils/format
 import { factorColor } from '../utils/colors';
 import Pagination from './Pagination';
 import PresetBar from './common/PresetBar';
-<<<<<<< Updated upstream
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { readJSON, writeJSON } from '../utils/storage';
 
@@ -46,8 +45,6 @@ const COL_TOOLTIPS = {
   reco:       'Note moyenne analystes (1=Strong Buy, 5=Strong Sell). Tri ↑ = Buy en tête.',
   upside:     'Upside vs target moyen analystes : (target / current_price − 1) × 100.',
 };
-=======
->>>>>>> Stashed changes
 
 // Polling adaptatif : 4s pendant rebuild (liste) + 3s pendant job → 30s idle.
 const POLL_ACTIVE_MS = 4000;
@@ -823,19 +820,12 @@ export default function UniverseManagerPage() {
           <PresetBar
             scope="universe"
             label="Vues univers"
-<<<<<<< Updated upstream
             current={{ sectorFilter, searchText, sortBy, buyFilter }}
-=======
-            current={{ sectorFilter, searchText, sortBy }}
->>>>>>> Stashed changes
             onApply={(p) => {
               if (p?.sectorFilter !== undefined) setSectorFilter(p.sectorFilter);
               if (p?.searchText   !== undefined) setSearchText(p.searchText);
               if (p?.sortBy       !== undefined) setSortBy(p.sortBy);
-<<<<<<< Updated upstream
               if (p?.buyFilter    !== undefined) setBuyFilter(p.buyFilter);
-=======
->>>>>>> Stashed changes
               setPage(1);
             }}
           />
@@ -864,7 +854,6 @@ export default function UniverseManagerPage() {
                   const reco = recoBucket(t.recommendation_mean);
                   const up   = upsidePct(t);
                   return (
-<<<<<<< Updated upstream
                     <tr
                       key={t.ticker}
                       className="scan-row"
@@ -887,9 +876,6 @@ export default function UniverseManagerPage() {
                           style={{ cursor: 'pointer' }}
                         />
                       </td>
-=======
-                    <tr key={t.ticker} className="scan-row" data-ticker={t.ticker}>
->>>>>>> Stashed changes
                       <td>
                         <div className="scan-ticker-cell">
                           <span className="scan-ticker-logo">📈</span>

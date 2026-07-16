@@ -883,7 +883,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-<<<<<<< Updated upstream
     "/api/watchlist": {
         parameters: {
             query?: never;
@@ -1174,8 +1173,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-=======
->>>>>>> Stashed changes
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2862,7 +2859,6 @@ export interface operations {
             };
         };
     };
-<<<<<<< Updated upstream
     get_watchlist_api_watchlist_get: {
         parameters: {
             query?: never;
@@ -3445,6 +3441,4 @@ export interface operations {
             };
         };
     };
-=======
->>>>>>> Stashed changes
 }
