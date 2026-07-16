@@ -65,6 +65,21 @@ Exemples :
             "Importe aussi les fills récents pour mettre à jour les trades OPEN clôturés par bracket."
         ),
     )
+    mode_group.add_argument(
+        "--auto-approve-proposals", action="store_true",
+        help=(
+            "Auto-approuve les propositions pending qui remplissent la règle "
+            "TITAN>=80 (ou 70-80 + support ON + Piotroski>=7), budget capé "
+            "2/run et 5/semaine. Appeler via cron en heures de marché."
+        ),
+    )
+    mode_group.add_argument(
+        "--daily-digest", action="store_true",
+        help=(
+            "Envoie un résumé Telegram quotidien actionnable : propositions "
+            "en attente (top 3), positions ouvertes, P&L. Appeler via cron le matin."
+        ),
+    )
 
     args = parser.parse_args()
 
