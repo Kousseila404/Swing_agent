@@ -116,6 +116,20 @@ déjà accès à tout) :
   (breakdown source_provider, ratio staleness, count `dq_sanitize`) et
   calcule une tendance dans le temps (le fix Étape 0 a-t-il fait baisser le
   ratio stale, le taux de panne yfinance monte/descend).
+- **Volet backtest/WFO** (vérifié en live le 2026-07-18 — état réel, pas une
+  supposition) : 87 snapshots historiques (seuil ≥60 atteint ✓), mais
+  seulement **8 trades clos** (4 WIN/4 LOSS, seuil ≥20 loin d'être atteint)
+  et `wfo_calibration.py` a tourné 2 fois avec **n_folds=0 / avg_ic_test=0.0**
+  les deux fois — aucune validation statistique des poids TITAN n'existe à
+  ce jour. Le digest doit suivre cette progression (folds, IC, trades clos
+  vs seuils) à chaque run. **Interdiction stricte** : cet agent ne modifie
+  JAMAIS les poids/logique de `sector_metrics/_scoring.py` ou tout autre
+  code de scoring — avec 8 trades, tout pattern trouvé serait du bruit
+  statistique, pas un signal. Le jour où WFO produit enfin des folds avec
+  un IC significatif, l'agent rédige une **proposition écrite** (fichier
+  markdown, pas de commit sur le code de scoring) que l'utilisateur relit
+  et applique lui-même s'il est d'accord. Jamais d'auto-application sur la
+  logique qui pilote de l'argent réel.
 - Digest envoyé via le mécanisme Telegram existant (réutiliser le chemin de
   `daily_digest.py`/`alerter.py`, pas en recréer un).
 - Branché comme step supplémentaire dans `run_titan.sh` (déjà cron quotidien
