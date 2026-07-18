@@ -130,6 +130,14 @@ déjà accès à tout) :
   markdown, pas de commit sur le code de scoring) que l'utilisateur relit
   et applique lui-même s'il est d'accord. Jamais d'auto-application sur la
   logique qui pilote de l'argent réel.
+- **Persistance obligatoire** : chaque run **append** son constat structuré
+  (JSON : date, ratio staleness par source, dq_sanitize count, n_folds WFO,
+  avg_ic_test, n_trades clos win/loss) dans `data/metrics_history.jsonl`
+  (même pattern que `wfo_history.jsonl` déjà utilisé) — Telegram est éphémère
+  et ne suffit pas pour juger une tendance sur plusieurs semaines (ex : la
+  décision payant/gratuit a besoin d'un historique consultable, pas du
+  dernier message). Le digest Telegram reste le canal de notification
+  proactive, le JSONL est la mémoire durable.
 - Digest envoyé via le mécanisme Telegram existant (réutiliser le chemin de
   `daily_digest.py`/`alerter.py`, pas en recréer un).
 - Branché comme step supplémentaire dans `run_titan.sh` (déjà cron quotidien
