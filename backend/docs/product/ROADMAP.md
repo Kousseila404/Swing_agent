@@ -65,17 +65,75 @@ Root cause identifiée dans `auto_proposer.py` (`plan_proposals`, ~L793-798) :
 - Pas de "résumé 3 lignes" avant de plonger dans le détail — l'utilisateur
   doit parcourir toute la table pour juger s'il y a quelque chose de neuf.
 
+### 3. "La donnée elle-même n'est peut-être pas fiable"
+
+Vérifié en live (2026-07-18, pas une supposition) :
+- **100% des fondamentaux viennent de yfinance gratuit** — `FMP_ENABLED=false`
+  par défaut (`data_providers/__init__.py`), le tier gratuit FMP ne sert que
+  `/profile`. Aucune redondance de source.
+- **Bug de mesure de fraîcheur** : `fundamentals_period_end`
+  (`data_providers/yfinance_provider.py:142-177`) est calculé depuis les
+  états financiers **annuels** (`tk.balance_sheet`/`tk.financials`), jamais
+  trimestriels, malgré un commentaire ailleurs qui dit "Q-latest". Résultat
+  live : 77/461 tickers (17%) taggués stale, dont AAPL à 287j — artefact
+  cyclique du mode de calcul, pas un vrai trou de donnée à chaque fois.
+- **33/461 tickers actuellement `dq_sanitize`** (valeurs brutes aberrantes
+  clampées). Historique du projet : audit du 2026-04-23 a trouvé 310/516
+  tickers avec valeurs aberrantes à un moment donné — la fragilité de la
+  source gratuite est un vécu répété, pas hypothétique.
+- `data_confidence.py` et `/api/data_health` ne couvrent que les
+  fondamentaux — rien sur finnhub/insider/SEC/news. Chacune de ces sources
+  a sa propre logique de cache ad hoc, pas le pattern Provider partagé.
+- Décision payant vs gratuit : **différée**, prise avec des chiffres réels
+  (taux de panne mesuré) plutôt qu'à l'instinct — cf. Étape 0bis.
+
 ## Roadmap — étape par étape
 
 On implémente une étape, on valide en usage réel, puis on passe à la
-suivante. Pas de gros refactor big-bang.
+suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 → 4.
 
-### Étape 1 — Qualifier le signal (fraîcheur + segmentation) — PAS COMMENCÉE
+### Étape 0 — Fondation data — PAS COMMENCÉE
+- Corriger le calcul de fraîcheur fondamentaux : utiliser
+  `tk.quarterly_balance_sheet`/`quarterly_financials` là où c'est pertinent
+  au lieu des seuls états annuels (`yfinance_provider.py`).
+- Étendre le pattern `data_providers` (Provider ABC + cache/fallback partagé)
+  à finnhub/insider/SEC/news au lieu de leur logique de cache ad hoc propre.
+- Généraliser `data_confidence.py` à toutes les sources, pas seulement
+  fondamentaux.
+- Unifier `/api/data_health` en tableau de bord toutes-sources (pas que
+  l'univers fondamental).
+- Zéro coût — refactor pur, aucune souscription/API payante. **Ne jamais**
+  activer un tier payant automatiquement : toujours différé à l'utilisateur
+  avec des chiffres réels.
+
+### Étape 0bis — Agent d'analyse des chiffres (local, pas cloud) — PAS COMMENCÉE
+Découverte en configurant l'automatisation : un agent cloud n'a accès ni aux
+secrets `.env`, ni à l'API live, ni au bot Telegram — seulement à un clone
+Git. Donc ce n'est PAS une 2e routine cloud, c'est une fonctionnalité à
+coder et faire tourner via le cron local existant (`run_titan.sh`, qui a
+déjà accès à tout) :
+- Nouveau module qui lit `/api/data_health` + stats `universe.json`
+  (breakdown source_provider, ratio staleness, count `dq_sanitize`) et
+  calcule une tendance dans le temps (le fix Étape 0 a-t-il fait baisser le
+  ratio stale, le taux de panne yfinance monte/descend).
+- Digest envoyé via le mécanisme Telegram existant (réutiliser le chemin de
+  `daily_digest.py`/`alerter.py`, pas en recréer un).
+- Branché comme step supplémentaire dans `run_titan.sh` (déjà cron quotidien
+  — pas besoin d'un nouveau crontab).
+- Purement lecture/analyse — ne modifie jamais le code ni l'état trading.
+
+### Étape 1 — Qualifier le signal (fraîcheur + segmentation + narratif) — PAS COMMENCÉE
 Exploite `universe_history` (déjà en place, zéro nouvelle infra) :
 - Delta de score / flip de verdict vs N jours en arrière.
 - Segmentation en 3 catégories de conviction plutôt qu'un tri plat :
   🔥 Nouveau signal (verdict vient de changer) / ⭐ Confirmé (stable, fort)
   / 👁 Surveillance (proche du seuil, pas encore actionnable).
+- **Narratif généré** par ticker : synthèse en une phrase du "pourquoi"
+  (Piotroski, momentum, support, earnings, tilt) au lieu de badges bruts —
+  tous les ingrédients existent déjà dans `context`, c'est de la synthèse.
+- **Fraîcheur causale** : quand le verdict change, croiser avec
+  `earnings_surprise.py`/`insider_enrich.py`/`revisions_score.py` pour dire
+  *pourquoi* ça a bougé, pas juste que ça a bougé.
 
 ### Étape 2 — Condenser l'UI Proposals — PAS COMMENCÉE
 - Vue "résumé" (3-5 top picks en cartes) au-dessus de la table détaillée,
@@ -101,3 +159,19 @@ Exploite `universe_history` (déjà en place, zéro nouvelle infra) :
   signal, pas de nouvelle prise de décision automatisée.
 - Chaque étape se ferme par un test manuel de l'utilisateur en conditions
   réelles avant de passer à la suivante.
+
+## Automatisation (2026-07-18)
+
+Une routine cloud ("SwingQuant Roadmap Builder") exécute ce roadmap étape
+par étape en autonome pendant que l'utilisateur est déconnecté du VPS —
+même mécanique que "SwingQuant CI Auto-Fix" déjà en prod : push direct sur
+`main`, auto-pull + auto-restart côté VPS, aucune action manuelle de
+déploiement nécessaire. 1 étape par déclenchement (pas tout d'un coup) pour
+rester revue-able. Garde-fous codés dans la routine :
+- Jamais de logique trading/risk/ordre/killswitch/sizing.
+- Jamais de souscription/API payante activée automatiquement.
+- Si tests rouges après 2 tentatives, ou si l'étape nécessiterait de toucher
+  au trading/risk : la routine s'arrête et écrit une note `BLOCKED` ici au
+  lieu de forcer.
+- Une fois 0→4 fait, la routine passe en mode "suivi" (health check léger,
+  pas de nouvelle scope inventée seule).
