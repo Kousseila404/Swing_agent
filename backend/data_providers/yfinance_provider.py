@@ -139,6 +139,29 @@ def _empty_prev_year() -> _PrevYear:
     }
 
 
+def _latest_quarterly_period_end(tk: yf.Ticker) -> str | None:
+    """Date ISO de fin du dernier trimestre publié (tk.quarterly_balance_sheet /
+    tk.quarterly_financials, colonne 0 = la plus récente).
+
+    Bug fraîcheur (roadmap Étape 0, 2026-07-18) : `fundamentals_period_end`
+    n'était calculé que depuis les états **annuels**, alors qu'un 10-Q publié
+    entre deux 10-K est presque toujours plus récent. Résultat en prod :
+    77/461 tickers taggués stale (dont AAPL à 287j) alors que leur dernier
+    trimestre est frais — artefact du mode de calcul, pas un vrai trou de
+    donnée.
+
+    Fail-open : None si le scraping trimestriel échoue ou si rien n'est
+    disponible — l'appelant retombe alors sur la date annuelle seule.
+    """
+    try:
+        qbs = tk.quarterly_balance_sheet
+        qfin = tk.quarterly_financials
+    except Exception as e:
+        logger.debug(f"[YF prev_year] quarterly fetch failed: {e}")
+        return None
+    return _col_date(qbs, 0) or _col_date(qfin, 0)
+
+
 def _prev_year_ratios(tk: yf.Ticker) -> _PrevYear:
     """Extrait les ratios Piotroski Y-1 + dates de période fiscale depuis
     les annuels yfinance.
@@ -151,8 +174,11 @@ def _prev_year_ratios(tk: yf.Ticker) -> _PrevYear:
       - gross_margin_prev_year     : Gross Profit Y-1 / Total Revenue Y-1
 
     Plus 2 dates ISO :
-      - fundamentals_period_end    : fin de période fiscale Y0 (la plus récente)
-      - fundamentals_period_end_y1 : fin de période fiscale Y-1
+      - fundamentals_period_end    : fin de période fiscale la plus récente
+        connue (annuelle OU trimestrielle, cf. `_latest_quarterly_period_end`)
+      - fundamentals_period_end_y1 : fin de période fiscale Y-1 (annuelle —
+        c'est le référentiel des `*_prev_year` ci-dessus, ne doit pas glisser
+        vers le trimestriel)
 
     Permet à `_piotroski_score_pillar(as_of, publication_lag_days)` de
     refuser un Y-1 dont la période fiscale n'a pas encore été publiée à
@@ -173,7 +199,15 @@ def _prev_year_ratios(tk: yf.Ticker) -> _PrevYear:
     fin_prev = _prev_year_col(fin)
     # On extrait les dates même si une seule des deux sources marche : la
     # bs_prev est plus fiable que fin (P&L parfois absent en free yfinance).
-    out["fundamentals_period_end"]    = _col_date(bs, 0) or _col_date(fin, 0)
+    annual_period_end = _col_date(bs, 0) or _col_date(fin, 0)
+    quarterly_period_end = _latest_quarterly_period_end(tk)
+    # Fraîcheur = période la plus récente disponible, annuelle ou trimestrielle
+    # (comparaison de chaînes ISO YYYY-MM-DD, triable lexicographiquement).
+    out["fundamentals_period_end"] = max(
+        (d for d in (annual_period_end, quarterly_period_end) if d), default=None,
+    )
+    # Y-1 reste strictement annuel : c'est le référentiel des *_prev_year
+    # extraits plus bas (bs_prev/fin_prev = colonne annuelle 1).
     out["fundamentals_period_end_y1"] = _col_date(bs, 1) or _col_date(fin, 1)
     if bs_prev is None and fin_prev is None:
         return out
