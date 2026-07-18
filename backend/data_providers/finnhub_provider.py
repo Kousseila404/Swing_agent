@@ -36,6 +36,8 @@ from urllib import parse, request
 
 from modules.log import logger
 
+from ._disk_cache import read_json_cache, write_json_cache
+
 _BASE_URL = "https://finnhub.io/api/v1"
 _HTTP_TIMEOUT = 10.0
 _MIN_DELAY_SECONDS = 1.05   # 60/min = 1 call/sec, on garde une marge.
@@ -122,12 +124,7 @@ def _fetch_json(endpoint: str, params: dict[str, Any], api_key: str) -> Any:
         return None
 
 
-def _ensure_cache_dir() -> None:
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
 def _cache_path(ticker: str) -> Path:
-    _ensure_cache_dir()
     return _CACHE_DIR / f"{ticker.upper()}.json"
 
 
@@ -139,42 +136,17 @@ _CACHE_SCHEMA_VERSION = 1
 
 
 def _read_cache(ticker: str) -> dict[str, Any] | None:
-    p = _cache_path(ticker)
-    if not p.exists():
-        return None
-    try:
-        payload = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    cached_at = payload.get("_cached_at")
-    if not isinstance(cached_at, (int, float)):
-        return None
-    if time.time() - cached_at > _CACHE_TTL_SECONDS:
-        return None
-    # Phase 6 — refuse les caches d'une version de schéma antérieure.
-    if payload.get("_schema_version") != _CACHE_SCHEMA_VERSION:
-        logger.info(
-            f"[finnhub] {ticker} cache schema obsolète "
-            f"(v={payload.get('_schema_version')}, attendu v{_CACHE_SCHEMA_VERSION}) "
-            f"— re-fetch."
-        )
-        return None
-    return payload
+    return read_json_cache(
+        _cache_path(ticker), _CACHE_TTL_SECONDS,
+        schema_version=_CACHE_SCHEMA_VERSION, label="finnhub",
+    )
 
 
 def _write_cache(ticker: str, payload: dict[str, Any]) -> None:
-    p = _cache_path(ticker)
-    payload = {
-        **payload,
-        "_cached_at": time.time(),
-        "_schema_version": _CACHE_SCHEMA_VERSION,
-    }
-    try:
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        tmp.replace(p)
-    except OSError as e:
-        logger.warning(f"[finnhub] cache write failed for {ticker}: {e}")
+    write_json_cache(
+        _cache_path(ticker), payload,
+        schema_version=_CACHE_SCHEMA_VERSION, label="finnhub",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

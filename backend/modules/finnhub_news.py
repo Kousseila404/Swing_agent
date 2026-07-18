@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib import error as urlerror
 from urllib import parse, request
 
+from data_providers._disk_cache import read_json_cache, write_json_cache
 from modules.log import logger
 
 _BASE_URL = "https://finnhub.io/api/v1"
@@ -40,26 +40,16 @@ def _cache_path(ticker: str, days: int) -> Path:
 
 
 def _read_cache(ticker: str, days: int) -> dict[str, Any] | None:
-    p = _cache_path(ticker, days)
-    if not p.exists():
-        return None
-    if time.time() - p.stat().st_mtime > _CACHE_TTL_SECONDS:
-        return None
-    try:
-        with open(p, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    return read_json_cache(
+        _cache_path(ticker, days), _CACHE_TTL_SECONDS,
+        use_mtime=True, label="finnhub_news",
+    )
 
 
 def _write_cache(ticker: str, days: int, payload: dict[str, Any]) -> None:
-    try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        p = _cache_path(ticker, days)
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-    except Exception as exc:
-        logger.warning(f"[finnhub_news] cache write fail: {exc}")
+    write_json_cache(
+        _cache_path(ticker, days), payload, stamp=False, label="finnhub_news",
+    )
 
 
 def _normalize_article(raw: dict[str, Any]) -> dict[str, Any]:

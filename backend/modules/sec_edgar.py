@@ -28,6 +28,7 @@ from typing import Any
 from urllib import error as urlerror
 from urllib import request
 
+from data_providers._disk_cache import read_json_cache, write_json_cache
 from modules.log import logger
 
 _USER_AGENT = "SwingQuant TITAN research@swingquant.local"
@@ -100,40 +101,16 @@ def _fetch_json(url: str) -> dict[str, Any] | None:
         return None
 
 
-def _ensure_cache_dir() -> None:
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
 def _cache_path(ticker: str) -> Path:
-    _ensure_cache_dir()
     return _CACHE_DIR / f"insider_{ticker.upper()}.json"
 
 
 def _read_cache(ticker: str) -> dict[str, Any] | None:
-    p = _cache_path(ticker)
-    if not p.exists():
-        return None
-    try:
-        payload = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    cached_at = payload.get("_cached_at")
-    if not isinstance(cached_at, (int, float)):
-        return None
-    if time.time() - cached_at > _CACHE_TTL_SECONDS:
-        return None
-    return payload
+    return read_json_cache(_cache_path(ticker), _CACHE_TTL_SECONDS, label="sec_edgar")
 
 
 def _write_cache(ticker: str, payload: dict[str, Any]) -> None:
-    p = _cache_path(ticker)
-    payload["_cached_at"] = time.time()
-    try:
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        tmp.replace(p)
-    except OSError as e:
-        logger.warning(f"[sec_edgar] cache write failed for {ticker}: {e}")
+    write_json_cache(_cache_path(ticker), payload, label="sec_edgar")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -146,15 +123,9 @@ def _load_cik_map() -> dict[str, str]:
     Cache disque 7 jours. La table SEC pèse ~500 KB → load instantané.
     Fail-open : retourne {} si SEC indisponible.
     """
-    _ensure_cache_dir()
-    if _CIK_MAP_CACHE.exists():
-        try:
-            payload = json.loads(_CIK_MAP_CACHE.read_text(encoding="utf-8"))
-            cached_at = payload.get("_cached_at", 0)
-            if time.time() - cached_at < _CIK_MAP_TTL_SECONDS:
-                return payload.get("map") or {}
-        except (OSError, ValueError):
-            pass
+    cached = read_json_cache(_CIK_MAP_CACHE, _CIK_MAP_TTL_SECONDS, label="sec_edgar")
+    if cached is not None:
+        return cached.get("map") or {}
 
     raw = _fetch_json(_CIK_MAP_URL)
     if not isinstance(raw, dict):
@@ -168,13 +139,7 @@ def _load_cik_map() -> dict[str, str]:
         cik = entry.get("cik_str")
         if t and cik is not None:
             out[t] = str(cik).zfill(10)
-    try:
-        _CIK_MAP_CACHE.write_text(
-            json.dumps({"_cached_at": time.time(), "map": out}),
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
+    write_json_cache(_CIK_MAP_CACHE, {"map": out}, label="sec_edgar")
     return out
 
 
@@ -236,25 +201,16 @@ def _filings_cache_path(ticker: str) -> Path:
 
 
 def _read_filings_cache(ticker: str) -> dict[str, Any] | None:
-    p = _filings_cache_path(ticker)
-    if not p.exists():
-        return None
-    if time.time() - p.stat().st_mtime > _FILINGS_CACHE_TTL:
-        return None
-    try:
-        with open(p, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    return read_json_cache(
+        _filings_cache_path(ticker), _FILINGS_CACHE_TTL,
+        use_mtime=True, label="sec_edgar",
+    )
 
 
 def _write_filings_cache(ticker: str, payload: dict[str, Any]) -> None:
-    try:
-        _FILINGS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(_filings_cache_path(ticker), "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-    except Exception as exc:
-        logger.warning(f"[sec_edgar] filings cache write fail: {exc}")
+    write_json_cache(
+        _filings_cache_path(ticker), payload, stamp=False, label="sec_edgar",
+    )
 
 
 def _archive_url(cik: str, accession: str, primary_doc: str | None) -> str:

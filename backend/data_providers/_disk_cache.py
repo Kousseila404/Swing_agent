@@ -1,0 +1,99 @@
+"""Cache disque TTL générique — pattern partagé entre enrichers secondaires
+(finnhub_provider, sec_edgar, finnhub_news).
+
+Étape 0 roadmap : ces modules dupliquaient chacun leur propre lecture/écriture
+JSON+TTL sur disque (variantes mineures : timestamp stocké vs mtime fichier,
+versionning de schéma optionnel). Ce module factorise la mécanique commune ;
+chaque caller garde son propre répertoire/TTL/clé de cache — seule la
+lecture/écriture est partagée, pas d'API Provider ABC ici (ces sources
+enrichissent `universe.json`, elles ne produisent pas de `FinancialRatios`).
+
+Politique fail-open : toute erreur de lecture/écriture (fichier corrompu,
+disque plein, payload non sérialisable) est avalée — un cache cassé ne doit
+jamais faire planter la pipeline d'enrichissement, il force juste un re-fetch.
+"""
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+from modules.log import logger
+
+
+def read_json_cache(
+    path: Path,
+    ttl_seconds: float,
+    *,
+    schema_version: int | None = None,
+    use_mtime: bool = False,
+    label: str = "disk_cache",
+) -> dict[str, Any] | None:
+    """Lit un fichier cache JSON si présent et frais. None sinon (miss/expiré/corrompu).
+
+    use_mtime=True : âge dérivé de `path.stat().st_mtime` — pour les caches qui
+    n'écrivent pas de timestamp interne (`write_json_cache(..., stamp=False)`).
+    use_mtime=False (défaut) : âge dérivé du champ `_cached_at` écrit par
+    `write_json_cache`.
+    """
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    if use_mtime:
+        try:
+            age = time.time() - path.stat().st_mtime
+        except OSError:
+            return None
+    else:
+        cached_at = payload.get("_cached_at")
+        if not isinstance(cached_at, (int, float)):
+            return None
+        age = time.time() - cached_at
+
+    if age > ttl_seconds:
+        return None
+
+    if schema_version is not None and payload.get("_schema_version") != schema_version:
+        logger.info(
+            f"[{label}] {path.stem} cache schema obsolète "
+            f"(v={payload.get('_schema_version')}, attendu v{schema_version}) — re-fetch."
+        )
+        return None
+
+    return payload
+
+
+def write_json_cache(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    schema_version: int | None = None,
+    stamp: bool = True,
+    label: str = "disk_cache",
+) -> None:
+    """Écrit un payload JSON atomiquement (tmp + rename), en créant le
+    répertoire parent si besoin.
+
+    stamp=True (défaut) : ajoute `_cached_at`=now — requis pour un `read_json_cache`
+    ultérieur avec `use_mtime=False`.
+    schema_version, si fourni, est ajouté comme `_schema_version`.
+    """
+    out = dict(payload)
+    if stamp:
+        out["_cached_at"] = time.time()
+    if schema_version is not None:
+        out["_schema_version"] = schema_version
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(out), encoding="utf-8")
+        tmp.replace(path)
+    except Exception as e:
+        logger.warning(f"[{label}] cache write failed for {path.name}: {e}")
