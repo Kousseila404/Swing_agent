@@ -100,8 +100,16 @@ suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 �
   (annuelle ou trimestrielle) — `fundamentals_period_end_y1` reste
   volontairement annuel (référentiel Piotroski Y/Y inchangé). Corrige le
   faux-stale type AAPL@287j causé par l'ancien calcul annuel-only.
-- Étendre le pattern `data_providers` (Provider ABC + cache/fallback partagé)
-  à finnhub/insider/SEC/news au lieu de leur logique de cache ad hoc propre.
+- [FAIT 2026-07-18] Factorisé le cache disque TTL ad hoc dupliqué 5x
+  (`finnhub_provider`, `sec_edgar` insider/filings/CIK-map, `finnhub_news`)
+  dans `data_providers/_disk_cache.py` (`read_json_cache`/`write_json_cache`).
+  Chaque module garde son propre répertoire/TTL/clé — comportement inchangé
+  (mêmes TTL, mêmes chemins de cache, fail-open préservé), seule la mécanique
+  lecture/écriture JSON+TTL est partagée. Pas de changement de contrat
+  `Provider ABC` : ces sources enrichissent `universe.json`, elles ne
+  produisent pas de `FinancialRatios` — les forcer dans
+  `FundamentalProviderBase` aurait touché le pipeline de scoring, hors scope
+  de ce refactor pur.
 - Généraliser `data_confidence.py` à toutes les sources, pas seulement
   fondamentaux. **Attention en l'implémentant** : ce module alimente déjà
   `_sizing_buffett.apply_buffett_tilt` et `lt_exit_policy.decide`
