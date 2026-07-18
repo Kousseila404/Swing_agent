@@ -117,6 +117,18 @@ suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 �
   Généraliser la formule sans changer le comportement des tickers déjà
   couverts (fondamentaux) demande un jugement humain sur comment isoler le
   nouveau facteur multi-source ; ne pas reformuler l'existant à la volée.
+  **BLOCKED (2026-07-18):** vérifié en code — `confidence_score` gate
+  directement `EXIT_VALUATION` et `confidence_drop`/WARN dans
+  `lt_exit_policy.decide` (`lt_exit_policy.py:344-427`) et pondère le tilt
+  de sizing dans `_sizing_buffett.apply_buffett_tilt`
+  (`_sizing_buffett.py:154-155`). Généraliser la formule multiplicative de
+  `compute_confidence` pour absorber finnhub/insider/SEC/news sans
+  définition humaine de comment isoler ce nouveau facteur risquerait de
+  faire glisser silencieusement les scores de confiance — donc le
+  sizing/exit — sur des tickers déjà en prod. Reste exactement le jugement
+  humain que ce bullet demande déjà ; un agent autonome ne tranche pas ce
+  choix. Prochain run : passer au bullet suivant (`/api/data_health`
+  toutes-sources) tant que celui-ci n'est pas débloqué par l'utilisateur.
 - Unifier `/api/data_health` en tableau de bord toutes-sources (pas que
   l'univers fondamental).
 - Zéro coût — refactor pur, aucune souscription/API payante. **Ne jamais**
