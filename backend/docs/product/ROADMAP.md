@@ -93,13 +93,22 @@ On implémente une étape, on valide en usage réel, puis on passe à la
 suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 → 4.
 
 ### Étape 0 — Fondation data — PAS COMMENCÉE
-- Corriger le calcul de fraîcheur fondamentaux : utiliser
-  `tk.quarterly_balance_sheet`/`quarterly_financials` là où c'est pertinent
-  au lieu des seuls états annuels (`yfinance_provider.py`).
+- [FAIT 2026-07-18] Corriger le calcul de fraîcheur fondamentaux : ajout de
+  `_latest_quarterly_period_end()` (`yfinance_provider.py`), qui lit
+  `tk.quarterly_balance_sheet`/`quarterly_financials` en plus des annuels.
+  `fundamentals_period_end` retient désormais la période la plus récente
+  (annuelle ou trimestrielle) — `fundamentals_period_end_y1` reste
+  volontairement annuel (référentiel Piotroski Y/Y inchangé). Corrige le
+  faux-stale type AAPL@287j causé par l'ancien calcul annuel-only.
 - Étendre le pattern `data_providers` (Provider ABC + cache/fallback partagé)
   à finnhub/insider/SEC/news au lieu de leur logique de cache ad hoc propre.
 - Généraliser `data_confidence.py` à toutes les sources, pas seulement
-  fondamentaux.
+  fondamentaux. **Attention en l'implémentant** : ce module alimente déjà
+  `_sizing_buffett.apply_buffett_tilt` et `lt_exit_policy.decide`
+  (inhibition EXIT_VALUATION) — donc de la logique de sizing/exit réelle.
+  Généraliser la formule sans changer le comportement des tickers déjà
+  couverts (fondamentaux) demande un jugement humain sur comment isoler le
+  nouveau facteur multi-source ; ne pas reformuler l'existant à la volée.
 - Unifier `/api/data_health` en tableau de bord toutes-sources (pas que
   l'univers fondamental).
 - Zéro coût — refactor pur, aucune souscription/API payante. **Ne jamais**
