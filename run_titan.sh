@@ -156,6 +156,22 @@ else
     echo "── Step 3b/4 : wfo_monitor SKIP (jour $(date +%d), exécuté seulement le 01)"
 fi
 
+# ── 3c. Agent d'analyse des chiffres (local, pas cloud) ──────────
+#     Étape 0bis roadmap — purement lecture/analyse : lit /api/data_health
+#     + wfo_history.jsonl + universe_history + journal de trades, calcule
+#     une tendance dans le temps et pousse un digest Telegram (canal
+#     alerter existant). Persiste data/metrics_history.jsonl (mémoire
+#     durable — Telegram est éphémère). Ne modifie jamais le code ni
+#     l'état trading ; si un jour WFO produit un IC significatif, écrit au
+#     plus une proposition markdown pour relecture humaine (jamais de
+#     poids de scoring appliqués automatiquement).
+echo "── Step 3c/4 : metrics_agent (digest tendance data quality + WFO)"
+"$PYTHON" -m modules.metrics_agent
+rc_metrics=$?
+if [[ $rc_metrics -ne 0 ]]; then
+    echo "WARN: metrics_agent exit=$rc_metrics (non bloquant)"
+fi
+
 # ── 4. Refresh propositions (auto_proposer + Telegram) ───────────
 #     Évalue les gates (killswitch, CB, régime macro, slots libres, cash)
 #     et enqueue jusqu'à N propositions à valider manuellement dans l'UI.
