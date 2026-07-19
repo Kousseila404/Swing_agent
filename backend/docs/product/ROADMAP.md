@@ -289,6 +289,18 @@ le même trio statique.
 
 ### Étape 4 — Exploration (si besoin après 1-3) — PAS COMMENCÉE
 - Screener multi-critères sauvegardable.
+  **BLOCKED (2026-07-19):** seul item non-FAIT restant sur l'ensemble du
+  roadmap (0→4). Comme noté par le run précédent dans le bullet "Vue
+  comparaison" ci-dessous, ce bullet reste un pas séparé, plus large que
+  ce qui a été spécifié pour les étapes 0-3 : ni les critères de filtrage,
+  ni l'emplacement de la persistance (localStorage / backend DB / par
+  utilisateur), ni la maquette UI ne sont définis ici. Ce sont des choix
+  produit qui changent matériellement l'UX (ex : filtres persistés
+  changent le modèle de données si stockés côté backend) — jugement humain
+  requis avant implémentation, cf. stop condition (c) de la routine.
+  Prochain run : ne pas retenter automatiquement (cf. stop condition (d)) ;
+  reprendre uniquement une fois ce bullet précisé par l'utilisateur ici
+  (critères, lieu de stockage, wireframe/UI attendue).
 - [FAIT 2026-07-19] Vue comparaison multi-tickers dédiée : nouvel endpoint
   `GET /api/compare` (`modules/peer_comparison.build_compare_table`, 2 à 8
   tickers choisis librement par l'utilisateur, pas de contrainte
