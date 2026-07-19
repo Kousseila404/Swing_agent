@@ -292,6 +292,23 @@ le même trio statique.
 - Vue comparaison multi-tickers dédiée (au-delà de `PeerComparison`
   existant, à auditer avant de dupliquer).
 
+**BLOCKED (2026-07-19):** contrairement aux étapes 0→3, cette étape est
+formulée comme "(si besoin après 1-3)" — elle est explicitement
+conditionnée à un retour d'usage réel de l'utilisateur sur 1-3 (cf. Notes
+de méthode : "chaque étape se ferme par un test manuel de l'utilisateur en
+conditions réelles avant de passer à la suivante"), retour qui n'est pas
+documenté ici. Elle bundle en plus deux features distinctes sans le niveau
+de spécification (fichier/ligne, root cause) que chaque étape précédente
+avait : "screener multi-critères sauvegardable" ne précise ni les critères,
+ni où la sauvegarde vit (localStorage / backend·DB / par utilisateur), ni
+l'UI ; "vue comparaison multi-tickers" demande explicitement un audit
+préalable de `PeerComparison.jsx` (aucune décision sur le doublon prise
+ici) avant même de savoir s'il faut créer une nouvelle vue. Ce sont des
+choix UX/scope qui changent matériellement le produit — jugement humain
+requis (scope exact du screener, confirmation que 1-3 ne suffisent pas,
+verdict sur `PeerComparison`) avant qu'une routine autonome implémente
+quoi que ce soit ici.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
