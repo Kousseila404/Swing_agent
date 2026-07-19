@@ -284,7 +284,8 @@ def run_agent(
     """Collecte les métriques du jour, calcule la tendance, persiste et
     envoie le digest Telegram. Retourne l'entrée structurée."""
     timestamp = datetime.now(UTC).isoformat(timespec="seconds")
-    api_url = api_url or os.getenv("TITAN_API_URL", "http://localhost:8000")
+    if api_url is None:
+        api_url = os.getenv("TITAN_API_URL", "http://localhost:8000")
 
     previous_snap = _read_history(last_n=1)
     previous = previous_snap[0] if previous_snap else None
