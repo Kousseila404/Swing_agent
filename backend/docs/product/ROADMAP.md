@@ -240,11 +240,25 @@ proposition) :
 - Aucune modification du verdict `buy_signal`, du sizing ou de la logique
   d'exit — lecture seule sur `universe_history`/`scored_universe`.
 
-### Étape 2 — Condenser l'UI Proposals — PAS COMMENCÉE
-- Vue "résumé" (3-5 top picks en cartes) au-dessus de la table détaillée,
-  table repliable pour les power-users.
-- Réduire les colonnes par défaut ; le détail existe déjà via
-  `TickerAnalysisModal`, pas besoin de le dupliquer en colonnes.
+### Étape 2 — Condenser l'UI Proposals — [FAIT 2026-07-19]
+[FAIT 2026-07-19] `ProposalsPage.jsx` : nouvelle section "🎯 Top picks du
+jour" (jusqu'à 5 cartes, classées par conviction puis score TITAN — même
+classement que le tri "Conviction" de l'Étape 1, filtre `pending`
+uniquement), affichée au-dessus de la table. Chaque carte reprend le badge
+buy-signal, le badge conviction et le narratif une-phrase déjà calculés par
+`signal_qualification.py`, plus une checkbox reliée au même état de
+sélection que la table (sélectionner depuis une carte suffit pour
+approuver ensuite via l'ActionBar, sans ouvrir la table).
+- Table détaillée rendue repliable (bouton "▾/▸ Table détaillée (N)"),
+  expanded par défaut pour ne pas casser l'habitude d'approbation
+  existante — le power-user peut la replier une fois les top picks
+  suffisants.
+- Colonnes "Tendance" (sparkline `TickerSpark`) et "Mom 6M" retirées de la
+  table : doublons du chart prix (compact + TradingView) et du
+  `momentum_6m_pct` déjà affichés dans `TickerAnalysisModal` (accessible en
+  un clic sur le ticker).
+- Aucun changement de logique trading/risk/sizing — travail de présentation
+  pur sur `ProposalsPage.jsx`.
 
 ### Étape 3 — Proactivité réelle — PAS COMMENCÉE
 - Le digest Telegram devient un vrai call-to-action (lien direct vers la
