@@ -37,6 +37,11 @@ load_dotenv(dotenv_path=_ENV_PATH)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
+# URL publique du frontend déployé (ex: https://titan.ton-domaine.com/).
+# Optionnel — sert uniquement à construire un lien cliquable dans le digest
+# Telegram (Étape 3 roadmap). Vide → le digest omet le lien sans erreur.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").rstrip("/")
+
 # Anthropic (Claude) — analyse IA des candidats quantamentaux
 LLM_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 LLM_MODEL   = "claude-sonnet-4-6"

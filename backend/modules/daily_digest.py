@@ -3,6 +3,13 @@
 Un seul message le matin plutôt que devoir ouvrir l'appli pour voir l'état
 de la file de propositions : combien en attente, depuis combien de temps,
 lesquelles regarder en premier — plus un rappel de l'état du portefeuille.
+
+Étape 3 roadmap (proactivité réelle) : le digest ne liste plus le top-N par
+`titan_score` (quasi figé d'un jour à l'autre vu le cycle de rescoring
+budgété ~5j, cf. diagnostic roadmap) mais uniquement les propositions dont
+`context.qualification.conviction == "new_signal"` (Étape 1 —
+verdict actionnable ET qui vient de changer). Ajoute aussi un lien direct
+vers l'onglet Propositions si `config.FRONTEND_URL` est configuré.
 """
 from __future__ import annotations
 
@@ -10,10 +17,11 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+import config
 from modules import api_core, proposals
 from modules.log import logger
 
-_TOP_N = 3
+_TOP_N = 5
 
 
 def _fmt_age(created_at: str) -> str:
@@ -38,14 +46,32 @@ def _equity_snapshot() -> dict[str, Any]:
         return {}
 
 
-def build_digest_text() -> str:
-    pending = proposals.list_all(status="pending")
-    pending_sorted = sorted(
-        pending,
+def _new_signals(pending: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Propositions en `conviction == "new_signal"` (Étape 1), triées par
+    score TITAN décroissant. `qualification` est `None` en fail-open —
+    ces propositions ne sont jamais comptées "nouvelles" sans preuve.
+    """
+    fresh = [
+        p for p in pending
+        if ((p.get("context") or {}).get("qualification") or {}).get("conviction")
+        == "new_signal"
+    ]
+    return sorted(
+        fresh,
         key=lambda p: (p.get("context") or {}).get("titan_score") or 0,
         reverse=True,
     )
-    top = pending_sorted[:_TOP_N]
+
+
+def _proposals_link() -> str:
+    if not config.FRONTEND_URL:
+        return ""
+    return f"{config.FRONTEND_URL}/#/proposals"
+
+
+def build_digest_text() -> str:
+    pending = proposals.list_all(status="pending")
+    fresh = _new_signals(pending)[:_TOP_N]
     oldest = min(pending, key=lambda p: p.get("created_at") or "", default=None)
 
     eq = _equity_snapshot()
@@ -53,25 +79,29 @@ def build_digest_text() -> str:
 
     lines = ["\U0001f4ca <b>Digest quotidien SwingQuant</b>", ""]
 
+    if fresh:
+        lines.append(f"\U0001f525 <b>{len(fresh)} nouveau(x) signal(aux)</b> :")
+        for p in fresh:
+            ctx = p.get("context") or {}
+            verdict = (ctx.get("buy_signal") or {}).get("verdict", "?")
+            narrative = ((ctx.get("qualification") or {}).get("narrative")
+                         or p.get("ticker"))
+            lines.append(f"  • <b>{p.get('ticker')}</b> ({verdict}) — {narrative}")
+    else:
+        lines.append("\U0001f441 Aucun nouveau signal depuis le dernier cycle.")
+
     if pending:
         oldest_age = _fmt_age(oldest["created_at"]) if oldest else "?"
         lines.append(
-            f"\U0001f4cb <b>{len(pending)} proposition(s) en attente</b> "
+            f"\U0001f4cb {len(pending)} proposition(s) en attente au total "
             f"(la plus ancienne : {oldest_age})"
         )
-        for p in top:
-            ctx = p.get("context") or {}
-            titan = ctx.get("titan_score")
-            support = (ctx.get("support") or {}).get("level", "?")
-            verdict = (ctx.get("buy_signal") or {}).get("verdict", "?")
-            titan_str = f"{titan:.0f}" if titan is not None else "?"
-            lines.append(
-                f"  • {p.get('ticker')} — TITAN {titan_str} | {support} | {verdict}"
-            )
-        if len(pending) > _TOP_N:
-            lines.append(f"  … et {len(pending) - _TOP_N} autre(s)")
     else:
         lines.append("\U0001f4cb Aucune proposition en attente.")
+
+    link = _proposals_link()
+    if link:
+        lines.append(f'\U0001f449 <a href="{link}">Voir les propositions</a>')
 
     lines.append("")
     if eq:
