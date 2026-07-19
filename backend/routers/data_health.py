@@ -16,7 +16,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Security
 
-from modules import api_core
+from data_providers import finnhub_provider
+from modules import api_core, finnhub_news, sec_edgar
 from modules.fundamentals_cache import (
     cache_sanitize_stats,
     cache_stats,
@@ -127,6 +128,33 @@ def _universe_inventory() -> dict[str, Any]:
     }
 
 
+def _provider_sources_health() -> dict[str, Any]:
+    """Cache stats des sources non-fondamentales (finnhub enrich/insider/SEC
+    filings/news) — Étape 0 roadmap : dashboard toutes-sources, pas seulement
+    l'univers fondamental yfinance/FMP. Chaque source garde son propre cache
+    disque (cf. `data_providers/_disk_cache.py`) ; ici on ne fait qu'agréger
+    les stats déjà exposées par chaque module, sans toucher à leur logique
+    de fetch/enrichissement.
+    """
+    return {
+        "finnhub": {
+            "configured": finnhub_provider.FinnhubProvider.is_configured(),
+            "cache": finnhub_provider.cache_stats(),
+        },
+        "news": {
+            "configured": finnhub_news.is_configured(),
+            "cache": finnhub_news.cache_stats(),
+        },
+        "insider": {
+            "cache": sec_edgar.insider_cache_stats(),
+        },
+        "sec_filings": {
+            "cache": sec_edgar.filings_cache_stats(),
+        },
+        "cik_map_age_sec": sec_edgar.cik_map_age_sec(),
+    }
+
+
 def _global_severity(payload: dict[str, Any]) -> str:
     """Calcule la severity globale = pire des composantes."""
     severities = []
@@ -176,6 +204,8 @@ def get_data_health():
       - fundamentals_cache : n_cached, ages
       - universe : fields_missing par champ, fetched_at distribution, sources
       - fmp : quota_used / quota_max si dispo
+      - providers : cache stats finnhub/insider/SEC filings/news (Étape 0 —
+        dashboard toutes-sources, pas seulement fondamentaux)
 
     Endpoint **public** — pas d'info sensible, just observability.
     """
@@ -216,6 +246,13 @@ def get_data_health():
     # On peut juste lire les compteurs si get_providers() a déjà été appelé
     # ce process. Sinon (pas encore initialisé) → null.
     payload["fmp"] = _fmp_status()
+
+    # 4b. Sources non-fondamentales (finnhub/insider/SEC filings/news).
+    try:
+        payload["providers"] = _provider_sources_health()
+    except (OSError, ValueError, KeyError) as e:
+        logger.warning(f"[data_health] provider_sources_health failed: {e}")
+        payload["providers"] = {"error": str(e)}
 
     # 5. Severity globale
     payload["severity_global"] = _global_severity(payload)

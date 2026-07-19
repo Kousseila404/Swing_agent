@@ -28,7 +28,7 @@ from typing import Any
 from urllib import error as urlerror
 from urllib import request
 
-from data_providers._disk_cache import read_json_cache, write_json_cache
+from data_providers._disk_cache import dir_cache_stats, read_json_cache, write_json_cache
 from modules.log import logger
 
 _USER_AGENT = "SwingQuant TITAN research@swingquant.local"
@@ -111,6 +111,21 @@ def _read_cache(ticker: str) -> dict[str, Any] | None:
 
 def _write_cache(ticker: str, payload: dict[str, Any]) -> None:
     write_json_cache(_cache_path(ticker), payload, label="sec_edgar")
+
+
+def insider_cache_stats() -> dict[str, Any]:
+    """Stats diagnostiques du cache disque insider (Form 4) — pour `/api/data_health`."""
+    return dir_cache_stats(_CACHE_DIR, pattern="insider_*.json")
+
+
+def cik_map_age_sec() -> float | None:
+    """Âge en secondes du cache CIK map, ou None si absent."""
+    if not _CIK_MAP_CACHE.exists():
+        return None
+    try:
+        return round(time.time() - _CIK_MAP_CACHE.stat().st_mtime, 1)
+    except OSError:
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +226,11 @@ def _write_filings_cache(ticker: str, payload: dict[str, Any]) -> None:
     write_json_cache(
         _filings_cache_path(ticker), payload, stamp=False, label="sec_edgar",
     )
+
+
+def filings_cache_stats() -> dict[str, Any]:
+    """Stats diagnostiques du cache disque filings — pour `/api/data_health`."""
+    return dir_cache_stats(_FILINGS_CACHE_DIR)
 
 
 def _archive_url(cik: str, accession: str, primary_doc: str | None) -> str:

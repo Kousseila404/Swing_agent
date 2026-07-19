@@ -36,7 +36,7 @@ from urllib import parse, request
 
 from modules.log import logger
 
-from ._disk_cache import read_json_cache, write_json_cache
+from ._disk_cache import dir_cache_stats, read_json_cache, write_json_cache
 
 _BASE_URL = "https://finnhub.io/api/v1"
 _HTTP_TIMEOUT = 10.0
@@ -147,6 +147,11 @@ def _write_cache(ticker: str, payload: dict[str, Any]) -> None:
         _cache_path(ticker), payload,
         schema_version=_CACHE_SCHEMA_VERSION, label="finnhub",
     )
+
+
+def cache_stats() -> dict[str, Any]:
+    """Stats diagnostiques du cache disque — pour `/api/data_health`."""
+    return dir_cache_stats(_CACHE_DIR)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

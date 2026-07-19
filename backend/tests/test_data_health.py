@@ -144,6 +144,39 @@ def test_data_health_universe_sources_aggregation(client, isolated_universe, iso
     assert sources["yfinance+cached"] == 5
 
 
+# ─────────────────────────────────────────────────────────────────
+# Providers non-fondamentaux (Étape 0 — dashboard toutes-sources)
+# ─────────────────────────────────────────────────────────────────
+
+def test_data_health_exposes_providers_section(client):
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    providers = body["providers"]
+    for key in ("finnhub", "news", "insider", "sec_filings"):
+        assert key in providers
+        assert "cache" in providers[key]
+        assert "n_cached" in providers[key]["cache"]
+    assert "configured" in providers["finnhub"]
+    assert "configured" in providers["news"]
+    assert "cik_map_age_sec" in providers
+
+
+def test_data_health_providers_cache_counts_disk_files(client, tmp_path, monkeypatch):
+    """Un fichier cache finnhub sur disque doit remonter dans n_cached."""
+    from data_providers import finnhub_provider
+
+    cache_dir = tmp_path / "finnhub_cache"
+    monkeypatch.setattr(finnhub_provider, "_CACHE_DIR", cache_dir)
+    finnhub_provider._write_cache("AAPL", {"ticker": "AAPL", "error": None})
+    finnhub_provider._write_cache("MSFT", {"ticker": "MSFT", "error": "boom"})
+
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    cache = body["providers"]["finnhub"]["cache"]
+    assert cache["n_cached"] == 2
+    assert cache["n_errors"] == 1
+
+
 def test_data_health_no_universe_file(client, tmp_path, monkeypatch):
     """Universe absent → loaded=False, severity reste calculable."""
     monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", tmp_path / "missing.json")

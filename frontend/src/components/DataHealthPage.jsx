@@ -94,6 +94,7 @@ export default function DataHealthPage() {
   const fields = inv.fields_missing || {};
   const fa = inv.fetched_at || {};
   const nFlagged = sanitize.n_tickers_flagged || 0;
+  const providers = data.providers || {};
 
   return (
     <div className="page-content">
@@ -289,6 +290,36 @@ export default function DataHealthPage() {
             <Row label="Plus vieux (sec)" value={fmtNum(cache.oldest_age_sec, 0)} mono />
           </>
         )}
+      </Card>
+
+      {/* ── Sources non-fondamentales (finnhub/insider/SEC/news) ── */}
+      <Card title="🌐 Sources enrichissement (finnhub / insider / SEC / news)">
+        {[
+          ['finnhub', 'Finnhub (revisions/earnings)', providers.finnhub],
+          ['news', 'Finnhub news', providers.news],
+          ['insider', 'SEC insider (Form 4)', providers.insider],
+          ['sec_filings', 'SEC filings', providers.sec_filings],
+        ].map(([key, label, src]) => {
+          const c = (src && src.cache) || {};
+          return (
+            <div key={key} style={{ marginBottom: 10 }}>
+              <Row
+                label={label}
+                value={`${c.n_cached ?? 0} cachés${c.n_errors ? ` · ${c.n_errors} erreurs` : ''}`}
+                mono
+                color={c.n_errors > 0 ? 'var(--warning, #fbbf24)' : undefined}
+              />
+              {src && 'configured' in src && (
+                <Row label="Configuré" value={src.configured ? '✓ oui' : '✗ non'} />
+              )}
+            </div>
+          );
+        })}
+        <Row label="CIK map (âge)"
+             value={providers.cik_map_age_sec != null
+               ? `${fmtNum(providers.cik_map_age_sec / 3600, 1)} h`
+               : '—'}
+             mono />
       </Card>
 
       {/* ── FMP status ── */}

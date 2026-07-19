@@ -97,3 +97,50 @@ def write_json_cache(
         tmp.replace(path)
     except Exception as e:
         logger.warning(f"[{label}] cache write failed for {path.name}: {e}")
+
+
+def dir_cache_stats(cache_dir: Path, *, pattern: str = "*.json") -> dict[str, Any]:
+    """Stats agrégées sur un répertoire de cache disque — pour `/api/data_health`.
+
+    Contrairement à `read_json_cache`, ne filtre PAS par TTL/schema : on veut
+    l'état brut de ce qui est sur disque (expiré ou non) pour observer l'usage
+    réel d'une source (combien de tickers cachés, âge, taux d'erreur). Âge
+    dérivé de `_cached_at` si présent, sinon `mtime` fichier — couvre les deux
+    conventions utilisées par les callers de ce module. Fail-open : fichier
+    illisible/corrompu est ignoré silencieusement, jamais levé.
+    """
+    if not cache_dir.exists():
+        return {
+            "n_cached": 0, "oldest_age_sec": None, "youngest_age_sec": None,
+            "median_age_sec": None, "n_errors": 0,
+        }
+    now = time.time()
+    ages: list[float] = []
+    n_errors = 0
+    for path in cache_dir.glob(pattern):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        cached_at = payload.get("_cached_at")
+        if isinstance(cached_at, (int, float)):
+            age = now - cached_at
+        else:
+            try:
+                age = now - path.stat().st_mtime
+            except OSError:
+                continue
+        ages.append(age)
+        if payload.get("error"):
+            n_errors += 1
+    return {
+        "n_cached": len(ages),
+        "oldest_age_sec": round(max(ages), 1) if ages else None,
+        "youngest_age_sec": round(min(ages), 1) if ages else None,
+        "median_age_sec": round(sorted(ages)[len(ages) // 2], 1) if ages else None,
+        "n_errors": n_errors,
+    }

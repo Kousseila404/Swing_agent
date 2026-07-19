@@ -22,7 +22,7 @@ from typing import Any
 from urllib import error as urlerror
 from urllib import parse, request
 
-from data_providers._disk_cache import read_json_cache, write_json_cache
+from data_providers._disk_cache import dir_cache_stats, read_json_cache, write_json_cache
 from modules.log import logger
 
 _BASE_URL = "https://finnhub.io/api/v1"
@@ -33,6 +33,16 @@ _CACHE_TTL_SECONDS = 60 * 60  # 1h
 
 def _api_key() -> str:
     return os.getenv("FINNHUB_API_KEY", "").strip()
+
+
+def is_configured() -> bool:
+    """True si FINNHUB_API_KEY est set dans l'env (clé partagée avec finnhub_provider)."""
+    return bool(_api_key())
+
+
+def cache_stats() -> dict[str, Any]:
+    """Stats diagnostiques du cache disque — pour `/api/data_health`."""
+    return dir_cache_stats(_CACHE_DIR)
 
 
 def _cache_path(ticker: str, days: int) -> Path:
