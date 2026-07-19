@@ -145,12 +145,42 @@ suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 �
   activer un tier payant automatiquement : toujours différé à l'utilisateur
   avec des chiffres réels.
 
-### Étape 0bis — Agent d'analyse des chiffres (local, pas cloud) — PAS COMMENCÉE
+### Étape 0bis — Agent d'analyse des chiffres (local, pas cloud) — [FAIT 2026-07-19]
 Découverte en configurant l'automatisation : un agent cloud n'a accès ni aux
 secrets `.env`, ni à l'API live, ni au bot Telegram — seulement à un clone
 Git. Donc ce n'est PAS une 2e routine cloud, c'est une fonctionnalité à
 coder et faire tourner via le cron local existant (`run_titan.sh`, qui a
 déjà accès à tout) :
+
+[FAIT 2026-07-19] Implémenté `modules/metrics_agent.py`, branché comme
+step 3c non-bloquant dans `run_titan.sh` (après `wfo_monitor`, avant le
+refresh des propositions) :
+- Lit `/api/data_health` (severity, staleness fondamentaux, dq_sanitize)
+  via HTTP local (l'API est déjà up à ce stade du cron) — même source de
+  vérité que le dashboard, aucun seuil dupliqué. Lit aussi
+  `wfo_history.jsonl` (via `wfo_monitor`), `universe_history.list_snapshots()`
+  et le journal de trades (`evaluation.load_journal()` +
+  `perf_metrics.compute_metrics()`) pour le compte WIN/LOSS clos. Les seuils
+  de progression (60 snapshots, 20 trades clos, 3 folds WFO, IC 0.02/0.05)
+  sont repris tels quels de `audit_summary._TH` / du commentaire existant
+  dans `wfo_monitor.py` — aucune valeur inventée.
+- Calcule la tendance vs le run précédent (staleness, dq_sanitize) et
+  envoie un digest Telegram via le canal `alerter` existant, à chaque run
+  (fail-open si Telegram ou l'API sont indisponibles — jamais de crash du
+  cron).
+- Persiste chaque constat dans `data/metrics_history.jsonl` (append,
+  même pattern que `wfo_history.jsonl` déjà utilisé — gitignored, mémoire
+  durable côté VPS uniquement, Telegram étant éphémère).
+- **Garde-fou respecté** : le module ne touche jamais
+  `modules/sector_metrics/_scoring.py`. Si un run WFO produit un jour un
+  IC significatif (seuil IC > 0.05, repris du commentaire déjà présent
+  dans `wfo_monitor.py`), il écrit au plus une proposition markdown
+  (poids OOS vs poids prod) dans `data/wfo_proposals/`, idempotente par
+  timestamp de run WFO — jamais d'auto-application sur le code de scoring.
+  Avec `n_folds=0` actuellement, ce chemin ne se déclenche pas encore.
+- Tests : `backend/tests/test_metrics_agent.py` (14 tests — historique
+  JSONL, fail-open réseau/Telegram, tendance affichée, écriture/idempotence
+  de la proposition WFO).
 - Nouveau module qui lit `/api/data_health` + stats `universe.json`
   (breakdown source_provider, ratio staleness, count `dq_sanitize`) et
   calcule une tendance dans le temps (le fix Étape 0 a-t-il fait baisser le
