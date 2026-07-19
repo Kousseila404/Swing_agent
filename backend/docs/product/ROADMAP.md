@@ -213,18 +213,32 @@ refresh des propositions) :
   — pas besoin d'un nouveau crontab).
 - Purement lecture/analyse — ne modifie jamais le code ni l'état trading.
 
-### Étape 1 — Qualifier le signal (fraîcheur + segmentation + narratif) — PAS COMMENCÉE
-Exploite `universe_history` (déjà en place, zéro nouvelle infra) :
-- Delta de score / flip de verdict vs N jours en arrière.
-- Segmentation en 3 catégories de conviction plutôt qu'un tri plat :
-  🔥 Nouveau signal (verdict vient de changer) / ⭐ Confirmé (stable, fort)
-  / 👁 Surveillance (proche du seuil, pas encore actionnable).
-- **Narratif généré** par ticker : synthèse en une phrase du "pourquoi"
-  (Piotroski, momentum, support, earnings, tilt) au lieu de badges bruts —
-  tous les ingrédients existent déjà dans `context`, c'est de la synthèse.
-- **Fraîcheur causale** : quand le verdict change, croiser avec
-  `earnings_surprise.py`/`insider_enrich.py`/`revisions_score.py` pour dire
-  *pourquoi* ça a bougé, pas juste que ça a bougé.
+### Étape 1 — Qualifier le signal (fraîcheur + segmentation + narratif) — [FAIT 2026-07-19]
+[FAIT 2026-07-19] Nouveau module `modules/signal_qualification.py`, branché
+en lecture seule dans `auto_proposer.plan_proposals` (`context.qualification`,
+fail-open — une erreur de qualification ne fait jamais perdre une
+proposition) :
+- Delta de score TITAN + flip de verdict `buy_signal` vs N jours en arrière
+  (défaut 5j, aligné sur le cycle de rescoring budgété ~5j ouvrés), via
+  `universe_history.ticker_history()` — zéro nouvelle infra, comme prévu.
+  Limite documentée dans le module : `buy_signal` n'étant pas historisé, le
+  verdict "N jours en arrière" est une RECONSTITUTION (`compute_buy_signal`
+  rejoué sur le snapshot historique, sans le bloc `support` de l'époque).
+- Segmentation en 3 catégories de conviction (`classify_conviction`) :
+  🔥 Nouveau signal (verdict actionnable + changé) / ⭐ Confirmé (actionnable,
+  stable — ou historique insuffisant, jamais affiché "nouveau" sans preuve)
+  / 👁 Surveillance (verdict WATCH). Nouveau mode de tri "Conviction" côté
+  `ProposalsPage.jsx` (badge + tooltip narratif), en plus de score/poids/buy_zone.
+- **Narratif généré** (`build_narrative`) : synthèse une-phrase, pure
+  formatage des ingrédients déjà dans `context` (Piotroski, momentum,
+  support, revisions, earnings, tilt flags) — aucun nouveau calcul de score.
+- **Fraîcheur causale** (`causal_reasons`) : quand le verdict a changé,
+  croise `earnings_surprise.py`/insider (`insider_cluster_buying`)/
+  `revisions_score` entre l'instantané de référence et aujourd'hui.
+- Tests : `test_signal_qualification.py` (26) + 2 dans
+  `test_auto_proposer_gates.py` (intégration + fail-open dédié).
+- Aucune modification du verdict `buy_signal`, du sizing ou de la logique
+  d'exit — lecture seule sur `universe_history`/`scored_universe`.
 
 ### Étape 2 — Condenser l'UI Proposals — PAS COMMENCÉE
 - Vue "résumé" (3-5 top picks en cartes) au-dessus de la table détaillée,
