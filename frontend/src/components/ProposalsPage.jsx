@@ -21,14 +21,13 @@ import {
   useRegenerateProposals,
   useRejectProposalsBatch,
 } from '../hooks/useApi';
-import { fmtNum, fmtPctRaw, fmtPrice, fmtSignedPct } from '../utils/format';
+import { fmtNum, fmtPctRaw, fmtPrice } from '../utils/format';
 import { factorColor } from '../utils/colors';
 import ApiErrorBanner from './common/ApiErrorBanner';
 import EmptyState from './common/EmptyState';
 import PresetBar from './common/PresetBar';
 import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
-import TickerSpark from './common/TickerSpark';
 import { loadProposalDefaults } from '../utils/preferences';
 
 // Lot 14 — palette tilt flags (qarp/garp/consistent/cheap-junk/falling-knife).
@@ -512,6 +511,79 @@ function ConvictionBadge({ qualification }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Étape 2 roadmap — vue résumé (3-5 top picks en cartes) au-dessus de la
+// table détaillée. Reprend le classement par conviction (Étape 1), pas de
+// nouveau calcul de score. La table complète reste la source de vérité pour
+// éditer/approuver — les cartes ne font qu'aider à repérer le signal du jour
+// sans parcourir toute la table.
+// ─────────────────────────────────────────────────────────────────
+function TopPickCard({ p, selected, onToggle, onOpenAnalysis }) {
+  const ctx = p.context || {};
+  const qualification = ctx.qualification;
+  return (
+    <div className="card" style={{
+      padding: '0.7rem 0.85rem', minWidth: 200, flex: '1 1 200px',
+      border: selected ? '1px solid rgba(34,197,94,0.5)' : '1px solid var(--border)',
+      background: selected ? 'rgba(34,197,94,0.06)' : undefined,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <input type="checkbox" checked={selected} onChange={onToggle}
+               style={{ width: 15, height: 15, marginTop: 3, cursor: 'pointer' }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => onOpenAnalysis?.(p.ticker)}
+                    title="Cliquer pour ouvrir l'analyse complète"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 0, margin: 0,
+                      cursor: 'pointer', fontSize: '0.95rem', fontWeight: 800,
+                      color: 'var(--accent-primary)',
+                      textDecoration: 'underline dotted', textUnderlineOffset: 3,
+                    }}>
+              {p.ticker}
+            </button>
+            {Number.isFinite(ctx.titan_score) && (
+              <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem',
+                             color: factorColor(ctx.titan_score) }}>
+                {fmtNum(ctx.titan_score, 1)}
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+            {ctx.buy_signal && <BuySignalChip signal={ctx.buy_signal} />}
+            {qualification && <ConvictionBadge qualification={qualification} />}
+          </div>
+          {qualification?.narrative && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)',
+                          marginTop: 5, lineHeight: 1.35 }}>
+              {qualification.narrative}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopPicksSummary({ picks, selected, onToggle, onOpenAnalysis }) {
+  if (picks.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)',
+                    textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 6 }}>
+        🎯 Top picks du jour
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {picks.map(p => (
+          <TopPickCard key={p.id} p={p}
+                       selected={selected.has(p.id)}
+                       onToggle={() => onToggle(p.id)}
+                       onOpenAnalysis={onOpenAnalysis} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Ligne de proposition — table éditable
@@ -527,9 +599,6 @@ function ProposalRow({
   const isPending = p.status === 'pending';
 
   const titanCol = factorColor(ctx.titan_score);
-  const momCol   = ctx.momentum_pct == null
-                 ? 'var(--text-muted)'
-                 : ctx.momentum_pct >= 0 ? 'var(--success)' : 'var(--danger)';
 
   const getVal = (field, def) => {
     const v = edits[p.id]?.[field];
@@ -713,15 +782,6 @@ function ProposalRow({
 
       <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
         {fmtPrice(ctx.amount_usd, 0)}
-      </td>
-
-      <td style={{ textAlign: 'center' }}>
-        <TickerSpark ticker={p.ticker} width={70} height={20} />
-      </td>
-
-      <td style={{ textAlign: 'right', fontFamily: 'monospace',
-                   color: momCol, fontWeight: 600, fontSize: '0.78rem' }}>
-        {fmtSignedPct(ctx.momentum_pct, 1)}
       </td>
 
       <td style={{ fontSize: '0.68rem', color: 'var(--text-muted)',
@@ -914,6 +974,9 @@ export default function ProposalsPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [analysisTicker, setAnalysisTicker] = useState(null);
+  // Étape 2 roadmap — table détaillée repliable pour les power-users, la vue
+  // résumé (cartes) devient la lecture par défaut.
+  const [tableExpanded, setTableExpanded] = useState(true);
   const toastIdRef = useRef(0);
   const toast = (text, type = 'ok') => {
     const id = ++toastIdRef.current;
@@ -962,6 +1025,22 @@ export default function ProposalsPage() {
     }
     return copy;
   }, [proposalsQ.data, sortMode]);
+
+  // Étape 2 roadmap — top picks pour la vue résumé : toujours classés par
+  // conviction (indépendant du sortMode choisi pour la table), limité aux
+  // pending. N'a de sens que sur le filtre "À décider".
+  const topPicks = useMemo(() => {
+    if (statusFilter !== 'pending') return [];
+    const pending = sortedItems.filter(p => p.status === 'pending');
+    const titanKey = p => p.context?.titan_score ?? 0;
+    const ranked = [...pending].sort((a, b) => {
+      const ca = CONVICTION_RANK[a.context?.qualification?.conviction] ?? -1;
+      const cb = CONVICTION_RANK[b.context?.qualification?.conviction] ?? -1;
+      if (ca !== cb) return cb - ca;
+      return titanKey(b) - titanKey(a);
+    });
+    return ranked.slice(0, 5);
+  }, [sortedItems, statusFilter]);
 
   // Validation locale par proposition.
   const validated = useMemo(() => {
@@ -1193,6 +1272,13 @@ export default function ProposalsPage() {
         }}
       />
 
+      <TopPicksSummary
+        picks={topPicks}
+        selected={selected}
+        onToggle={toggleSelected}
+        onOpenAnalysis={setAnalysisTicker}
+      />
+
       {/* Filtres + tri */}
       <div style={{
         display: 'flex', gap: 8, flexWrap: 'wrap',
@@ -1289,6 +1375,14 @@ export default function ProposalsPage() {
       )}
 
       {sortedItems.length > 0 && (
+        <button type="button" onClick={() => setTableExpanded(v => !v)}
+                className="scan-filter-btn"
+                style={{ marginBottom: 8, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }}>
+          {tableExpanded ? '▾' : '▸'} Table détaillée ({sortedItems.length})
+        </button>
+      )}
+
+      {sortedItems.length > 0 && tableExpanded && (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="scan-table-wrap">
             <table className="scan-table">
@@ -1305,8 +1399,6 @@ export default function ProposalsPage() {
                   <th style={{ width: 110 }}>TP</th>
                   <th style={{ width: 80 }}>Size</th>
                   <th style={{ width: 90, textAlign: 'right' }}>Notional</th>
-                  <th style={{ width: 80, textAlign: 'center' }} title="Sparkline prix sur l'historique disponible">Tendance</th>
-                  <th style={{ width: 72, textAlign: 'right' }}>Mom 6M</th>
                   <th>Expire / décision</th>
                 </tr>
               </thead>
