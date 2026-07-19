@@ -329,6 +329,64 @@ def test_include_held_flag_keeps_held_tickers(
     assert aapl_prop["context"]["current_shares"] == 5
 
 
+def test_proposal_context_carries_signal_qualification(
+    monkeypatch, isolated_proposals, trading_allowed, cb_clean, bull_macro,
+    fresh_universe_json, empty_portfolio,
+):
+    """Étape 1 roadmap — chaque proposition porte context.qualification
+    (conviction/trend/narrative), sans historique préalable ici donc
+    conviction dérivée du seul verdict courant (pas d'historique = pas de
+    'nouveau signal' sans preuve, cf. signal_qualification.classify_conviction).
+    """
+    from modules import sector_metrics
+    monkeypatch.setattr(sector_metrics, "get_scored_universe", lambda: {
+        "AAPL": {"sector": "Technology", "titan_composite_score": 90.0},
+    })
+
+    from modules.portfolio_engine import PortfolioManager
+    monkeypatch.setattr(
+        PortfolioManager, "calculate_allocations",
+        lambda *a, **kw: _fake_allocations(["AAPL"]),
+    )
+
+    r = auto_proposer.plan_proposals(max_holdings=20, min_proposal_usd=100)
+    assert len(r.proposals) == 1
+    qualification = r.proposals[0]["context"]["qualification"]
+    assert qualification is not None
+    assert qualification["conviction"] in (
+        "new_signal", "confirmed", "watch", "other",
+    )
+    assert isinstance(qualification["narrative"], str) and qualification["narrative"]
+    assert qualification["trend"]["verdict_changed"] is None  # pas d'historique
+
+
+def test_proposal_survives_signal_qualification_failure(
+    monkeypatch, isolated_proposals, trading_allowed, cb_clean, bull_macro,
+    fresh_universe_json, empty_portfolio,
+):
+    """Fail-open : si signal_qualification lève, la proposition n'est PAS
+    perdue — context.qualification=None au lieu de faire planter le plan."""
+    from modules import sector_metrics
+    monkeypatch.setattr(sector_metrics, "get_scored_universe", lambda: {
+        "AAPL": {"sector": "Technology", "titan_composite_score": 90.0},
+    })
+
+    from modules.portfolio_engine import PortfolioManager
+    monkeypatch.setattr(
+        PortfolioManager, "calculate_allocations",
+        lambda *a, **kw: _fake_allocations(["AAPL"]),
+    )
+
+    monkeypatch.setattr(
+        auto_proposer.signal_qualification, "qualify_proposal",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    r = auto_proposer.plan_proposals(max_holdings=20, min_proposal_usd=100)
+    assert len(r.proposals) == 1
+    assert r.proposals[0]["context"]["qualification"] is None
+
+
 def test_over_cap_ticker_is_exposed_not_filtered(
     monkeypatch, isolated_proposals, trading_allowed, cb_clean, bull_macro,
     fresh_universe_json, empty_portfolio,

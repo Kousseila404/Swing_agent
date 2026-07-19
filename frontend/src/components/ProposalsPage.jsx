@@ -475,6 +475,43 @@ function isInBuyZone(ctx) {
   return v === 'STRONG_BUY' || v === 'BUY';
 }
 
+// Étape 1 roadmap — segmentation conviction (backend modules/signal_qualification.py).
+// Remplace le tri plat par 3 catégories : signal frais / confirmé / à surveiller.
+const CONVICTION_STYLE = {
+  new_signal: { label: '🔥 Nouveau', bg: 'rgba(251,146,60,0.18)', fg: '#fb923c' },
+  confirmed:  { label: '⭐ Confirmé', bg: 'rgba(34,197,94,0.16)', fg: '#22c55e' },
+  watch:      { label: '👁 Surveillance', bg: 'rgba(251,191,36,0.16)', fg: '#fbbf24' },
+};
+const CONVICTION_RANK = { new_signal: 3, confirmed: 2, watch: 1, other: 0 };
+
+function ConvictionBadge({ qualification }) {
+  const conviction = qualification?.conviction;
+  const s = CONVICTION_STYLE[conviction];
+  if (!s) return null;
+  const tooltipParts = [qualification.narrative];
+  if (qualification.causal_reasons?.length) {
+    tooltipParts.push(qualification.causal_reasons.join(' · '));
+  }
+  const trend = qualification.trend;
+  if (trend?.score_delta != null) {
+    tooltipParts.push(
+      `Score ${trend.score_delta >= 0 ? '+' : ''}${trend.score_delta.toFixed(1)} vs il y a ${trend.lookback_days}j`
+    );
+  }
+  return (
+    <span title={tooltipParts.filter(Boolean).join('\n')} style={{
+      display: 'inline-flex', alignItems: 'center',
+      fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.02em',
+      padding: '0.15rem 0.5rem', borderRadius: 4,
+      background: s.bg, color: s.fg,
+      border: `1px solid ${s.fg}`,
+      whiteSpace: 'nowrap', cursor: 'help',
+    }}>
+      {s.label}
+    </span>
+  );
+}
+
 
 // ─────────────────────────────────────────────────────────────────
 // Ligne de proposition — table éditable
@@ -540,6 +577,7 @@ function ProposalRow({
           </button>
           <StatusBadge status={p.status} />
           {ctx.buy_signal && isPending && <BuySignalChip signal={ctx.buy_signal} />}
+          {ctx.qualification && isPending && <ConvictionBadge qualification={ctx.qualification} />}
           {alreadyHeld && (
             <span style={{
               fontSize: '0.6rem', padding: '0.08rem 0.4rem', borderRadius: 4,
@@ -868,7 +906,7 @@ function ConfirmModal({ items, isPending, onConfirm, onCancel }) {
 // ─────────────────────────────────────────────────────────────────
 export default function ProposalsPage() {
   const [statusFilter, setStatusFilter] = useState('pending');
-  const [sortMode, setSortMode] = useState('score'); // 'score' | 'weight'
+  const [sortMode, setSortMode] = useState('score'); // 'score' | 'weight' | 'buy_zone' | 'conviction'
   const [edits, setEdits] = useState({});            // {id: {entry, stop_loss, take_profit, size}}
   const [selected, setSelected] = useState(() => new Set());
   const [sectorAck, setSectorAck] = useState(() => new Set());
@@ -907,6 +945,15 @@ export default function ProposalsPage() {
         const za = isInBuyZone(a.context) ? 1 : 0;
         const zb = isInBuyZone(b.context) ? 1 : 0;
         if (za !== zb) return zb - za;
+        return titanKey(b) - titanKey(a);
+      });
+    } else if (sortMode === 'conviction') {
+      // Étape 1 roadmap — segmentation par conviction (🔥 nouveau > ⭐ confirmé
+      // > 👁 surveillance > reste) plutôt qu'un tri plat par score.
+      copy.sort((a, b) => {
+        const ca = CONVICTION_RANK[a.context?.qualification?.conviction] ?? -1;
+        const cb = CONVICTION_RANK[b.context?.qualification?.conviction] ?? -1;
+        if (ca !== cb) return cb - ca;
         return titanKey(b) - titanKey(a);
       });
     } else {
@@ -1179,6 +1226,15 @@ export default function ProposalsPage() {
                       color: sortMode === 'buy_zone' ? '#0b1220' : 'var(--text-muted)',
                       fontWeight: 700, cursor: 'pointer',
                     }}>✓ Buy Zone</button>
+            <button type="button" onClick={() => setSortMode('conviction')}
+                    title="Segmente 🔥 Nouveau signal / ⭐ Confirmé / 👁 Surveillance au lieu d'un tri plat par score"
+                    style={{
+                      padding: '0.3rem 0.6rem', border: 'none',
+                      borderLeft: '1px solid var(--border)',
+                      background: sortMode === 'conviction' ? 'rgba(251,146,60,0.6)' : 'transparent',
+                      color: sortMode === 'conviction' ? '#0b1220' : 'var(--text-muted)',
+                      fontWeight: 700, cursor: 'pointer',
+                    }}>🔥 Conviction</button>
             <button type="button" onClick={() => setSortMode('score')}
                     style={{
                       padding: '0.3rem 0.6rem', border: 'none',

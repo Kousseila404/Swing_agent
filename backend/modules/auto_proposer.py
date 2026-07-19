@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from modules import api_core, proposals
+from modules import api_core, proposals, signal_qualification
 from modules.buy_signal import compute_buy_signal
 from modules.log import logger
 from modules.support_score import compute_support_score
@@ -545,6 +545,9 @@ def _build_proposal_from_alloc(
         "days_until_earnings": alloc.get("days_until_earnings"),
         # Lot 18 — Buy Signal verdict pour badge UI prominent.
         "buy_signal":         alloc.get("buy_signal"),
+        # Étape 1 roadmap — segmentation conviction + narratif + fraîcheur
+        # causale (None si le calcul a fail-open côté qualify_proposal).
+        "qualification":      alloc.get("qualification"),
     }
 
     return proposals.make_proposal(
@@ -994,6 +997,21 @@ def plan_proposals(
         # context.sector_exposure.over_cap et `approve_batch` refuse sans ack
         # explicite côté UI. Ça permet à l'utilisateur de voir le top-N complet
         # et d'arbitrer (ex: override un sector cap si conviction forte).
+
+        # Étape 1 roadmap — qualification du signal (fraîcheur/segmentation/
+        # narratif). Lecture seule sur universe_history + scored_row, pure
+        # synthèse d'ingrédients déjà présents dans `alloc` — n'affecte ni le
+        # verdict buy_signal ni le sizing/exit. Fail-open : une proposition
+        # ne doit jamais être perdue pour une erreur de qualification.
+        try:
+            alloc["qualification"] = signal_qualification.qualify_proposal(
+                ticker,
+                scored_row=scored_row,
+                context_ingredients=alloc,
+            )
+        except Exception as e:
+            logger.warning(f"[AutoProposer] signal_qualification failed for {ticker}: {e}")
+            alloc["qualification"] = None
 
         prop = _build_proposal_from_alloc(
             ticker, alloc, macro_meta=macro_meta, ttl_hours=ttl_hours,
