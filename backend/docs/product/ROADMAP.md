@@ -129,8 +129,18 @@ suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 �
   humain que ce bullet demande déjà ; un agent autonome ne tranche pas ce
   choix. Prochain run : passer au bullet suivant (`/api/data_health`
   toutes-sources) tant que celui-ci n'est pas débloqué par l'utilisateur.
-- Unifier `/api/data_health` en tableau de bord toutes-sources (pas que
-  l'univers fondamental).
+- [FAIT 2026-07-19] Unifié `/api/data_health` en tableau de bord
+  toutes-sources : nouvelle section `providers` (finnhub enrich, finnhub
+  news, insider SEC Form 4, SEC filings, CIK map), cache stats agrégées
+  via un nouveau helper générique `dir_cache_stats()` dans `_disk_cache.py`
+  (n_cached/ages/n_errors par source, `configured` pour finnhub/news).
+  Aucune modification de la logique de fetch/enrichissement des sources —
+  uniquement de l'agrégation en lecture des caches disque existants.
+  Pas de changement de `severity_global` : les seuils d'alerte sur ces
+  nouvelles sources demandent un calibrage sur données réelles d'usage,
+  pas de valeur arbitraire — à faire dans un futur run une fois un
+  historique observé (cf. Étape 0bis `metrics_history.jsonl`). UI :
+  nouvelle card "Sources enrichissement" dans `DataHealthPage.jsx`.
 - Zéro coût — refactor pur, aucune souscription/API payante. **Ne jamais**
   activer un tier payant automatiquement : toujours différé à l'utilisateur
   avec des chiffres réels.
