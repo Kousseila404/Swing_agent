@@ -260,11 +260,32 @@ approuver ensuite via l'ActionBar, sans ouvrir la table).
 - Aucun changement de logique trading/risk/sizing — travail de présentation
   pur sur `ProposalsPage.jsx`.
 
-### Étape 3 — Proactivité réelle — PAS COMMENCÉE
-- Le digest Telegram devient un vrai call-to-action (lien direct vers la
-  proposition), pas une info à côté.
-- Notifications ciblées sur signal **nouveau/changé** uniquement — pas de
-  répétition du même score statique jour après jour.
+### Étape 3 — Proactivité réelle — [FAIT 2026-07-19]
+[FAIT 2026-07-19] `modules/daily_digest.py` (`build_digest_text`) ne liste
+plus le top-N par `titan_score` (quasi figé d'un jour à l'autre vu le cycle
+de rescoring budgété ~5j, cf. diagnostic ci-dessus) mais uniquement les
+propositions en `context.qualification.conviction == "new_signal"` (Étape 1
+— verdict actionnable qui vient de changer), avec leur narratif une-phrase
+déjà calculé par `signal_qualification.py`. `qualification=None` (fail-open)
+n'est jamais compté "nouveau" sans preuve — même garde-fou qu'Étape 1.
+S'il n'y a rien de neuf, le digest le dit explicitement au lieu de répéter
+le même trio statique.
+- Lien cliquable ajouté vers l'onglet Propositions (`#/proposals`) via une
+  nouvelle variable optionnelle `FRONTEND_URL` (`config.py`, vide par
+  défaut — aucune URL publique de prod n'existait dans la config avant ce
+  run ; le digest fonctionne sans lien si elle n'est pas renseignée par
+  l'utilisateur).
+- Scope volontairement limité au digest quotidien (`daily_digest.py`),
+  celui explicitement visé par le diagnostic ("digest Telegram matinal
+  déconnecté du flow"). La notification `_notify_new_proposals`
+  (`routers/proposals.py`, déclenchée à chaque refresh) n'est pas touchée —
+  elle a déjà sa propre logique de "nouvelles propositions" au sens DB, pas
+  du ressort de cette étape.
+- Tests : `backend/tests/test_daily_digest.py` (7 tests — filtrage
+  new_signal, fail-open qualification=None, lien présent/absent selon
+  FRONTEND_URL, envoi Telegram fail-open).
+- Aucune modification de logique trading/risk/sizing — présentation/
+  notification pure.
 
 ### Étape 4 — Exploration (si besoin après 1-3) — PAS COMMENCÉE
 - Screener multi-critères sauvegardable.
