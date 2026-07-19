@@ -10,29 +10,8 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { fetchPeers } from '../api/client.js';
-import { fmtMarketCap, fmtNum, fmtPct } from '../utils/format.js';
-
-const KPI_ROWS = [
-  { key: 'titan_composite_score', label: 'TITAN', fmt: (v) => fmtNum(v, 1), goodHigh: true },
-  { key: 'trailing_pe',           label: 'P/E TTM', fmt: (v) => fmtNum(v, 1), goodHigh: false, ignoreNegative: true },
-  { key: 'forward_pe',            label: 'Fwd P/E', fmt: (v) => fmtNum(v, 1), goodHigh: false, ignoreNegative: true },
-  { key: 'ev_to_ebitda',          label: 'EV/EBITDA', fmt: (v) => fmtNum(v, 1), goodHigh: false, ignoreNegative: true },
-  { key: 'return_on_equity',      label: 'ROE', fmt: (v) => fmtPct(v, 1), goodHigh: true },
-  { key: 'operating_margin',      label: 'Op margin', fmt: (v) => fmtPct(v, 1), goodHigh: true },
-  { key: 'revenue_growth',        label: 'Rev growth', fmt: (v) => fmtPct(v, 1), goodHigh: true },
-  { key: 'earnings_growth',       label: 'EPS growth', fmt: (v) => fmtPct(v, 1), goodHigh: true },
-  { key: 'debt_to_equity',        label: 'D/E', fmt: (v) => fmtNum(v, 1), goodHigh: false },
-  { key: 'dividend_yield',        label: 'Div yield', fmt: (v) => fmtPct(v, 2), goodHigh: true },
-];
-
-function toneFor(value, median, goodHigh, ignoreNegative) {
-  if (value == null || median == null || !Number.isFinite(value) || !Number.isFinite(median)) return 'var(--text-muted)';
-  if (ignoreNegative && (value < 0 || median <= 0)) return 'var(--text-muted)';
-  const delta = value - median;
-  if (Math.abs(delta) / Math.max(Math.abs(median), 1e-9) < 0.05) return undefined; // ~ médiane → neutre
-  const isBetter = goodHigh ? delta > 0 : delta < 0;
-  return isBetter ? '#4ade80' : '#f87171';
-}
+import { fmtMarketCap } from '../utils/format.js';
+import { KPI_ROWS, toneFor } from '../utils/kpiCompare.js';
 
 export default function PeerComparison({ ticker }) {
   // Migration vers React Query : annule le fetch précédent au changement de

@@ -9,6 +9,7 @@ import {
   addNote,
   addToWatchlist,
   fetchCatalystCalendar,
+  fetchCompare,
   fetchNews,
   fetchNewsFirehose,
   fetchSecFilings,
@@ -89,6 +90,14 @@ export const useUniverse = (sector, opts = {}) =>
   useQuery({
     queryKey: ['universe', sector ?? null],
     queryFn: () => fetchUniverse(sector),
+    ...opts,
+  })
+
+export const useCompare = (tickers, opts = {}) =>
+  useQuery({
+    queryKey: ['compare', (tickers || []).join(',')],
+    queryFn: () => fetchCompare(tickers),
+    enabled: (tickers || []).length >= 2,
     ...opts,
   })
 

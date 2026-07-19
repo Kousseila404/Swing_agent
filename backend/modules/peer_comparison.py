@@ -114,6 +114,16 @@ def find_peers(
     return out
 
 
+def _median(vals: list[float | None]) -> float | None:
+    valid = sorted(v for v in vals if v is not None)
+    if not valid:
+        return None
+    n_valid = len(valid)
+    if n_valid % 2 == 1:
+        return valid[n_valid // 2]
+    return 0.5 * (valid[n_valid // 2 - 1] + valid[n_valid // 2])
+
+
 def build_peer_table(
     target: str, universe: dict[str, dict[str, Any]], *, n: int = 5,
 ) -> dict[str, Any]:
@@ -132,19 +142,8 @@ def build_peer_table(
     peers = find_peers(target, universe, n=n)
 
     # Médianes sur self+peers, KPI par KPI.
-    median: dict[str, float | None] = {}
     pool = [self_row, *(p for p in peers)]
-    for f in PEER_COMPARE_FIELDS:
-        vals = [_safe(p.get(f)) for p in pool]
-        valid = sorted(v for v in vals if v is not None)
-        if not valid:
-            median[f] = None
-            continue
-        n_valid = len(valid)
-        if n_valid % 2 == 1:
-            median[f] = valid[n_valid // 2]
-        else:
-            median[f] = 0.5 * (valid[n_valid // 2 - 1] + valid[n_valid // 2])
+    median = {f: _median([_safe(p.get(f)) for p in pool]) for f in PEER_COMPARE_FIELDS}
 
     target_block = {
         "ticker": target,
@@ -162,3 +161,54 @@ def build_peer_table(
         "sector_median": median,
         "n_peers": len(peers),
     }
+
+
+# Nb max de tickers dans une comparaison manuelle (au-delà, table illisible +
+# risque d'abus sur un endpoint sans rate-limit dédié).
+MAX_COMPARE_TICKERS = 8
+
+
+def build_compare_table(
+    tickers: list[str], universe: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Comparaison side-by-side d'une liste de tickers choisis par l'utilisateur.
+
+    Contrairement à `build_peer_table` (auto-sélection sector + market_cap
+    proche autour d'UN target), ici les tickers sont fournis explicitement —
+    pas de notion de "target" ni de filtre sectoriel/mcap.
+
+    Returns:
+      {
+        "requested": [tickers demandés, upper, dédupliqués, ordre préservé],
+        "rows":      [{ticker, name, sector, industry, market_cap, kpis...}],
+        "missing":   [tickers absents de l'univers scoré],
+        "median":    {kpi: value} (sur les rows trouvées),
+      }
+    """
+    requested: list[str] = []
+    for t in tickers:
+        tu = (t or "").strip().upper()
+        if tu and tu not in requested:
+            requested.append(tu)
+
+    rows: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for t in requested:
+        row = universe.get(t)
+        if not row:
+            missing.append(t)
+            continue
+        entry = {
+            "ticker": t,
+            "name": row.get("name"),
+            "sector": row.get("sector"),
+            "industry": row.get("industry"),
+            "market_cap": row.get("market_cap"),
+        }
+        for f in PEER_COMPARE_FIELDS:
+            entry[f] = row.get(f)
+        rows.append(entry)
+
+    median = {f: _median([_safe(r.get(f)) for r in rows]) for f in PEER_COMPARE_FIELDS}
+
+    return {"requested": requested, "rows": rows, "missing": missing, "median": median}

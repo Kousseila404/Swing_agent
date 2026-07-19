@@ -24,6 +24,7 @@ export const NAV_SECTIONS = [
       { id: 'universe',    label: 'Univers',       icon: '🌐' },
       { id: 'sectors',     label: 'Secteurs',      icon: '🏛' },
       { id: 'ticker',      label: 'Ticker Detail', icon: '🎯' },
+      { id: 'compare',     label: 'Comparer',      icon: '⚖️' },
     ],
   },
   {
@@ -62,6 +63,7 @@ export const PAGE_META = {
   performance: { title: 'Performance & Métriques',       subtitle: 'Sharpe · Sortino · Calmar · DD · Expectancy · Distribution PnL' },
   attribution: { title: 'Performance Attribution',       subtitle: "Win rate par bucket de score TITAN à l'entrée — calibration du moteur" },
   ticker:      { title: 'Ticker Detail · Score history', subtitle: "Évolution scores TITAN d'un ticker via universe_history" },
+  compare:     { title: 'Comparer des tickers',          subtitle: 'Fondamentaux + score TITAN côte à côte — sélection libre' },
   datahealth:  { title: 'Data Health · Providers + cache', subtitle: 'Santé providers + cache fundamentals + fields manquants' },
   risk:        { title: 'Risk Monitor',                  subtitle: 'Budget · VIX · concentration · Kelly' },
   calendar:    { title: 'Catalyst Calendar',             subtitle: 'Earnings (positions + watchlist) + Macro consolidés' },
@@ -82,6 +84,7 @@ export const PAGE_PALETTE_HINTS = {
   performance: "Page · Sharpe, Sortino, DD",
   attribution: "Page · Win rate par bucket TITAN entry",
   ticker:      "Page · Score history",
+  compare:     "Page · Comparaison multi-tickers",
   datahealth:  "Page · Providers et cache",
   risk:        "Page · Budget et VIX",
   calendar:    "Page · Earnings + Macro consolidés",

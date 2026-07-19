@@ -1,7 +1,7 @@
 """Tests modules/peer_comparison.py."""
 from __future__ import annotations
 
-from modules.peer_comparison import build_peer_table, find_peers
+from modules.peer_comparison import build_compare_table, build_peer_table, find_peers
 
 
 def _ticker(name, sector, industry, mcap, **extra):
@@ -69,3 +69,36 @@ def test_industry_match_ranks_higher():
     }
     peers = find_peers("AAA", universe, n=2)
     assert peers[0]["ticker"] == "SAME_IND"
+
+
+def test_build_compare_table_basic():
+    universe = {
+        "AAA": _ticker("Alpha", "Tech", "Software", 1e9, trailing_pe=10.0),
+        "BBB": _ticker("Beta", "Healthcare", "Pharma", 5e9, trailing_pe=30.0),
+    }
+    table = build_compare_table(["aaa", "bbb"], universe)
+    assert table["requested"] == ["AAA", "BBB"]
+    assert [r["ticker"] for r in table["rows"]] == ["AAA", "BBB"]
+    assert table["missing"] == []
+    assert table["median"]["trailing_pe"] == 20.0  # médiane de 10 et 30
+
+
+def test_build_compare_table_dedup_and_order():
+    universe = {"AAA": _ticker("Alpha", "Tech", "Software", 1e9)}
+    table = build_compare_table(["AAA", "aaa", "AAA"], universe)
+    assert table["requested"] == ["AAA"]
+    assert len(table["rows"]) == 1
+
+
+def test_build_compare_table_missing_ticker():
+    universe = {"AAA": _ticker("Alpha", "Tech", "Software", 1e9)}
+    table = build_compare_table(["AAA", "ZZZ"], universe)
+    assert table["missing"] == ["ZZZ"]
+    assert [r["ticker"] for r in table["rows"]] == ["AAA"]
+
+
+def test_build_compare_table_no_matches():
+    table = build_compare_table(["ZZZ", "YYY"], {})
+    assert table["rows"] == []
+    assert table["missing"] == ["ZZZ", "YYY"]
+    assert all(v is None for v in table["median"].values())

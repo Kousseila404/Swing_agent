@@ -196,6 +196,9 @@ export const fetchTickerAnalysis = (ticker) =>
 export const fetchPeers = (ticker, n = 5) =>
   get(`/peers/${encodeURIComponent(ticker.toUpperCase())}?n=${n}`);
 
+export const fetchCompare = (tickers) =>
+  get(`/compare?tickers=${encodeURIComponent(tickers.join(','))}`);
+
 export const fetchCatalystCalendar = (days = 30) =>
   get(`/calendar?days=${days}`);
 

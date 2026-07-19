@@ -34,6 +34,7 @@ const PortfolioPage       = lazy(() => import('./components/PortfolioPage'));
 const ProposalsPage       = lazy(() => import('./components/ProposalsPage'));
 const PerformancePage     = lazy(() => import('./components/PerformancePage'));
 const TickerDetailPage    = lazy(() => import('./components/TickerDetailPage'));
+const ComparePage         = lazy(() => import('./components/ComparePage'));
 const DataHealthPage      = lazy(() => import('./components/DataHealthPage'));
 const RiskMonitorPage     = lazy(() => import('./components/RiskMonitorPage'));
 const MacroCalendarPage   = lazy(() => import('./components/MacroCalendarPage'));
@@ -50,6 +51,7 @@ const PAGES = {
   proposals:   ProposalsPage,
   performance: PerformancePage,
   ticker:      TickerDetailPage,
+  compare:     ComparePage,
   datahealth:  DataHealthPage,
   risk:        RiskMonitorPage,
   calendar:    CalendarPage,
