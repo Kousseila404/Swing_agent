@@ -399,6 +399,41 @@ Implémenter demanderait, sur le même patron que `insider_enrich._enrich_one`
 - Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée —
   pur renforcement de la fiabilité de la couche data existante.
 
+### Étape 6 — Visibilité des compteurs `insider_error`/`finnhub_error` dans `/api/data_health` — PAS COMMENCÉE
+Preuve concrète relevée en code (pas une hypothèse) : `modules/insider_enrich.py`
+(L47) persiste `insider_error` et `modules/finnhub_enrich.py` (L97) persiste
+`finnhub_error` par ticker dans `universe.json` — les deux champs sont déjà
+lus par `data_confidence._multi_source_factor` (Étape 0 et Étape 5) pour
+pénaliser la confiance d'un ticker. Mais aucun des deux n'est agrégé nulle
+part : `routers/data_health.py::_universe_inventory()` ne compte que les
+champs de `_CRITICAL_FIELDS` (% manquant) et la répartition `source_provider`
+— pas ces deux signaux d'échec. Côté UI, `DataHealthPage.jsx` (card "🏷
+Sources enrichissement", ~L298) n'affiche que les stats de cache disque
+(`n_cached`/`ages`/`n_errors` via `dir_cache_stats()`), pas de compte de
+tickers actuellement en `insider_error`/`finnhub_error` truthy dans
+`universe.json`. Résultat : le dashboard "toutes-sources" construit
+spécifiquement par l'Étape 0 pour donner de la visibilité sur les sources
+non-fondamentales reste aveugle aux deux signaux d'échec que l'Étape 0 et
+l'Étape 5 viennent d'introduire — impossible aujourd'hui de voir "12
+tickers actuellement pénalisés par finnhub_error" sans lire le JSON brut.
+
+Implémenter demanderait : dans `_universe_inventory()` (ou un petit helper
+dédié), compter les tickers avec `insider_error`/`finnhub_error` truthy
+(même pattern que le comptage `sources` déjà présent), exposer ces deux
+compteurs dans le payload `/api/data_health`, et les afficher comme deux
+nombres simples dans la card "Sources enrichissement" existante de
+`DataHealthPage.jsx` (pas de nouvelle card).
+
+Hors scope explicite : ne touche pas `_global_severity()` / n'ajoute aucun
+nouveau seuil d'alerte — le calibrage de seuils sur ces sources est
+volontairement différé jusqu'à un historique réel observé via
+`data/metrics_history.jsonl` (Étape 0bis), comme déjà noté par Étape 0. Ce
+step-ci est un pur ajout de comptage/visibilité, aucune nouvelle logique de
+sévérité.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+complément d'observabilité sur la couche data déjà en place.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
