@@ -504,6 +504,48 @@ lecture sur une liste déjà calculée.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
+### Étape 8 — Afficher le(s) tag(s) `dq_sanitize` par ticker (pas juste la liste) — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : l'Étape 7 a exposé
+`sanitize.tickers` (liste triée de symboles) via `list_flagged_tickers()`
+(`modules/fundamentals_cache.py:364-376`), affichée en chips repliables dans
+`DataHealthPage.jsx` (~L239-260). Mais cette fonction ne retourne que le
+symbole — elle jette l'information de tag au passage (`if "dq_sanitize=" in
+err: flagged.append(ticker)`, L374-375). Le tag lui-même (ex.
+`out_of_bounds:ev_to_ebitda`, `mcap_mismatch`) existe déjà par entrée de
+cache et est déjà parsé ticker par ticker dans `cache_sanitize_stats()`
+(même fichier, L379-407 : `_, _, tag_part = err.partition("dq_sanitize=");
+tag_part.split("|")`) — mais cette fonction ne fait que sommer les tags
+**globalement** (`flags_count[tag] += 1`), sans jamais associer un tag à
+son ticker dans le payload retourné. Résultat vécu : le dashboard dit "33
+tickers flaggés" + un tableau agrégé "out_of_bounds:ev_to_ebitda: 12", et
+depuis l'Étape 7 la liste des 33 symboles — mais un utilisateur qui clique
+sur le chip "AAPL" ne peut toujours pas savoir *pourquoi* AAPL est flaggé
+(quel ratio, quelle raison) sans aller lire le cache JSON brut sur le VPS.
+C'est exactement le même type de trou que celui qu'a comblé l'Étape 7
+(liste sans détail), une itération plus loin (détail par ticker).
+
+Implémenter demanderait : réutiliser le même parsing déjà fait dans
+`cache_sanitize_stats()` (`err.partition("dq_sanitize=")` puis
+`split("|")`) pour construire, dans `list_flagged_tickers()` ou un helper
+voisin, un mapping `{ticker: [tags]}` plutôt qu'une simple liste de
+symboles ; exposer ça sous `sanitize.tickers` en remplaçant les strings
+par des objets `{ticker, tags}` (ou une structure équivalente qui reste
+rétro-compatible avec le rendu existant) dans `routers/data_health.py`
+(~L245-247) ; côté `DataHealthPage.jsx`, afficher les tags au survol/clic
+de chaque chip (tooltip `title=` suffit, cohérent avec le style léger déjà
+en place — pas besoin d'une nouvelle card ni d'un nouveau composant).
+Aucun nouveau calcul : le tag est déjà présent dans `entry["ratios"]["error"]`
+pour chaque ticker du cache, seule la structure de sortie change.
+
+Hors scope explicite : ne touche pas à `sanitize_ratios`
+(`data_validation.py`) ni au bouton "Rafraîchir" (`refresh_flagged_tickers`)
+— pur enrichissement de présentation d'une donnée déjà calculée, comme
+l'Étape 7. Aucun nouveau seuil de `severity_global`.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+complément d'observabilité sur la couche data déjà en place.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
