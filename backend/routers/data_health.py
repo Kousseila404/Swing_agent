@@ -23,6 +23,7 @@ from modules.fundamentals_cache import (
     cache_stats,
     invalidate_tickers,
     list_flagged_tickers,
+    list_flagged_tickers_with_tags,
 )
 from modules.log import logger
 from modules.yf_circuit_breaker import yf_breaker
@@ -243,7 +244,10 @@ def get_data_health():
     # out-of-bounds rejetées et cross-check market_cap en amont du cache.
     try:
         sanitize = cache_sanitize_stats()
-        sanitize["tickers"] = list_flagged_tickers()
+        tagged = list_flagged_tickers_with_tags()
+        sanitize["tickers"] = [
+            {"ticker": ticker, "tags": tags} for ticker, tags in tagged.items()
+        ]
         payload["sanitize"] = sanitize
     except (OSError, ValueError, KeyError) as e:
         logger.warning(f"[data_health] cache_sanitize_stats failed: {e}")

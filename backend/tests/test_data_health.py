@@ -237,7 +237,20 @@ def test_data_health_sanitize_exposes_flagged_tickers(client, isolated_cache):
     _seed_flagged_cache(3)
     resp = client.get("/api/data_health")
     body = resp.json()
-    assert body["sanitize"]["tickers"] == ["FLAG0", "FLAG1", "FLAG2"]
+    assert [t["ticker"] for t in body["sanitize"]["tickers"]] == ["FLAG0", "FLAG1", "FLAG2"]
+
+
+def test_data_health_sanitize_tickers_include_tags(client, isolated_cache):
+    """Étape 8 : chaque ticker flaggé porte son détail de tag(s), pas juste le symbole."""
+    from data_providers.base import FinancialRatios
+    fc._store.put("MULTI", FinancialRatios(
+        ticker="MULTI", source_provider="fake",
+        error="dq_sanitize=out_of_bounds:ev_to_ebitda|mcap_mismatch",
+    ))
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    entries = {t["ticker"]: t["tags"] for t in body["sanitize"]["tickers"]}
+    assert entries["MULTI"] == ["out_of_bounds:ev_to_ebitda", "mcap_mismatch"]
 
 
 def test_data_health_sanitize_tickers_empty_when_clean(client, isolated_cache):

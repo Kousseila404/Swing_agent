@@ -248,11 +248,16 @@ export default function DataHealthPage() {
             {showTickers && (
               <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {sanitize.tickers.map((t) => (
-                  <span key={t} style={{
-                    background: 'rgba(255,255,255,0.06)',
-                    padding: '2px 8px', borderRadius: 12,
-                    fontSize: '0.75rem', fontFamily: 'monospace',
-                  }}>{t}</span>
+                  <span
+                    key={t.ticker}
+                    title={t.tags && t.tags.length > 0 ? t.tags.join(', ') : undefined}
+                    style={{
+                      background: 'rgba(255,255,255,0.06)',
+                      padding: '2px 8px', borderRadius: 12,
+                      fontSize: '0.75rem', fontFamily: 'monospace',
+                      cursor: t.tags && t.tags.length > 0 ? 'help' : 'default',
+                    }}
+                  >{t.ticker}</span>
                 ))}
               </div>
             )}

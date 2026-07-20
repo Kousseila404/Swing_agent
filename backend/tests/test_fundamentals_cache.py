@@ -247,6 +247,33 @@ def test_list_flagged_tickers_returns_only_sanitized(isolated_cache):
     assert flagged == ["FLAG1", "FLAG2", "FLAG3"]
 
 
+def test_list_flagged_tickers_with_tags_empty(isolated_cache):
+    assert fc.list_flagged_tickers_with_tags() == {}
+
+
+def test_list_flagged_tickers_with_tags_single_tag(isolated_cache):
+    _seed_cache_with_flagged("FLAG1")  # default flag = "dq_sanitize=out_of_bounds:ev_to_ebitda"
+    tagged = fc.list_flagged_tickers_with_tags()
+    assert tagged == {"FLAG1": ["out_of_bounds:ev_to_ebitda"]}
+
+
+def test_list_flagged_tickers_with_tags_multi_tag(isolated_cache):
+    _seed_cache_with_flagged(
+        "MULTI", flag="dq_sanitize=out_of_bounds:ev_to_ebitda|mcap_mismatch",
+    )
+    tagged = fc.list_flagged_tickers_with_tags()
+    assert tagged == {"MULTI": ["out_of_bounds:ev_to_ebitda", "mcap_mismatch"]}
+
+
+def test_list_flagged_tickers_with_tags_excludes_clean(isolated_cache):
+    _seed_cache_with_flagged("FLAG1")
+    clean = FinancialRatios(ticker="CLEAN", source_provider="fake")
+    fc._store.put("CLEAN", clean)
+    tagged = fc.list_flagged_tickers_with_tags()
+    assert "CLEAN" not in tagged
+    assert list(tagged.keys()) == ["FLAG1"]
+
+
 def test_invalidate_tickers_removes_entries(isolated_cache):
     _seed_cache_with_flagged("FLAG1")
     _seed_cache_with_flagged("FLAG2")

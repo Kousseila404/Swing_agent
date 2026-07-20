@@ -376,6 +376,30 @@ def list_flagged_tickers() -> list[str]:
     return sorted(flagged)
 
 
+def list_flagged_tickers_with_tags() -> dict[str, list[str]]:
+    """Comme `list_flagged_tickers()` mais garde le détail des tags par
+    ticker (ex. {"AAPL": ["out_of_bounds:ev_to_ebitda", "mcap_mismatch"]}).
+
+    Réutilise exactement le même parsing que `cache_sanitize_stats()`
+    (`dq_sanitize=tag1|tag2`), juste associé au ticker plutôt que sommé
+    globalement. Pour /api/data_health : détail par ticker (Étape 8).
+    """
+    with _store._lock:  # noqa: SLF001
+        _store._load_unlocked()  # noqa: SLF001
+        entries = dict(_store._mem)  # noqa: SLF001
+    result: dict[str, list[str]] = {}
+    for ticker, entry in entries.items():
+        err = (entry.get("ratios") or {}).get("error") or ""
+        if "dq_sanitize=" not in err:
+            continue
+        _, _, tag_part = err.partition("dq_sanitize=")
+        tag_part = tag_part.split(";", 1)[0]
+        tags = [tag.strip() for tag in tag_part.split("|") if tag.strip()]
+        if tags:
+            result[ticker] = tags
+    return dict(sorted(result.items()))
+
+
 def cache_sanitize_stats() -> dict[str, Any]:
     """Compte les flags dq_sanitize dans les entrées cachées.
 
