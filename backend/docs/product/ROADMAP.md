@@ -287,20 +287,31 @@ le même trio statique.
 - Aucune modification de logique trading/risk/sizing — présentation/
   notification pure.
 
-### Étape 4 — Exploration (si besoin après 1-3) — PAS COMMENCÉE
-- Screener multi-critères sauvegardable.
-  **BLOCKED (2026-07-19):** seul item non-FAIT restant sur l'ensemble du
-  roadmap (0→4). Comme noté par le run précédent dans le bullet "Vue
-  comparaison" ci-dessous, ce bullet reste un pas séparé, plus large que
-  ce qui a été spécifié pour les étapes 0-3 : ni les critères de filtrage,
-  ni l'emplacement de la persistance (localStorage / backend DB / par
-  utilisateur), ni la maquette UI ne sont définis ici. Ce sont des choix
-  produit qui changent matériellement l'UX (ex : filtres persistés
-  changent le modèle de données si stockés côté backend) — jugement humain
-  requis avant implémentation, cf. stop condition (c) de la routine.
-  Prochain run : ne pas retenter automatiquement (cf. stop condition (d)) ;
-  reprendre uniquement une fois ce bullet précisé par l'utilisateur ici
-  (critères, lieu de stockage, wireframe/UI attendue).
+### Étape 4 — Exploration (si besoin après 1-3) — [FAIT 2026-07-20]
+[FAIT 2026-07-20] Screener multi-critères sauvegardable, débloqué sur
+instruction explicite de l'utilisateur (2026-07-20 — "fais ce qui te
+semble plus logique et opti") après lui avoir rappelé les 3 axes
+d'ambiguïté (critères / lieu de persistance / UI). Choix retenu :
+- **Critères** : panneau de seuils combinables en ET logique sur les
+  champs déjà exposés par `/api/universe` (TITAN composite, 6 piliers
+  Quality/Value/Risk/Sentiment/Momentum/Piotroski via `f_score`, market
+  cap, forward P/E) — aucun champ backend nouveau, aucun endpoint dédié.
+  S'ajoute aux filtres secteur/buy/status déjà présents dans
+  `UniverseManagerPage.jsx`, pas une nouvelle page.
+- **Persistance** : réutilise l'infra déjà en place plutôt qu'un nouveau
+  mécanisme — auto-persist localStorage existant (reload ne perd pas la
+  vue) + `PresetBar`/`utils/presets.js` déjà wiré scope `"universe"` pour
+  la sauvegarde nommée (mêmes composants que le filtre secteur/buy
+  existant, juste un payload étendu).
+- **UI** : panneau repliable "🎛 Screener" au-dessus de la table, cohérent
+  avec le style des autres contrôles de la page (pas de maquette séparée).
+- Vérifié en local : lint + 45 tests vitest + build clean, et exercice
+  navigateur réel (Playwright headless) — panneau ouvre/filtre
+  correctement (ex : TITAN≥80 réduit 6→3 tickers), bouton Reset, et
+  sauvegarde d'un preset nommé → reload → application du preset restaure
+  bien les seuils et re-filtre (round-trip localStorage confirmé).
+- Aucun changement backend, aucune logique trading/risk touchée — travail
+  de présentation pur sur `UniverseManagerPage.jsx`.
 - [FAIT 2026-07-19] Vue comparaison multi-tickers dédiée : nouvel endpoint
   `GET /api/compare` (`modules/peer_comparison.build_compare_table`, 2 à 8
   tickers choisis librement par l'utilisateur, pas de contrainte
