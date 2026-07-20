@@ -95,6 +95,7 @@ export default function DataHealthPage() {
   const fa = inv.fetched_at || {};
   const nFlagged = sanitize.n_tickers_flagged || 0;
   const providers = data.providers || {};
+  const enrichmentErrors = inv.enrichment_errors || {};
 
   return (
     <div className="page-content">
@@ -295,11 +296,11 @@ export default function DataHealthPage() {
       {/* ── Sources non-fondamentales (finnhub/insider/SEC/news) ── */}
       <Card title="🌐 Sources enrichissement (finnhub / insider / SEC / news)">
         {[
-          ['finnhub', 'Finnhub (revisions/earnings)', providers.finnhub],
-          ['news', 'Finnhub news', providers.news],
-          ['insider', 'SEC insider (Form 4)', providers.insider],
-          ['sec_filings', 'SEC filings', providers.sec_filings],
-        ].map(([key, label, src]) => {
+          ['finnhub', 'Finnhub (revisions/earnings)', providers.finnhub, enrichmentErrors.finnhub_error],
+          ['news', 'Finnhub news', providers.news, null],
+          ['insider', 'SEC insider (Form 4)', providers.insider, enrichmentErrors.insider_error],
+          ['sec_filings', 'SEC filings', providers.sec_filings, null],
+        ].map(([key, label, src, nErrTickers]) => {
           const c = (src && src.cache) || {};
           return (
             <div key={key} style={{ marginBottom: 10 }}>
@@ -311,6 +312,14 @@ export default function DataHealthPage() {
               />
               {src && 'configured' in src && (
                 <Row label="Configuré" value={src.configured ? '✓ oui' : '✗ non'} />
+              )}
+              {nErrTickers != null && (
+                <Row
+                  label="Tickers en échec (universe.json)"
+                  value={nErrTickers}
+                  mono
+                  color={nErrTickers > 0 ? 'var(--warning, #fbbf24)' : undefined}
+                />
               )}
             </div>
           );

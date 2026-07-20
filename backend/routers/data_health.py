@@ -111,6 +111,12 @@ def _universe_inventory() -> dict[str, Any]:
         sp = r.get("source_provider") or "unknown"
         sources[sp] = sources.get(sp, 0) + 1
 
+    # Compteurs insider_error/finnhub_error (Étape 0/5) — jusqu'ici lus
+    # uniquement par data_confidence._multi_source_factor, jamais agrégés
+    # (Étape 6).
+    n_insider_error = sum(1 for r in tickers.values() if r.get("insider_error"))
+    n_finnhub_error = sum(1 for r in tickers.values() if r.get("finnhub_error"))
+
     return {
         "loaded": True,
         "n_tickers": n,
@@ -125,6 +131,10 @@ def _universe_inventory() -> dict[str, Any]:
             "severe_threshold_days": _FETCHED_AT_STALE_DAYS_CRITICAL,
         },
         "sources": sources,
+        "enrichment_errors": {
+            "insider_error": n_insider_error,
+            "finnhub_error": n_finnhub_error,
+        },
     }
 
 
@@ -202,7 +212,9 @@ def get_data_health():
       - severity_global : ok | warning | critical (calculé sur les composantes)
       - yf_breaker : tripped, age, cooldown, auto_reset_in
       - fundamentals_cache : n_cached, ages
-      - universe : fields_missing par champ, fetched_at distribution, sources
+      - universe : fields_missing par champ, fetched_at distribution, sources,
+        enrichment_errors (compteurs tickers insider_error/finnhub_error —
+        Étape 6)
       - fmp : quota_used / quota_max si dispo
       - providers : cache stats finnhub/insider/SEC filings/news (Étape 0 —
         dashboard toutes-sources, pas seulement fondamentaux)

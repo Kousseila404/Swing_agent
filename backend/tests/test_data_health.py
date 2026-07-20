@@ -177,6 +177,29 @@ def test_data_health_providers_cache_counts_disk_files(client, tmp_path, monkeyp
     assert cache["n_errors"] == 1
 
 
+def test_data_health_enrichment_errors_counted(client, tmp_path, monkeypatch):
+    """Étape 6 — insider_error/finnhub_error truthy doivent être comptés,
+    séparément l'un de l'autre, et jamais sur une valeur falsy/absente."""
+    p = tmp_path / "universe.json"
+    p.write_text(json.dumps({
+        "updated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tickers": {
+            "A": {"ticker": "A", "insider_error": "cik_unknown"},
+            "B": {"ticker": "B", "finnhub_error": "http_429"},
+            "C": {"ticker": "C", "insider_error": "sec_fetch_failed",
+                  "finnhub_error": "rate_limited"},
+            "D": {"ticker": "D", "insider_error": None, "finnhub_error": None},
+            "E": {"ticker": "E"},
+        },
+    }))
+    monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", p)
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    errs = body["universe"]["enrichment_errors"]
+    assert errs["insider_error"] == 2
+    assert errs["finnhub_error"] == 2
+
+
 def test_data_health_no_universe_file(client, tmp_path, monkeypatch):
     """Universe absent → loaded=False, severity reste calculable."""
     monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", tmp_path / "missing.json")
