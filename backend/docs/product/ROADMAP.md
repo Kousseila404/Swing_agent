@@ -333,6 +333,43 @@ d'ambiguïté (critères / lieu de persistance / UI). Choix retenu :
   séparé (scope plus large : persistance des critères, UI de filtres — à
   spécifier avant implémentation).
 
+### Étape 5 — Signal d'échec Finnhub pour `multi_source` — PAS COMMENCÉE
+Preuve concrète relevée en code (pas une hypothèse), directement dans le
+prolongement de la limite déjà documentée par Étape 0 dans
+`data_confidence.py` (docstring `_multi_source_factor`, L17-36) : *"Finnhub
+(revisions/earnings) et news n'ont pas encore de signal d'échec par-ticker
+persisté (fail-open silencieux — un champ `None` peut aussi bien dire 'pas
+d'info Finnhub' que 'endpoint en échec')"*.
+
+Vérifié en lisant le code du provider : `FinnhubData` (`data_providers/
+finnhub_provider.py`) a bien un champ `error: str | None = None` dans son
+dataclass, mais il n'est **jamais assigné nulle part** dans
+`get_revisions_and_earnings`/`_fetch_json` — chaque échec HTTP (timeout,
+429 rate-limit, HTTPError, exception réseau) `return None` silencieusement,
+indiscernable d'un ticker qui n'a légitimement aucune donnée. Côté
+`modules/finnhub_enrich.py`, `n_errors` ne compte que les crashes non
+gérés (`except Exception`), jamais ces échecs fail-open, et le champ
+`fdata.error` n'est de toute façon jamais lu ni persisté dans
+`universe.json`.
+
+Implémenter demanderait, sur le même patron que `insider_enrich._enrich_one`
+→ `insider_error` (Étape 0) :
+1. Faire distinguer à `_fetch_json`/`get_revisions_and_earnings` un échec
+   réseau/HTTP explicite (429, timeout, HTTPError, exception) d'un "0
+   résultat légitime", et peupler `FinnhubData.error` en conséquence.
+2. `finnhub_enrich.py` persiste ce signal dans `universe.json` (nouveau
+   champ `finnhub_error`, même mécanique que `insider_error`).
+3. Étendre `_multi_source_factor` (`modules/data_confidence.py`) pour
+   pénaliser `finnhub_error` truthy avec la même magnitude (×0.85) et la
+   même philosophie neutre-par-défaut que `insider_error` — aucune
+   régression sur le comportement fondamentaux-only existant.
+- Hors scope de cette étape : `news` (fetch à la demande, jamais persisté
+  dans `universe.json` — persister nécessiterait une décision de design
+  séparée, pas juste de l'instrumentation) et les filings SEC 10-K/Q,
+  comme déjà noté par Étape 0.
+- Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée —
+  pur renforcement de la fiabilité de la couche data existante.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
