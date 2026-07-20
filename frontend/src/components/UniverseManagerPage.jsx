@@ -25,6 +25,16 @@ const PERSIST_KEY = 'swing.universePage.filters.v1';
 const loadPersistedFilters = () => readJSON(PERSIST_KEY, null);
 const savePersistedFilters = (state) => writeJSON(PERSIST_KEY, state);
 
+// Screener multi-critères (Étape 4 roadmap) — seuils combinables en ET sur
+// les champs déjà exposés par /api/universe (aucun nouveau champ backend).
+// Valeur '' = critère inactif. Champ vide dans un ticker → exclu dès qu'un
+// seuil est actif sur ce champ (même logique fail-safe que buyFilter).
+const DEFAULT_SCORE_FILTERS = {
+  titanMin: '', qualityMin: '', valueMin: '', riskMin: '',
+  momentumMin: '', piotroskiMin: '', marketCapMinB: '', fwdPeMax: '',
+};
+const SCORE_FILTER_ACTIVE = (f) => Object.values(f).some(v => v !== '' && v != null);
+
 // Tooltips détaillés (Tier C #3) — composition de chaque pilier TITAN.
 // Source : modules/sector_metrics/_scoring.py. On vise une explication courte
 // activable au hover, pas une doc exhaustive.
@@ -101,11 +111,16 @@ export default function UniverseManagerPage() {
   const [buyFilter, setBuyFilter]       = useState(persistedFilters.buyFilter ?? 'all');
   // Filtre status portefeuille : 'all' | 'held' | 'proposed' | 'free'.
   const [statusFilter, setStatusFilter] = useState(persistedFilters.statusFilter ?? 'all');
+  // Screener multi-critères — seuils sur les piliers TITAN + market cap/PE.
+  const [scoreFilters, setScoreFilters] = useState({
+    ...DEFAULT_SCORE_FILTERS, ...(persistedFilters.scoreFilters || {}),
+  });
+  const [showScreener, setShowScreener] = useState(SCORE_FILTER_ACTIVE(persistedFilters.scoreFilters || {}));
 
   // Persistance des filtres à chaque changement (Suivi #23).
   useEffect(() => {
-    savePersistedFilters({ sectorFilter, sortBy, sortDir, buyFilter, statusFilter });
-  }, [sectorFilter, sortBy, sortDir, buyFilter, statusFilter]);
+    savePersistedFilters({ sectorFilter, sortBy, sortDir, buyFilter, statusFilter, scoreFilters });
+  }, [sectorFilter, sortBy, sortDir, buyFilter, statusFilter, scoreFilters]);
   const [analysisTicker, setAnalysisTicker] = useState(null);
   // Trace par ticker des push manuels en cours (pour disable + spinner).
   const [pushingTickers, setPushingTickers] = useState({});
@@ -428,6 +443,20 @@ export default function UniverseManagerPage() {
       buyFilter === 'buy_override'      ? BUY_TITAN_OVERRIDE_THRESHOLD :
       null;
     const requireStrongFScore = buyFilter === 'buy_strict_fscore';
+    // Screener multi-critères — chaque seuil actif ('' = inactif) doit être
+    // satisfait (ET logique). Ticker exclu si le champ correspondant est
+    // manquant (cohérent avec le fail-safe déjà appliqué à buyFilter ci-dessus).
+    const sf = scoreFilters;
+    const scoreChecks = [
+      [sf.titanMin,     t => t.titan_composite_score, (v, min) => v >= min],
+      [sf.qualityMin,   t => t.quality_score,          (v, min) => v >= min],
+      [sf.valueMin,     t => t.value_score,            (v, min) => v >= min],
+      [sf.riskMin,      t => t.risk_score,             (v, min) => v >= min],
+      [sf.momentumMin,  t => t.momentum_score,         (v, min) => v >= min],
+      [sf.piotroskiMin, t => t.f_score,                (v, min) => v >= min],
+      [sf.marketCapMinB, t => t.market_cap,            (v, min) => v >= min * 1e9],
+      [sf.fwdPeMax,     t => t.forward_pe,             (v, max) => v <= max],
+    ];
     let list = tickers.filter(t => {
       if (sectorFilter !== 'ALL' && (t.sector || 'Unknown') !== sectorFilter) return false;
       if (buyMin !== null) {
@@ -438,6 +467,13 @@ export default function UniverseManagerPage() {
       }
       if (requireStrongFScore) {
         if (!Number.isFinite(t.f_score) || t.f_score < 7) return false;
+      }
+      for (const [raw, getVal, cmp] of scoreChecks) {
+        if (raw === '' || raw == null) continue;
+        const threshold = Number(raw);
+        if (!Number.isFinite(threshold)) continue;
+        const val = getVal(t);
+        if (!Number.isFinite(val) || !cmp(val, threshold)) return false;
       }
       if (statusFilter === 'held' && t.portfolio_status !== 'HELD') return false;
       if (statusFilter === 'proposed' && t.portfolio_status !== 'PROPOSED') return false;
@@ -498,12 +534,12 @@ export default function UniverseManagerPage() {
       return res * flip;
     });
     return list;
-  }, [tickers, sectorFilter, searchText, sortBy, sortDir, buyFilter, statusFilter]);
+  }, [tickers, sectorFilter, searchText, sortBy, sortDir, buyFilter, statusFilter, scoreFilters]);
 
   // Reset page à chaque changement de filtre/tri — évite de rester sur
   // une page vide. Pattern React "adjust state on input change" (évite
   // le cascading render d'un useEffect).
-  const filterKey = `${sectorFilter}|${searchText}|${sortBy}|${buyFilter}|${statusFilter}`;
+  const filterKey = `${sectorFilter}|${searchText}|${sortBy}|${buyFilter}|${statusFilter}|${JSON.stringify(scoreFilters)}`;
   const [lastFilterKey, setLastFilterKey] = useState(filterKey);
   if (filterKey !== lastFilterKey) {
     setLastFilterKey(filterKey);
@@ -656,7 +692,7 @@ export default function UniverseManagerPage() {
                 className="mini-input"
                 style={{ width: 280 }}
               />
-              {(searchText || sectorFilter !== 'ALL' || buyFilter !== 'all' || statusFilter !== 'all') && (
+              {(searchText || sectorFilter !== 'ALL' || buyFilter !== 'all' || statusFilter !== 'all' || SCORE_FILTER_ACTIVE(scoreFilters)) && (
                 <button
                   className="scan-filter-btn"
                   onClick={() => {
@@ -664,12 +700,20 @@ export default function UniverseManagerPage() {
                     setSectorFilter('ALL');
                     setBuyFilter('all');
                     setStatusFilter('all');
+                    setScoreFilters(DEFAULT_SCORE_FILTERS);
                   }}
                   style={{ padding: '0.5rem 0.75rem' }}
                 >
                   ✕ Reset
                 </button>
               )}
+              <button
+                className={`scan-filter-btn ${showScreener ? 'active' : ''}`}
+                onClick={() => setShowScreener(v => !v)}
+                title="Filtres avancés combinables (TITAN, piliers, market cap, P/E)"
+              >
+                🎛 Screener {SCORE_FILTER_ACTIVE(scoreFilters) ? '●' : ''}
+              </button>
             </div>
 
             {/* Filtre rapide "Buy candidates" — opérationalise la règle manuelle
@@ -816,16 +860,25 @@ export default function UniverseManagerPage() {
             </div>
           </div>
 
+          {/* ── SCREENER MULTI-CRITÈRES (Étape 4) ── */}
+          {showScreener && (
+            <ScreenerPanel filters={scoreFilters} onChange={setScoreFilters} />
+          )}
+
           {/* ── PRESETS ── */}
           <PresetBar
             scope="universe"
             label="Vues univers"
-            current={{ sectorFilter, searchText, sortBy, buyFilter }}
+            current={{ sectorFilter, searchText, sortBy, buyFilter, scoreFilters }}
             onApply={(p) => {
               if (p?.sectorFilter !== undefined) setSectorFilter(p.sectorFilter);
               if (p?.searchText   !== undefined) setSearchText(p.searchText);
               if (p?.sortBy       !== undefined) setSortBy(p.sortBy);
               if (p?.buyFilter    !== undefined) setBuyFilter(p.buyFilter);
+              if (p?.scoreFilters !== undefined) {
+                setScoreFilters({ ...DEFAULT_SCORE_FILTERS, ...p.scoreFilters });
+                setShowScreener(SCORE_FILTER_ACTIVE(p.scoreFilters));
+              }
               setPage(1);
             }}
           />
@@ -1055,6 +1108,49 @@ export default function UniverseManagerPage() {
           onClose={() => { setBacktestResult(null); setBacktestError(null); }}
         />
       )}
+    </div>
+  );
+}
+
+// Screener multi-critères — panneau de seuils combinables en ET, appliqués
+// en plus des filtres sector/buy/status existants. Purement client-side sur
+// les champs déjà renvoyés par /api/universe (aucun endpoint dédié).
+const SCREENER_FIELDS = [
+  { key: 'titanMin',      label: 'TITAN ≥',       step: 1,   suffix: '' },
+  { key: 'qualityMin',    label: 'Quality ≥',     step: 1,   suffix: '' },
+  { key: 'valueMin',      label: 'Value ≥',       step: 1,   suffix: '' },
+  { key: 'riskMin',       label: 'Risk ≥',        step: 1,   suffix: '' },
+  { key: 'momentumMin',   label: 'Momentum ≥',    step: 1,   suffix: '' },
+  { key: 'piotroskiMin',  label: 'F-Score ≥',     step: 1,   suffix: '/9' },
+  { key: 'marketCapMinB', label: 'Market cap ≥',  step: 0.5, suffix: 'B$' },
+  { key: 'fwdPeMax',      label: 'Fwd P/E ≤',     step: 1,   suffix: '' },
+];
+
+function ScreenerPanel({ filters, onChange }) {
+  const setField = (key, raw) => {
+    onChange(prev => ({ ...prev, [key]: raw }));
+  };
+  return (
+    <div className="card" style={{ padding: '0.85rem 1rem', marginBottom: '0.75rem' }}>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
+        🎛 Screener multi-critères — combine les seuils (ET logique), un champ vide = critère ignoré.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.6rem' }}>
+        {SCREENER_FIELDS.map(f => (
+          <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            {f.label}
+            <input
+              type="number"
+              step={f.step}
+              value={filters[f.key]}
+              onChange={e => setField(f.key, e.target.value)}
+              className="mini-input"
+              placeholder={f.suffix || '—'}
+              style={{ width: '100%' }}
+            />
+          </label>
+        ))}
+      </div>
     </div>
   );
 }
