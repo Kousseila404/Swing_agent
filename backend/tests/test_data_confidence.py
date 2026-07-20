@@ -130,6 +130,48 @@ def test_modifier_thresholds():
     assert confidence_modifier(30) == 0.50
 
 
+# ─── MultiSource (Étape 0 généralisation, 2026-07-20) ─────────
+def test_multi_source_absent_is_neutral():
+    """Ticker jamais enrichi par insider_enrich (champ absent) → ×1.00,
+    aucune régression sur le score existant."""
+    with_field = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7, "insider_error": None,
+    })
+    without_field = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7,
+    })
+    assert with_field["multi_source"] == 1.0
+    assert without_field["multi_source"] == 1.0
+    assert with_field["score"] == without_field["score"]
+
+
+def test_multi_source_quiet_ticker_not_penalized():
+    """insider_data_quality=0 SANS insider_error (insiders juste calmes)
+    ne doit pas faire chuter multi_source — pas une panne."""
+    r = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7,
+        "insider_data_quality": 0.0, "insider_error": None,
+    })
+    assert r["multi_source"] == 1.0
+
+
+def test_multi_source_insider_error_penalizes():
+    ok = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7, "insider_error": None,
+    })
+    failed = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7, "insider_error": "sec_fetch_failed",
+    })
+    assert failed["multi_source"] == 0.85
+    assert failed["score"] < ok["score"]
+    assert any("Insider SEC EDGAR en échec" in line for line in failed["breakdown"])
+
+
 # ─── Breakdown traceable ─────────────────────────────────────
 def test_breakdown_has_explanations():
     r = compute_confidence({

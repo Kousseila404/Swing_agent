@@ -14,9 +14,29 @@ module agrège trois signaux orthogonaux en un score 0-100 par ticker :
   • Sanity     — détection d'aberrations sectorielles (PEG ratio absurde,
                  quality_score outlier vs sector median, contradictions
                  internes type Q-90 mais ROE manquant).
+  • MultiSource — pannes explicites des sources d'enrichissement au-delà
+                 des fondamentaux (Étape 0 généralisation, 2026-07-20).
+                 Neutre (×1.00) par défaut ; ne pénalise QUE sur un signal
+                 d'échec sans ambiguïté déjà calculé ailleurs dans le
+                 pipeline — jamais sur une simple absence de données (qui
+                 peut vouloir dire "rien à signaler", pas "source cassée").
+                 Aujourd'hui : uniquement `insider_error` (SEC Form 4 —
+                 "cik_unknown"/"sec_fetch_failed", écrit par
+                 `insider_enrich._enrich_one`). Finnhub (revisions/
+                 earnings) et news n'ont pas encore de signal d'échec
+                 par-ticker persisté (fail-open silencieux — un champ
+                 `None` peut aussi bien dire "pas d'info Finnhub" que
+                 "endpoint en échec") ; les filings SEC 10-K/Q sont
+                 fetchés à la demande (`routers/sec_filings.py`), jamais
+                 persistés dans `universe.json` — donc invisibles ici
+                 sans I/O réseau, que ce module s'interdit (déterministe).
+                 Ajouter ces sources demandera d'abord de leur donner un
+                 signal d'échec par-ticker aussi propre que celui
+                 d'insider — pas un nouveau jugement d'isolation, juste
+                 du travail d'instrumentation supplémentaire.
 
 Logique :
-  confidence = 100 × (coverage × freshness × sanity)
+  confidence = 100 × (coverage × freshness × sanity × multi_source)
 
 Tous les facteurs sont des multiplicateurs dans [0, 1]. Un seul effondre le
 score : un ticker stale 12 mois (freshness=0.4) + outlier sectoriel
@@ -63,6 +83,11 @@ _FWD_PE_SANITY_MAX = 200.0
 # Outlier sector-relative : un quality_score qui dépasse le sector median
 # de plus de 40 pts est suspect (probable data anomaly, à investiguer).
 _QUALITY_OUTLIER_DELTA = 40.0
+
+# ─── Multi-source (au-delà des fondamentaux) ──────────────────
+# Même magnitude que les pénalités sanity existantes (PEG/Fwd-PE aberrants)
+# — pas de sévérité inventée, cohérent avec le reste du module.
+_MULTI_SOURCE_ERROR_PENALTY = 0.85
 
 
 def _safe_float(v: Any) -> float | None:
@@ -144,6 +169,26 @@ def _sanity_factor(
     return factor, notes
 
 
+def _multi_source_factor(info: dict[str, Any]) -> tuple[float, list[str]]:
+    """Facteur ∈ {0.85, 1.00} — pannes explicites hors fondamentaux.
+
+    Neutre (1.00) si absent/None, y compris pour un ticker jamais enrichi
+    par `insider_enrich` (pas de régression sur le comportement actuel).
+    Ne pénalise que sur `insider_error` truthy (échec SEC EDGAR sans
+    ambiguïté — cf. docstring module). Autres sources : voir docstring
+    module, pas encore de signal sûr disponible.
+    """
+    factor = 1.0
+    notes: list[str] = []
+    insider_err = info.get("insider_error")
+    if insider_err:
+        factor *= _MULTI_SOURCE_ERROR_PENALTY
+        notes.append(f"Insider SEC EDGAR en échec ({insider_err}) → ×{_MULTI_SOURCE_ERROR_PENALTY:.2f}")
+    if not notes:
+        notes.append("Sources d'enrichissement OK (ou non encore instrumentées) → ×1.00")
+    return factor, notes
+
+
 def compute_confidence(
     info: dict[str, Any] | None,
     *,
@@ -164,18 +209,19 @@ def compute_confidence(
 
     Returns:
         {
-          score:      0-100 (entier),
-          tier:       'high' | 'medium' | 'low' | 'very_low',
-          coverage:   0-1,
-          freshness:  0-1,
-          sanity:     0-1,
-          breakdown:  list[str] — explication ligne par ligne,
+          score:        0-100 (entier),
+          tier:         'high' | 'medium' | 'low' | 'very_low',
+          coverage:     0-1,
+          freshness:    0-1,
+          sanity:       0-1,
+          multi_source: 0-1,
+          breakdown:    list[str] — explication ligne par ligne,
         }
     """
     if not info:
         return {
             "score": 0, "tier": "very_low",
-            "coverage": 0.0, "freshness": 0.0, "sanity": 0.0,
+            "coverage": 0.0, "freshness": 0.0, "sanity": 0.0, "multi_source": 0.0,
             "breakdown": ["Aucune donnée disponible"],
         }
 
@@ -208,8 +254,10 @@ def compute_confidence(
         sector_quality_median=_safe_float(sector_quality_median),
     )
 
+    multi_source_v, multi_source_notes = _multi_source_factor(info)
+
     # Composition multiplicative — un facteur faible suffit à effondrer.
-    raw = 100.0 * coverage * fresh_factor * sanity_factor_v
+    raw = 100.0 * coverage * fresh_factor * sanity_factor_v * multi_source_v
     score = int(round(max(0.0, min(100.0, raw))))
 
     if score >= 80:
@@ -225,16 +273,18 @@ def compute_confidence(
         f"Coverage {coverage*100:.0f}% (champs fondamentaux disponibles) → ×{coverage:.2f}",
         fresh_label,
         *sanity_notes,
-        f"Score final = {coverage:.2f} × {fresh_factor:.2f} × {sanity_factor_v:.2f} × 100 = {score}",
+        *multi_source_notes,
+        f"Score final = {coverage:.2f} × {fresh_factor:.2f} × {sanity_factor_v:.2f} × {multi_source_v:.2f} × 100 = {score}",
     ]
 
     return {
-        "score":     score,
-        "tier":      tier,
-        "coverage":  round(coverage, 3),
-        "freshness": round(fresh_factor, 3),
-        "sanity":    round(sanity_factor_v, 3),
-        "breakdown": breakdown,
+        "score":        score,
+        "tier":         tier,
+        "coverage":     round(coverage, 3),
+        "freshness":    round(fresh_factor, 3),
+        "sanity":       round(sanity_factor_v, 3),
+        "multi_source": round(multi_source_v, 3),
+        "breakdown":    breakdown,
     }
 
 

@@ -1,0 +1,52 @@
+"""Tests insider_enrich — propagation de l'échec SEC EDGAR (Étape 0, 2026-07-20).
+
+`_enrich_one` doit exposer `insider_error` dans la row persistée (avant ce
+run, `activity.error`/`pillar["reason"]` étaient calculés mais jamais
+écrits dans universe.json — invisibles pour data_confidence.py).
+"""
+from __future__ import annotations
+
+from modules import insider_enrich
+from modules.sec_edgar import InsiderActivity
+
+
+def test_enrich_one_success_has_no_error(monkeypatch):
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(ticker=ticker, n_filings_scanned=6),
+    )
+    ticker, fields = insider_enrich._enrich_one("AAA")
+    assert ticker == "AAA"
+    assert fields["insider_error"] is None
+
+
+def test_enrich_one_quiet_ticker_has_no_error(monkeypatch):
+    """0 filing trouvé (insiders calmes) n'est PAS une panne — error=None."""
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(ticker=ticker, n_filings_scanned=0),
+    )
+    _, fields = insider_enrich._enrich_one("BBB")
+    assert fields["insider_error"] is None
+    # data_quality tombe à 0 aussi dans ce cas — mais SANS insider_error,
+    # data_confidence ne doit PAS le traiter comme une panne (cf. module).
+    assert fields["insider_data_quality"] == 0.0
+
+
+def test_enrich_one_propagates_fetch_failure(monkeypatch):
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(ticker=ticker, error="sec_fetch_failed"),
+    )
+    ticker, fields = insider_enrich._enrich_one("CCC")
+    assert fields["insider_error"] == "sec_fetch_failed"
+    assert fields["insider_data_quality"] == 0.0
+
+
+def test_enrich_one_propagates_cik_unknown(monkeypatch):
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(ticker=ticker, error="cik_unknown"),
+    )
+    _, fields = insider_enrich._enrich_one("DDD")
+    assert fields["insider_error"] == "cik_unknown"
