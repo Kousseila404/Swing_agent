@@ -450,7 +450,24 @@ sévérité.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
-### Étape 7 — Lister les tickers `dq_sanitize` dans `/api/data_health` — PAS COMMENCÉE
+### Étape 7 — Lister les tickers `dq_sanitize` dans `/api/data_health` — [FAIT 2026-07-20]
+[FAIT 2026-07-20] Implémenté exactement sur le patron décrit ci-dessous :
+`list_flagged_tickers()` (déjà calculée par `fundamentals_cache.py`, même
+source que `cache_sanitize_stats()`) est désormais incluse dans le payload
+`GET /api/data_health` sous `sanitize.tickers` (liste triée de symboles).
+Côté UI, `DataHealthPage.jsx` (card "🧹 Qualité données") affiche un bouton
+repliable "▸ Tickers (N)" sous le tableau des tags existant — chips au clic,
+cohérent avec le style déjà en place, pas de nouvelle card.
+Tests : 2 nouveaux dans `test_data_health.py` (liste correcte quand des
+tickers sont flaggés, liste vide quand le cache est propre).
+Vérifié : suite backend complète (1010 tests, 3 échecs pré-existants sans
+lien — confirmés en échec identique sur le commit de base avant ce
+changement, environnement sandbox : chemin `/nonexistent/...` writable en
+root, mapping secteur différent) + build frontend clean + 45 tests vitest +
+lint clean.
+Aucun changement à la logique de sanitization elle-même ni au comportement
+du bouton "Rafraîchir", aucun nouveau seuil de severity — pur ajout de
+lecture/présentation, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `modules/fundamentals_cache.py`
 (`list_flagged_tickers()`, L364) calcule déjà la liste triée des tickers
