@@ -6,9 +6,10 @@ pour un investisseur LT débutant (3 premiers mois conservateur).
 Grille de décision :
   STRONG_BUY  : TITAN ≥ 80 + Quality ≥ 60 + Momentum ≥ 50 + earnings ≥ 14j +
                 ≥ 2 boosters validés
-  BUY         : TITAN ≥ 75 + Quality ≥ 60 + Momentum ≥ 50 + earnings ≥ 14j +
+  BUY         : TITAN ≥ 70 + Quality ≥ 60 + Momentum ≥ 50 + earnings ≥ 14j +
                 ≥ 1 booster validé
-  WATCH       : TITAN 70-74 + earnings ≥ 14j (intéressant mais conviction insuffisante)
+  WATCH       : TITAN 70-79 sans booster, ou Q/M faible malgré TITAN haut
+                (intéressant mais conviction insuffisante)
   EARNINGS_BLACKOUT : earnings dans < 7j (skippé d'office)
   EARNINGS_NEAR : earnings 7-14j (watch only, size réduit)
   CHEAP_JUNK  : Value ≥ 80 ET Quality < 35 → piège fondamental
@@ -47,8 +48,11 @@ from datetime import date
 from typing import Any
 
 # Seuils principaux — ajustables selon la phase d'utilisation.
+# _T_BUY aligné sur _T_WATCH (2026-07-20) : à 75, 7 tickers déjà propres sur
+# Quality/Momentum/boosters (ex. APA, BMY, INCY) restaient bloqués en WATCH
+# uniquement par ce seuil composite. Décision réversible, non backtestée.
 _T_STRONG_BUY = 80.0
-_T_BUY        = 75.0
+_T_BUY        = 70.0
 _T_WATCH      = 70.0
 
 _T_QUALITY_MIN = 60.0
