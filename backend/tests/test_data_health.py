@@ -232,6 +232,20 @@ def test_data_health_sanitize_exposes_flag_stats(client, isolated_cache):
     assert body["sanitize"]["flags"].get("out_of_bounds:ev_to_ebitda") == 3
 
 
+def test_data_health_sanitize_exposes_flagged_tickers(client, isolated_cache):
+    """Étape 7 : la liste des tickers flaggés (pas juste le compte) est exposée."""
+    _seed_flagged_cache(3)
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    assert body["sanitize"]["tickers"] == ["FLAG0", "FLAG1", "FLAG2"]
+
+
+def test_data_health_sanitize_tickers_empty_when_clean(client, isolated_cache):
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    assert body["sanitize"]["tickers"] == []
+
+
 def test_data_health_severity_warning_above_sanitize_threshold(
     client, isolated_cache, tmp_path, monkeypatch,
 ):

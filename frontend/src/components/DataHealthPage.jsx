@@ -59,6 +59,7 @@ export default function DataHealthPage() {
   const { data, isLoading, isError, error, refetch } = useDataHealth();
   const qc = useQueryClient();
   const [lastResult, setLastResult] = useState(null);
+  const [showTickers, setShowTickers] = useState(false);
 
   const refreshMut = useMutation({
     mutationFn: refreshFlaggedTickers,
@@ -234,6 +235,28 @@ export default function DataHealthPage() {
               </tbody>
             </table>
           </>
+        )}
+        {nFlagged > 0 && sanitize.tickers && sanitize.tickers.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              className="action-btn"
+              style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+              onClick={() => setShowTickers((v) => !v)}
+            >
+              {showTickers ? '▾' : '▸'} Tickers ({sanitize.tickers.length})
+            </button>
+            {showTickers && (
+              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {sanitize.tickers.map((t) => (
+                  <span key={t} style={{
+                    background: 'rgba(255,255,255,0.06)',
+                    padding: '2px 8px', borderRadius: 12,
+                    fontSize: '0.75rem', fontFamily: 'monospace',
+                  }}>{t}</span>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         <div style={{ marginTop: 12, display: 'flex', gap: 10,
                       alignItems: 'center', flexWrap: 'wrap' }}>

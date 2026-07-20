@@ -242,7 +242,9 @@ def get_data_health():
     # 2b. Sanitize flags (Niveau 1 qualité data) — compte des valeurs
     # out-of-bounds rejetées et cross-check market_cap en amont du cache.
     try:
-        payload["sanitize"] = cache_sanitize_stats()
+        sanitize = cache_sanitize_stats()
+        sanitize["tickers"] = list_flagged_tickers()
+        payload["sanitize"] = sanitize
     except (OSError, ValueError, KeyError) as e:
         logger.warning(f"[data_health] cache_sanitize_stats failed: {e}")
         payload["sanitize"] = {"error": str(e)}
