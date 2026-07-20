@@ -573,6 +573,58 @@ l'Étape 7. Aucun nouveau seuil de `severity_global`.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
+### Étape 9 — Croiser les 8-K (événements matériels SEC) dans le narratif causal — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `causal_reasons()`
+(`modules/signal_qualification.py:220-255`) construit le "pourquoi maintenant"
+d'un signal en croisant exactement 3 sources entre l'instantané de référence
+et aujourd'hui — `earnings_surprise` (L233-241), `insider_cluster_buying`
+(L243-246), `revisions_score` (L248-253). Aucune trace d'événement matériel
+SEC (dépôt 8-K) dans cette liste, alors que c'est l'un des catalyseurs
+"pourquoi maintenant" les plus directs qui existent (rachat d'action annoncé,
+changement de direction, guidance révisée, fusion/acquisition — tout ce qui
+déclenche un 8-K). C'est exactement le type de trou que la Vision du document
+cible ("pourquoi celui-là, pourquoi maintenant").
+
+Ce qui rend l'ajout bon marché : la donnée est déjà fetchée quotidiennement
+pour tout l'univers, sans nouvel appel réseau. `insider_enrich.py` appelle
+`sec_edgar.fetch_insider_activity()` pour chaque ticker (déjà branché en
+cron), qui télécharge et parse `data.sec.gov/submissions/CIK{cik}.json` —
+mais la boucle de parsing (`sec_edgar.py:425-447`) filtre `if form not in
+("4", "4/A"): continue` (L426) et jette silencieusement tous les autres
+types de filing présents dans le même payload déjà en mémoire, y compris les
+8-K. Extraire en plus la date du 8-K le plus récent dans cette même boucle
+ne coûte aucune requête SEC supplémentaire — pure extraction d'une donnée
+déjà téléchargée et parsée.
+
+(Vérifié aussi : `sec_edgar.fetch_recent_filings()`, utilisé uniquement à la
+demande par `routers/sec_filings.py`, calcule déjà `days_ago` par filing y
+compris pour les 8-K — confirme que la donnée existe et est bien formée,
+seulement jamais persistée ni utilisée pour la qualification.)
+
+Implémenter demanderait :
+1. `sec_edgar.InsiderActivity` : ajouter un champ `most_recent_8k_date: str
+   | None`, peuplé dans la même boucle `fetch_insider_activity()` qui itère
+   déjà `forms`/`dates` (pas de nouveau fetch, juste une 2e condition dans
+   la boucle existante).
+2. `insider_enrich._enrich_one` : persister ce champ dans `universe.json`
+   (même mécanique que `insider_error`/`insider_most_recent`).
+3. `signal_qualification.causal_reasons` : ajouter une 4e comparaison —
+   si un 8-K est apparu entre l'instantané de référence et aujourd'hui,
+   ajouter une raison du type "Événement matériel déposé (8-K, {date})".
+   Même garde-fou que les 3 sources existantes : lecture seule sur des
+   champs déjà dans `scored_row`/`universe_history`, aucun nouveau calcul
+   de score, aucun impact sur `compute_buy_signal`/sizing/exit.
+
+Hors scope explicite : ne touche pas au pilier Insider
+(`compute_insider_pillar_score`) ni à aucun poids de scoring — uniquement
+une extraction de donnée déjà fetchée (data-provider layer) et un ajout de
+raison narrative (présentation/qualification layer), comme les étapes
+précédentes.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+enrichissement du narratif causal déjà en place (Étape 1).
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
