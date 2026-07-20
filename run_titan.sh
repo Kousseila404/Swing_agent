@@ -21,6 +21,22 @@ LOG_DIR="$ROOT/logs"
 LOG_FILE="$LOG_DIR/titan_daily.log"
 API_URL="${TITAN_API_URL:-http://localhost:8000}"
 
+# ── Dead-man-switch healthchecks.io (watchdog externe) ───────────
+#    Détecte le cas que ni le health-check Telegram (9h) ni le digest
+#    metrics_agent (step 3c) ne peuvent couvrir : le cron n'a pas tourné
+#    du tout (VPS down, cron daemon KO, crontab cassé). healthchecks.io
+#    alerte si aucun ping "succès" ou "start" n'arrive dans la fenêtre
+#    prévue + marge — indépendant de l'infra locale, gratuit.
+#    Optionnel : no-op silencieux tant que HEALTHCHECKS_PING_URL n'est
+#    pas défini (crontab ou backend/.env, même pattern que API_TOKEN).
+HC_PING_URL="${HEALTHCHECKS_PING_URL:-}"
+if [[ -z "$HC_PING_URL" && -f "$BACKEND/.env" ]]; then
+    HC_PING_URL=$(grep -E '^HEALTHCHECKS_PING_URL=' "$BACKEND/.env" | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+fi
+if [[ -n "$HC_PING_URL" ]]; then
+    curl --silent --max-time 10 "$HC_PING_URL/start" -o /dev/null || true
+fi
+
 mkdir -p "$LOG_DIR"
 
 # Redirection globale : stdout + stderr → log, avec horodatage ligne-à-ligne.
@@ -225,21 +241,29 @@ if [[ $rc_hedge -ne 0 ]]; then
 fi
 
 # ── Exit code synthétique ────────────────────────────────────────
+final_rc=0
 if [[ $rc_sched -ne 0 ]]; then
     echo "DONE with errors (scheduler rc=$rc_sched)"
-    exit $rc_sched
-fi
-if [[ $rc_warm -ne 0 ]]; then
+    final_rc=$rc_sched
+elif [[ $rc_warm -ne 0 ]]; then
     echo "DONE — scheduler OK, warm KO"
-    exit 1
-fi
-if [[ $rc_hist -ne 0 ]]; then
+    final_rc=1
+elif [[ $rc_hist -ne 0 ]]; then
     echo "DONE — scheduler+warm+proposals OK, history KO"
-    exit 3
-fi
-if [[ $rc_props -ne 0 ]]; then
+    final_rc=3
+elif [[ $rc_props -ne 0 ]]; then
     echo "DONE — scheduler+warm+history OK, proposals KO"
-    exit 2
+    final_rc=2
+else
+    echo "DONE — scheduler + warm + history + proposals OK"
 fi
-echo "DONE — scheduler + warm + history + proposals OK"
-exit 0
+
+if [[ -n "$HC_PING_URL" ]]; then
+    if [[ $final_rc -eq 0 ]]; then
+        curl --silent --max-time 10 "$HC_PING_URL" -o /dev/null || true
+    else
+        curl --silent --max-time 10 --data-raw "run_titan.sh exit=$final_rc (voir logs/titan_daily.log)" "$HC_PING_URL/fail" -o /dev/null || true
+    fi
+fi
+
+exit $final_rc
