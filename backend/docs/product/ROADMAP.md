@@ -92,7 +92,7 @@ Vérifié en live (2026-07-18, pas une supposition) :
 On implémente une étape, on valide en usage réel, puis on passe à la
 suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 → 4.
 
-### Étape 0 — Fondation data — PAS COMMENCÉE
+### Étape 0 — Fondation data — [FAIT 2026-07-20]
 - [FAIT 2026-07-18] Corriger le calcul de fraîcheur fondamentaux : ajout de
   `_latest_quarterly_period_end()` (`yfinance_provider.py`), qui lit
   `tk.quarterly_balance_sheet`/`quarterly_financials` en plus des annuels.
@@ -110,25 +110,31 @@ suivante. Pas de gros refactor big-bang. Ordre : 0 → 0bis → 1 → 2 → 3 �
   produisent pas de `FinancialRatios` — les forcer dans
   `FundamentalProviderBase` aurait touché le pipeline de scoring, hors scope
   de ce refactor pur.
-- Généraliser `data_confidence.py` à toutes les sources, pas seulement
-  fondamentaux. **Attention en l'implémentant** : ce module alimente déjà
-  `_sizing_buffett.apply_buffett_tilt` et `lt_exit_policy.decide`
-  (inhibition EXIT_VALUATION) — donc de la logique de sizing/exit réelle.
-  Généraliser la formule sans changer le comportement des tickers déjà
-  couverts (fondamentaux) demande un jugement humain sur comment isoler le
-  nouveau facteur multi-source ; ne pas reformuler l'existant à la volée.
-  **BLOCKED (2026-07-18):** vérifié en code — `confidence_score` gate
-  directement `EXIT_VALUATION` et `confidence_drop`/WARN dans
-  `lt_exit_policy.decide` (`lt_exit_policy.py:344-427`) et pondère le tilt
-  de sizing dans `_sizing_buffett.apply_buffett_tilt`
-  (`_sizing_buffett.py:154-155`). Généraliser la formule multiplicative de
-  `compute_confidence` pour absorber finnhub/insider/SEC/news sans
-  définition humaine de comment isoler ce nouveau facteur risquerait de
-  faire glisser silencieusement les scores de confiance — donc le
-  sizing/exit — sur des tickers déjà en prod. Reste exactement le jugement
-  humain que ce bullet demande déjà ; un agent autonome ne tranche pas ce
-  choix. Prochain run : passer au bullet suivant (`/api/data_health`
-  toutes-sources) tant que celui-ci n'est pas débloqué par l'utilisateur.
+- [FAIT 2026-07-20] Généraliser `data_confidence.py` au-delà des
+  fondamentaux, débloqué sur mécanisme explicitement validé par
+  l'utilisateur (2026-07-20) après proposition concrète : nouveau facteur
+  multiplicatif `multi_source` dans `compute_confidence`, **neutre
+  (×1.00) par défaut** sur tous les tickers déjà couverts — aucune
+  régression de comportement sur le fondamentaux-only existant, comme
+  exigé par le blocage initial. Ne pénalise (×0.85, même magnitude que les
+  pénalités sanity existantes) que sur un signal d'échec **sans
+  ambiguïté** déjà calculé ailleurs dans le pipeline — jamais sur une
+  simple absence de données. Source branchée : `insider_error` (SEC Form
+  4 — `"cik_unknown"`/`"sec_fetch_failed"`, distinct du cas normal "0
+  filing trouvé, insiders calmes"), jusqu'ici calculé par
+  `compute_insider_pillar_score` mais jamais persisté dans `universe.json`
+  — `insider_enrich._enrich_one` l'écrit désormais explicitement.
+  Finnhub (revisions/earnings) et news restent **hors scope** : ni l'un ni
+  l'autre n'a de signal d'échec par-ticker propre aujourd'hui (finnhub =
+  fail-open silencieux, un champ `None` peut vouloir dire "pas de data"
+  comme "endpoint cassé" ; news/filings SEC 10-K/Q = fetch à la demande,
+  jamais persisté dans `universe.json`, donc invisible sans I/O réseau que
+  ce module s'interdit). Les ajouter demandera d'abord de leur donner un
+  signal d'échec aussi propre que celui d'insider — pas un nouveau
+  jugement d'isolation, juste de l'instrumentation supplémentaire.
+  Tests : 3 dans `test_data_confidence.py` (neutre si absent, non
+  pénalisé si juste "calme", pénalisé si erreur explicite) + 4 dans
+  `test_insider_enrich.py` (propagation succès/échec/cik_unknown/calme).
 - [FAIT 2026-07-19] Unifié `/api/data_health` en tableau de bord
   toutes-sources : nouvelle section `providers` (finnhub enrich, finnhub
   news, insider SEC Form 4, SEC filings, CIK map), cache stats agrégées
