@@ -333,7 +333,36 @@ d'ambiguïté (critères / lieu de persistance / UI). Choix retenu :
   séparé (scope plus large : persistance des critères, UI de filtres — à
   spécifier avant implémentation).
 
-### Étape 5 — Signal d'échec Finnhub pour `multi_source` — PAS COMMENCÉE
+### Étape 5 — Signal d'échec Finnhub pour `multi_source` — [FAIT 2026-07-20]
+[FAIT 2026-07-20] Implémenté sur le patron exact décrit ci-dessous :
+`_fetch_json` (`data_providers/finnhub_provider.py`) retourne désormais
+`(payload, error)` — `error` est `None` même sur un payload vide/légitimement
+absent (ticker sans couverture analyste), et n'est renseigné que sur un
+échec réseau/HTTP explicite (`http_<code>`, `rate_limited` sur 429,
+`fetch_failed` sur exception réseau). `get_revisions_and_earnings` accumule
+les échecs des 4 endpoints (préfixés par endpoint, concaténés par `; ` si
+plusieurs) dans `FinnhubData.error`. `finnhub_enrich.py` persiste ce champ
+sous `finnhub_error` dans `universe.json`, **toujours réécrit** (même à
+`None`) pour qu'un ticker "guérisse" au run suivant si l'échec était
+transitoire — même mécanique que `insider_error` (Étape 0).
+`data_confidence._multi_source_factor` pénalise `finnhub_error` truthy avec
+la même magnitude (×0.85) et la même philosophie neutre-par-défaut que
+`insider_error` ; les deux pénalités sont indépendantes et cumulatives (un
+ticker en échec sur les deux sources tombe à ×0.7225, pas juste la pire des
+deux). Docstring module mis à jour (les deux sources sont désormais
+"branchées", plus seulement insider).
+Hors scope conservé : `news` et les filings SEC 10-K/Q (toujours fetchés à
+la demande, jamais persistés dans `universe.json`), comme documenté
+initialement.
+Tests : 4 nouveaux dans `test_finnhub_provider.py` (tuple `(payload, error)`,
+distinction échec/absence légitime, concatenation multi-endpoints) + 3 dans
+`test_finnhub_enrich.py` (succès sans erreur, propagation d'échec,
+guérison au run suivant) + 4 dans `test_data_confidence.py` (absent neutre,
+0-résultat légitime non pénalisé, pénalisé si erreur explicite, cumul avec
+insider_error).
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+renforcement de la fiabilité de la couche data existante, comme prévu.
+
 Preuve concrète relevée en code (pas une hypothèse), directement dans le
 prolongement de la limite déjà documentée par Étape 0 dans
 `data_confidence.py` (docstring `_multi_source_factor`, L17-36) : *"Finnhub
