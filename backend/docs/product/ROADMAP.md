@@ -450,6 +450,43 @@ sévérité.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
+### Étape 7 — Lister les tickers `dq_sanitize` dans `/api/data_health` — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `modules/fundamentals_cache.py`
+(`list_flagged_tickers()`, L364) calcule déjà la liste triée des tickers
+avec un flag `dq_sanitize=` actif (valeurs aberrantes clampées), mais cette
+fonction n'est utilisée **que** par `routers/data_health.py::refresh_flagged_tickers`
+(L297, endpoint POST déclenché par le bouton "refresh" de la page) — jamais
+retournée par le GET `/api/data_health` lui-même. Ce dernier n'expose que
+l'agrégat `cache_sanitize_stats()` (compteur par tag, ex.
+`out_of_bounds:ev_to_ebitda: 12`), sans jamais dire **quels tickers**.
+Côté UI, `DataHealthPage.jsx` (card "🧹 Qualité données", L210-237) affiche
+le nombre total de tickers flaggés et le tableau des tags avec leur count,
+mais aucune liste de symboles nulle part dans le frontend (confirmé :
+`dq_sanitize` n'apparaît dans `frontend/src` que dans les types générés
+`api/openapi.json`/`api/types.ts`, jamais dans un composant). Résultat :
+un utilisateur qui voit "33 tickers flaggés" sur le dashboard n'a aucun
+moyen de savoir lesquels sans lire le cache JSON brut sur le VPS ou
+cliquer aveuglément sur "Rafraîchir" — alors que la donnée existe déjà
+en mémoire côté backend.
+
+Implémenter demanderait : inclure `list_flagged_tickers()` (déjà calculée,
+même source que `cache_sanitize_stats()`) dans le payload `/api/data_health`
+sous `sanitize.tickers` (liste de symboles), puis afficher ces symboles
+dans `DataHealthPage.jsx` — par exemple une liste de chips repliable sous
+le tableau des tags existant (cohérent avec le style déjà en place, pas de
+nouvelle card). Pur ajout de lecture/présentation : aucun nouveau calcul,
+aucune nouvelle source, aucun changement de `severity_global` ou de seuil
+d'alerte.
+
+Hors scope explicite : ne change rien à la logique de sanitization
+elle-même (`data_validation.sanitize_ratios`), ni au comportement du bouton
+"Rafraîchir" (`refresh_flagged_tickers`) — uniquement de la visibilité en
+lecture sur une liste déjà calculée.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+complément d'observabilité sur la couche data déjà en place.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
