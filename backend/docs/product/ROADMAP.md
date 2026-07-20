@@ -399,7 +399,23 @@ Implémenter demanderait, sur le même patron que `insider_enrich._enrich_one`
 - Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée —
   pur renforcement de la fiabilité de la couche data existante.
 
-### Étape 6 — Visibilité des compteurs `insider_error`/`finnhub_error` dans `/api/data_health` — PAS COMMENCÉE
+### Étape 6 — Visibilité des compteurs `insider_error`/`finnhub_error` dans `/api/data_health` — [FAIT 2026-07-20]
+[FAIT 2026-07-20] Implémenté exactement sur le patron décrit ci-dessous :
+`_universe_inventory()` (`routers/data_health.py`) compte désormais les
+tickers avec `insider_error`/`finnhub_error` truthy dans `universe.json` et
+les expose sous `universe.enrichment_errors.{insider_error,finnhub_error}`
+(même pattern que le comptage `sources` déjà présent, deux compteurs
+indépendants). Côté UI, `DataHealthPage.jsx` affiche une ligne "Tickers en
+échec (universe.json)" dans les blocs Finnhub et SEC insider de la card
+"🌐 Sources enrichissement" existante — pas de nouvelle card, colorée en
+warning si > 0. Aucun changement de `_global_severity()`/nouveau seuil
+d'alerte, comme prévu (calibrage différé à un historique réel via
+`data/metrics_history.jsonl`, Étape 0bis).
+Tests : 1 nouveau dans `test_data_health.py` (comptage correct, insensible
+aux valeurs `None`/absentes, séparé par source).
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+complément d'observabilité.
+
 Preuve concrète relevée en code (pas une hypothèse) : `modules/insider_enrich.py`
 (L47) persiste `insider_error` et `modules/finnhub_enrich.py` (L97) persiste
 `finnhub_error` par ticker dans `universe.json` — les deux champs sont déjà
