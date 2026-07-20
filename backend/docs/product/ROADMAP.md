@@ -504,7 +504,34 @@ lecture sur une liste déjà calculée.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
-### Étape 8 — Afficher le(s) tag(s) `dq_sanitize` par ticker (pas juste la liste) — PAS COMMENCÉE
+### Étape 8 — Afficher le(s) tag(s) `dq_sanitize` par ticker (pas juste la liste) — [FAIT 2026-07-20]
+[FAIT 2026-07-20] Implémenté exactement sur le patron décrit ci-dessous :
+nouvelle fonction `list_flagged_tickers_with_tags()` (`modules/
+fundamentals_cache.py`), qui réutilise le même parsing que
+`cache_sanitize_stats()` (`err.partition("dq_sanitize=")` puis
+`split("|")`) mais associé au ticker plutôt que sommé globalement. `GET
+/api/data_health` (`routers/data_health.py`) expose désormais
+`sanitize.tickers` comme une liste d'objets `{ticker, tags}` (au lieu de
+simples symboles) — `list_flagged_tickers()` elle-même n'a pas changé de
+signature, `refresh_flagged_tickers` continue à l'utiliser telle quelle.
+Côté UI, `DataHealthPage.jsx` affiche les tags en `title=` (tooltip au
+survol) sur chaque chip existant — pas de nouveau composant.
+Tests : 4 nouveaux dans `test_fundamentals_cache.py` (vide, tag simple,
+multi-tags, exclusion des tickers propres) + 1 nouveau dans
+`test_data_health.py` (détail des tags exposé par l'endpoint) + le test
+existant `test_data_health_sanitize_exposes_flagged_tickers` adapté à la
+nouvelle forme `{ticker, tags}`.
+Vérifié : suite backend complète (1012 tests, mêmes 3 échecs
+pré-existants sans lien que l'Étape 7 — confirmés identiques sur le
+commit de base avant ce changement, environnement sandbox) + build
+frontend clean + 45 tests vitest. `npm run check:types` non concluant
+dans ce sandbox : diff déjà présent sur la baseline avant tout changement
+(dérive de génération OpenAPI liée aux versions de dépendances du
+sandbox, confirmée en stashant les changements et en relançant sur
+`origin/main` tel quel) — non lié à ce step, `sanitize.tickers` n'étant
+de toute façon pas typé (l'endpoint n'a pas de `response_model`).
+Aucun changement à `sanitize_ratios`, au bouton "Rafraîchir", ni à
+`severity_global` — pur enrichissement de présentation, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : l'Étape 7 a exposé
 `sanitize.tickers` (liste triée de symboles) via `list_flagged_tickers()`
