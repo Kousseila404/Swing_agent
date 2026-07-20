@@ -100,7 +100,15 @@ def _throttle() -> None:
     _last_call = time.time()
 
 
-def _fetch_json(endpoint: str, params: dict[str, Any], api_key: str) -> Any:
+def _fetch_json(endpoint: str, params: dict[str, Any], api_key: str) -> tuple[Any, str | None]:
+    """GET Finnhub. Retourne (payload, error).
+
+    `error` est None même si le payload est vide/légitimement absent (ex :
+    ticker sans couverture analyste) — il n'est renseigné que sur un échec
+    réseau/HTTP explicite (429, autre code HTTP, timeout, exception réseau),
+    pour que l'appelant puisse distinguer "pas de donnée" de "endpoint cassé"
+    au lieu de fusionner les deux dans un même `None` (Étape 5 roadmap).
+    """
     _throttle()
     params = {**params, "token": api_key}
     qs = parse.urlencode(params)
@@ -110,18 +118,18 @@ def _fetch_json(endpoint: str, params: dict[str, Any], api_key: str) -> Any:
         with request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
             if resp.status != 200:
                 logger.debug(f"[finnhub] HTTP {resp.status} on {endpoint}")
-                return None
+                return None, f"http_{resp.status}"
             data = resp.read().decode("utf-8", errors="ignore")
-            return json.loads(data)
+            return json.loads(data), None
     except urlerror.HTTPError as e:
         if e.code == 429:
             logger.warning(f"[finnhub] rate limit hit on {endpoint}")
-        else:
-            logger.debug(f"[finnhub] HTTP error {e.code} on {endpoint}")
-        return None
+            return None, "rate_limited"
+        logger.debug(f"[finnhub] HTTP error {e.code} on {endpoint}")
+        return None, f"http_{e.code}"
     except (urlerror.URLError, TimeoutError, OSError, ValueError) as e:
         logger.debug(f"[finnhub] fetch failed {endpoint}: {e}")
-        return None
+        return None, "fetch_failed"
 
 
 def _cache_path(ticker: str) -> Path:
@@ -198,11 +206,14 @@ class FinnhubProvider:
 
         data = FinnhubData(ticker=ticker)
         data.fetched_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        fetch_errors: list[str] = []
 
         # 1. Recommendation trends (gratuit free tier) — 4 derniers mois agrégés
         # par bucket (strongBuy/buy/hold/sell/strongSell). On dérive upgrades/
         # downgrades par diff entre mois consécutifs.
-        rec = _fetch_json("/stock/recommendation", {"symbol": ticker}, self._api_key)
+        rec, rec_err = _fetch_json("/stock/recommendation", {"symbol": ticker}, self._api_key)
+        if rec_err:
+            fetch_errors.append(f"recommendation:{rec_err}")
         if isinstance(rec, list) and rec:
             # Tri descending par period (mois le plus récent en [0]).
             try:
@@ -254,7 +265,9 @@ class FinnhubProvider:
             data.upgrade_downgrade_log = log
 
         # 2. Earnings history (4 derniers Q : actual/estimate/surprisePercent).
-        earn = _fetch_json("/stock/earnings", {"symbol": ticker, "limit": 8}, self._api_key)
+        earn, earn_err = _fetch_json("/stock/earnings", {"symbol": ticker, "limit": 8}, self._api_key)
+        if earn_err:
+            fetch_errors.append(f"earnings:{earn_err}")
         if isinstance(earn, list) and earn:
             surprises: list[float] = []
             for e in earn:
@@ -271,11 +284,13 @@ class FinnhubProvider:
         # 3. Earnings calendar (prochain earnings).
         today = datetime.utcnow().date()
         future = today + timedelta(days=365)
-        cal = _fetch_json(
+        cal, cal_err = _fetch_json(
             "/calendar/earnings",
             {"symbol": ticker, "from": today.isoformat(), "to": future.isoformat()},
             self._api_key,
         )
+        if cal_err:
+            fetch_errors.append(f"calendar:{cal_err}")
         if isinstance(cal, dict):
             entries = cal.get("earningsCalendar") or []
             if entries and isinstance(entries[0], dict):
@@ -284,9 +299,16 @@ class FinnhubProvider:
                 data.next_earnings_eps_estimate = _safe_float(first.get("epsEstimate"))
 
         # 4. Price target consensus.
-        pt = _fetch_json("/stock/price-target", {"symbol": ticker}, self._api_key)
+        pt, pt_err = _fetch_json("/stock/price-target", {"symbol": ticker}, self._api_key)
+        if pt_err:
+            fetch_errors.append(f"price_target:{pt_err}")
         if isinstance(pt, dict):
             data.target_price_consensus = _safe_float(pt.get("targetMean"))
+
+        # Signal d'échec explicite, distinct d'une simple absence de données
+        # (Étape 5 roadmap) — persisté par `finnhub_enrich.py` sous
+        # `finnhub_error`, lu par `data_confidence._multi_source_factor`.
+        data.error = "; ".join(fetch_errors) if fetch_errors else None
 
         _write_cache(ticker, data.to_dict())
         return data

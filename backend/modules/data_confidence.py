@@ -20,20 +20,22 @@ module agrège trois signaux orthogonaux en un score 0-100 par ticker :
                  d'échec sans ambiguïté déjà calculé ailleurs dans le
                  pipeline — jamais sur une simple absence de données (qui
                  peut vouloir dire "rien à signaler", pas "source cassée").
-                 Aujourd'hui : uniquement `insider_error` (SEC Form 4 —
+                 Sources branchées : `insider_error` (SEC Form 4 —
                  "cik_unknown"/"sec_fetch_failed", écrit par
-                 `insider_enrich._enrich_one`). Finnhub (revisions/
-                 earnings) et news n'ont pas encore de signal d'échec
-                 par-ticker persisté (fail-open silencieux — un champ
-                 `None` peut aussi bien dire "pas d'info Finnhub" que
-                 "endpoint en échec") ; les filings SEC 10-K/Q sont
-                 fetchés à la demande (`routers/sec_filings.py`), jamais
-                 persistés dans `universe.json` — donc invisibles ici
-                 sans I/O réseau, que ce module s'interdit (déterministe).
-                 Ajouter ces sources demandera d'abord de leur donner un
-                 signal d'échec par-ticker aussi propre que celui
-                 d'insider — pas un nouveau jugement d'isolation, juste
-                 du travail d'instrumentation supplémentaire.
+                 `insider_enrich._enrich_one`) et, depuis l'Étape 5,
+                 `finnhub_error` (échec réseau/HTTP explicite sur l'un des
+                 4 endpoints revisions/earnings — "http_429",
+                 "rate_limited", "fetch_failed" —, écrit par
+                 `finnhub_enrich.py` depuis `FinnhubData.error`, distinct
+                 d'un ticker légitimement sans couverture analyste).
+                 News et filings SEC 10-K/Q restent hors scope : fetchés à
+                 la demande (`routers/sec_filings.py`), jamais persistés
+                 dans `universe.json` — donc invisibles ici sans I/O
+                 réseau, que ce module s'interdit (déterministe). Ajouter
+                 ces sources demandera d'abord de leur donner un signal
+                 d'échec par-ticker aussi propre que celui d'insider/
+                 Finnhub — pas un nouveau jugement d'isolation, juste du
+                 travail d'instrumentation supplémentaire.
 
 Logique :
   confidence = 100 × (coverage × freshness × sanity × multi_source)
@@ -170,13 +172,15 @@ def _sanity_factor(
 
 
 def _multi_source_factor(info: dict[str, Any]) -> tuple[float, list[str]]:
-    """Facteur ∈ {0.85, 1.00} — pannes explicites hors fondamentaux.
+    """Facteur ∈ {0.7225, 0.85, 1.00} — pannes explicites hors fondamentaux.
 
     Neutre (1.00) si absent/None, y compris pour un ticker jamais enrichi
-    par `insider_enrich` (pas de régression sur le comportement actuel).
-    Ne pénalise que sur `insider_error` truthy (échec SEC EDGAR sans
-    ambiguïté — cf. docstring module). Autres sources : voir docstring
-    module, pas encore de signal sûr disponible.
+    par `insider_enrich`/`finnhub_enrich` (pas de régression sur le
+    comportement actuel). Ne pénalise que sur `insider_error`/
+    `finnhub_error` truthy (échecs sans ambiguïté — cf. docstring module),
+    jamais sur une simple absence de données. Les deux pénalités sont
+    indépendantes et cumulatives (un ticker peut avoir les deux sources en
+    échec simultanément). Autres sources : voir docstring module.
     """
     factor = 1.0
     notes: list[str] = []
@@ -184,6 +188,10 @@ def _multi_source_factor(info: dict[str, Any]) -> tuple[float, list[str]]:
     if insider_err:
         factor *= _MULTI_SOURCE_ERROR_PENALTY
         notes.append(f"Insider SEC EDGAR en échec ({insider_err}) → ×{_MULTI_SOURCE_ERROR_PENALTY:.2f}")
+    finnhub_err = info.get("finnhub_error")
+    if finnhub_err:
+        factor *= _MULTI_SOURCE_ERROR_PENALTY
+        notes.append(f"Finnhub revisions/earnings en échec ({finnhub_err}) → ×{_MULTI_SOURCE_ERROR_PENALTY:.2f}")
     if not notes:
         notes.append("Sources d'enrichissement OK (ou non encore instrumentées) → ×1.00")
     return factor, notes

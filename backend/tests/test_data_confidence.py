@@ -1,6 +1,8 @@
 """Tests data_confidence — Phase 1 Buffett-data hardening (2026-04-29)."""
 from __future__ import annotations
 
+import pytest
+
 from modules.data_confidence import compute_confidence, confidence_modifier
 
 
@@ -170,6 +172,56 @@ def test_multi_source_insider_error_penalizes():
     assert failed["multi_source"] == 0.85
     assert failed["score"] < ok["score"]
     assert any("Insider SEC EDGAR en échec" in line for line in failed["breakdown"])
+
+
+# ─── MultiSource — finnhub_error (Étape 5, 2026-07-20) ────────
+def test_multi_source_finnhub_error_absent_is_neutral():
+    """Ticker jamais enrichi par finnhub_enrich (champ absent) → ×1.00."""
+    r = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7,
+    })
+    assert r["multi_source"] == 1.0
+
+
+def test_multi_source_finnhub_no_coverage_not_penalized():
+    """finnhub_error=None malgré un ticker sans couverture analyste
+    (upgrades/downgrades restés None) n'est pas une panne."""
+    r = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7, "finnhub_error": None,
+    })
+    assert r["multi_source"] == 1.0
+
+
+def test_multi_source_finnhub_error_penalizes():
+    ok = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7, "finnhub_error": None,
+    })
+    failed = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7, "finnhub_error": "recommendation:rate_limited",
+    })
+    assert failed["multi_source"] == 0.85
+    assert failed["score"] < ok["score"]
+    assert any("Finnhub revisions/earnings en échec" in line for line in failed["breakdown"])
+
+
+def test_multi_source_both_errors_are_cumulative():
+    """insider_error + finnhub_error simultanés → pénalités cumulées (×0.85²),
+    pas juste la pire des deux."""
+    both = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7,
+        "insider_error": "cik_unknown", "finnhub_error": "fetch_failed",
+    })
+    one = compute_confidence({
+        "data_quality": 1.0, "fundamentals_age_days": 10,
+        "quality_score": 70, "f_score": 7, "insider_error": "cik_unknown",
+    })
+    assert both["multi_source"] == pytest.approx(0.85 * 0.85, abs=1e-3)
+    assert both["score"] < one["score"]
 
 
 # ─── Breakdown traceable ─────────────────────────────────────

@@ -42,14 +42,14 @@ def test_recommendation_parsing():
 
     def stub(endpoint, params, key):
         if "recommendation" in endpoint:
-            return rec_payload
+            return rec_payload, None
         if "earnings" in endpoint and "calendar" not in endpoint:
-            return earnings_payload
+            return earnings_payload, None
         if "calendar/earnings" in endpoint:
-            return cal_payload
+            return cal_payload, None
         if "price-target" in endpoint:
-            return pt_payload
-        return None
+            return pt_payload, None
+        return None, None
 
     p = FinnhubProvider(api_key="test")
     with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
@@ -67,15 +67,52 @@ def test_recommendation_parsing():
     assert data.target_price_consensus == 220.5
     assert data.earnings_beat_rate_8q == 1.0  # 4/4 positives
     assert abs(data.earnings_surprise_avg_4q - 3.3225) < 1e-6
+    assert data.error is None  # tous les endpoints ont répondu, même vide
 
 
 def test_handles_endpoint_failures_gracefully():
-    """Si tous les endpoints renvoient None, on retourne FinnhubData neutre."""
+    """Si tous les endpoints renvoient (None, None) — "0 résultat légitime",
+    pas un échec —, on retourne FinnhubData neutre sans `error`."""
     p = FinnhubProvider(api_key="test")
-    with patch("data_providers.finnhub_provider._fetch_json", return_value=None), \
+    with patch("data_providers.finnhub_provider._fetch_json", return_value=(None, None)), \
          patch("data_providers.finnhub_provider._read_cache", return_value=None), \
          patch("data_providers.finnhub_provider._write_cache"):
         data = p.get_revisions_and_earnings("XXX", use_cache=False)
     assert data.ticker == "XXX"
     assert data.upgrades_30d is None
     assert data.next_earnings_date is None
+    assert data.error is None
+
+
+def test_populates_error_on_explicit_fetch_failure():
+    """Un échec HTTP/réseau explicite (429, timeout...) doit être distingué
+    d'une absence légitime de données — Étape 5 roadmap."""
+    def stub(endpoint, params, key):
+        if "recommendation" in endpoint:
+            return None, "rate_limited"
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("YYY", use_cache=False)
+    assert data.error == "recommendation:rate_limited"
+
+
+def test_error_accumulates_across_endpoints():
+    """Plusieurs endpoints en échec sur le même ticker → error concatène les
+    causes au lieu d'écraser la première."""
+    def stub(endpoint, params, key):
+        if "recommendation" in endpoint:
+            return None, "http_500"
+        if "price-target" in endpoint:
+            return None, "fetch_failed"
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("ZZZ", use_cache=False)
+    assert data.error == "recommendation:http_500; price_target:fetch_failed"

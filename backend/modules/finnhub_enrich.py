@@ -91,6 +91,10 @@ def enrich_universe_with_finnhub(
         if fdata.upgrade_downgrade_log:
             row["upgrade_downgrade_log"] = fdata.upgrade_downgrade_log
         row["finnhub_enriched_at"] = fdata.fetched_at
+        # Toujours écrasé (même à None) — permet à un ticker de "guérir"
+        # au run suivant si l'échec était transitoire (même mécanique que
+        # insider_enrich.py → insider_error, Étape 5 roadmap).
+        row["finnhub_error"] = fdata.error
         n_enriched += 1
         if i % 50 == 0:
             logger.info(f"[finnhub_enrich] progress {i}/{len(tickers)}")
