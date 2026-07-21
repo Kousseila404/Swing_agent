@@ -1075,7 +1075,47 @@ déjà calculée et déjà persistée, comme les Étapes 7 et 8.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
-### Étape 15 — Qualification du signal dans la fiche ticker (`TickerAnalysisModal`) — PAS COMMENCÉE
+### Étape 15 — Qualification du signal dans la fiche ticker (`TickerAnalysisModal`) — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+`routers/ticker_analysis.py::ticker_analysis()` assemble un `context_ingredients`
+(mêmes clés que `alloc` dans `auto_proposer.py` : `buy_signal`, `f_score`,
+`f_score_max`, `momentum_score`, `support`, `revisions_score`,
+`days_until_earnings` via `auto_proposer._days_until_earnings` réimporté tel
+quel, `titan_tilt_flags`) puis appelle `signal_qualification.qualify_proposal(
+ticker, scored_row=scored, context_ingredients=...)` dans un `try/except`
+fail-open identique à celui d'`auto_proposer.py` — `qualification=None` sur
+toute exception, jamais de 500 sur l'endpoint. Résultat exposé sous une
+nouvelle clé `qualification` dans le payload retourné.
+Côté frontend, `ConvictionBadge`/`CONVICTION_STYLE`/`CONVICTION_RANK`
+(`ProposalsPage.jsx`) extraits vers un composant partagé
+`common/ConvictionBadge.jsx` + `utils/conviction.js` (même geste que
+l'extraction `utils/kpiCompare.js` de l'Étape 4) — `ProposalsPage.jsx`
+importe désormais depuis ce module partagé, comportement inchangé.
+`TickerAnalysisModal.jsx` affiche le badge juste à côté du `BuySignalBadge`
+existant (section "Buy Signal — verdict prominent"), avec le même garde
+`{data.qualification && <ConvictionBadge .../>}` qu'utilise déjà
+`ProposalsPage.jsx` — rien ne s'affiche si `qualification` est `None`/absent.
+Tests : 39 tests `test_signal_qualification.py` (inchangés, aucune régression)
++ suite backend complète sous Python 3.12 (même version que le Dockerfile de
+prod) — 1059 tests passent, mêmes 3 échecs pré-existants sans lien que les
+étapes précédentes (confirmés identiques sur le commit de base avant ce
+changement : `/nonexistent/...` writable en root et mapping secteur
+différent, artefacts du sandbox) + ruff clean + mypy clean sur
+`routers/ticker_analysis.py`. Frontend : build clean, lint clean (extraction
+vers `utils/conviction.js` nécessaire pour rester clean sur
+`react-refresh/only-export-components` — un fichier de composant ne peut
+exporter que des composants), 45 tests vitest passent. `npm run check:types`
+non concluant dans ce sandbox — même dérive de génération OpenAPI
+pré-existante déjà documentée aux Étapes 8/13 (diff porte sur tout le
+fichier, `Record<string, never>` vs `{[key: string]: unknown}`), pas
+spécifique à ce step : `/api/ticker_analysis` n'a de toute façon pas de
+`response_model` (retourne `dict[str, Any]`), donc aucun changement de
+schéma typé — changements générés (`openapi.json`/`types.ts`) écartés du
+commit.
+Aucune modification à `auto_proposer.plan_proposals`, au `buy_signal`/
+sizing/exit, ni à `data_confidence.py`/`_multi_source_factor` — nouveau
+consommateur en lecture seule de `qualify_proposal()` déjà testée, plus
+partage d'un composant d'affichage déjà existant, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `signal_qualification.
 qualify_proposal()` (`modules/signal_qualification.py:307-349`) est explicitement
