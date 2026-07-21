@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ _BASE_URL = "https://finnhub.io/api/v1"
 _HTTP_TIMEOUT = 10.0
 _CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "finnhub_cache" / "news"
 _CACHE_TTL_SECONDS = 60 * 60  # 1h
+_DEDUP_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 
 
 def _api_key() -> str:
@@ -81,6 +83,28 @@ def _normalize_article(raw: dict[str, Any]) -> dict[str, Any]:
         "datetime": iso,
         "id":       str(raw.get("id") or ""),
     }
+
+
+def dedup_key(article: dict[str, Any]) -> str:
+    """Clé de dédup pour un article normalisé : headline réduit (lowercase,
+    ponctuation/espaces collapsés), ou l'URL si le headline est vide."""
+    headline = _DEDUP_NORMALIZE_RE.sub(" ", (article.get("headline") or "").lower()).strip()
+    return headline or (article.get("url") or "").strip()
+
+
+def dedup_articles(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retire les doublons ré-syndiqués (même headline/URL), garde la première
+    occurrence rencontrée dans l'ordre de la liste passée."""
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for article in articles:
+        key = dedup_key(article)
+        if key:
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(article)
+    return out
 
 
 def fetch_news(ticker: str, days: int = 14, max_items: int = 30) -> dict[str, Any]:
@@ -149,9 +173,14 @@ def fetch_news(ticker: str, days: int = 14, max_items: int = 30) -> dict[str, An
             "cached": False, "error": "unexpected response shape",
         }
 
+    # Dédup des ré-syndications (même headline/URL, id Finnhub différent) avant
+    # le cap : sinon un doublon prend la place d'un article réellement distinct
+    # dans une fenêtre déjà limitée à max_items.
+    deduped = dedup_articles([_normalize_article(a) for a in raw])
+
     # Plus récent d'abord, capé à max_items pour ne pas surcharger l'UI.
     articles = sorted(
-        (_normalize_article(a) for a in raw),
+        deduped,
         key=lambda a: a.get("datetime") or "",
         reverse=True,
     )[:max_items]

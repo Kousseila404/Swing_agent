@@ -82,6 +82,12 @@ def portfolio_news_firehose(
             })
 
     items.sort(key=lambda a: a.get("datetime") or "", reverse=True)
+    # 2e passe de dédup après agrégation multi-tickers : deux tickers d'un
+    # même secteur peuvent partager un article macro identique, chacun déjà
+    # dédupliqué individuellement par finnhub_news.fetch_news mais pas l'un
+    # contre l'autre. Trié par date desc en amont -> garde l'occurrence la
+    # plus récente (ou la première par ordre alphabétique de ticker à égalité).
+    items = finnhub_news.dedup_articles(items)
 
     return {
         "items":      items,
