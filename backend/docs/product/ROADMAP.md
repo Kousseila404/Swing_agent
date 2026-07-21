@@ -651,6 +651,46 @@ précédentes.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 enrichissement du narratif causal déjà en place (Étape 1).
 
+### Étape 10 — Qualifier la notification Telegram `_notify_new_proposals` — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : l'Étape 3 a explicitement
+noté dans son propre done-note (ci-dessus) que `_notify_new_proposals`
+(`routers/proposals.py:969-997`, déclenchée à chaque refresh de propositions)
+n'a **pas** été touchée : *"elle a déjà sa propre logique de 'nouvelles
+propositions' au sens DB, pas du ressort de cette étape"*. Vérifié en lisant
+le code aujourd'hui : cette fonction envoie toujours un message Telegram brut
+— ticker, secteur, taille, prix d'entrée, score TITAN (`routers/
+proposals.py:980-988`) — sans aucun badge de conviction ni narratif, alors
+que `daily_digest.py` (`_new_signals`/`build_digest_text`, L49-89) affiche
+déjà pour les mêmes propositions `context.qualification.conviction`
+(🔥/⭐/👁, `signal_qualification.py:52-54`) et `context.qualification.narrative`
+(`build_narrative`, `signal_qualification.py:169`) — champs déjà calculés en
+lecture seule par `auto_proposer.plan_proposals` (Étape 1) et déjà présents
+dans le même dict `context` que celui que `_notify_new_proposals` reçoit via
+`items` (`p["context"]`). Résultat vécu : la notification qui arrive en
+premier (au refresh, avant le digest du lendemain matin) est la moins
+qualifiée des deux — exactement la friction n°2 du diagnostic initial du
+document ("push d'info pas assez proactif/qualitatif"), côté canal push
+cette fois, pas côté digest pull.
+
+Implémenter demanderait : dans `_notify_new_proposals` (`routers/
+proposals.py`), pour chaque proposition affichée, lire
+`(p.get("context") or {}).get("qualification") or {}` et préfixer la ligne
+existante par le badge de conviction (même mapping conviction→emoji que
+`signal_qualification.py`/`ProposalsPage.jsx`) et ajouter le narratif
+une-phrase (`qualification.narrative`) à la place du score brut ou en plus
+— fail-open identique à l'Étape 1/3 : `qualification` absent/`None` ne doit
+jamais faire échouer l'envoi ni être affiché comme "nouveau signal" sans
+preuve. Aucun nouveau calcul, aucune nouvelle source — pure réutilisation
+de champs déjà produits par `signal_qualification.py`.
+
+Hors scope explicite : ne touche pas à la logique de sélection "nouvelles
+propositions" elle-même (déclenchement au sens DB, cf. note Étape 3), ni au
+digest quotidien (`daily_digest.py`, déjà qualifié), ni à
+`auto_proposer.plan_proposals`. Uniquement le formatage du message Telegram
+envoyé par `_notify_new_proposals` — couche présentation/notification pure,
+aucune logique trading/risk/sizing touchée.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
