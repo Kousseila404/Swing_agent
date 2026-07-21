@@ -990,7 +990,8 @@ def _notify_new_proposals(items: list[dict[str, Any]]) -> None:
     for p in items[:10]:  # cap pour rester sous la limite Telegram
         ctx = p.get("context") or {}
         qualification = ctx.get("qualification") or {}
-        badge = CONVICTION_BADGES.get(qualification.get("conviction"))
+        conviction = qualification.get("conviction")
+        badge = CONVICTION_BADGES.get(conviction) if isinstance(conviction, str) else None
         narrative = qualification.get("narrative")
 
         detail = f" — {narrative}" if narrative else ""
