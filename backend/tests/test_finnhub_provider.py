@@ -116,3 +116,125 @@ def test_error_accumulates_across_endpoints():
          patch("data_providers.finnhub_provider._write_cache"):
         data = p.get_revisions_and_earnings("ZZZ", use_cache=False)
     assert data.error == "recommendation:http_500; price_target:fetch_failed"
+
+
+def _grade_time(y, m, d):
+    """Unix epoch (UTC, minuit) — même convention que `gradeTime` Finnhub."""
+    import calendar
+    from datetime import datetime as _dt
+    return calendar.timegm(_dt(y, m, d).timetuple())
+
+
+def test_upgrade_downgrade_nominative_parsing():
+    """Étape 13 roadmap : /stock/upgrade-downgrade doit être réellement
+    appelé et son contenu mappé vers `analyst_actions`, trié du plus récent
+    au plus ancien."""
+    ud_payload = [
+        {"symbol": "AAPL", "gradeTime": _grade_time(2026, 5, 1), "company": "Barclays",
+         "fromGrade": "Overweight", "toGrade": "Equal-Weight", "action": "down"},
+        {"symbol": "AAPL", "gradeTime": _grade_time(2026, 7, 15), "company": "Morgan Stanley",
+         "fromGrade": "Equal-Weight", "toGrade": "Overweight", "action": "up"},
+    ]
+
+    def stub(endpoint, params, key):
+        if "upgrade-downgrade" in endpoint:
+            return ud_payload, None
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("AAPL", use_cache=False)
+
+    assert data.error is None
+    assert len(data.analyst_actions) == 2
+    # Trié du plus récent au plus ancien.
+    assert data.analyst_actions[0] == {
+        "date": "2026-07-15", "firm": "Morgan Stanley", "action": "up",
+        "from_grade": "Equal-Weight", "to_grade": "Overweight",
+    }
+    assert data.analyst_actions[1]["firm"] == "Barclays"
+
+
+def test_upgrade_downgrade_skips_malformed_items():
+    """Items sans gradeTime/company/action exploitable sont ignorés sans
+    faire échouer le parsing des autres."""
+    ud_payload = [
+        {"symbol": "AAPL", "company": "Barclays", "fromGrade": "Buy", "toGrade": "Hold", "action": "down"},
+        {"symbol": "AAPL", "gradeTime": _grade_time(2026, 6, 1), "fromGrade": "Buy", "toGrade": "Hold", "action": "down"},
+        {"symbol": "AAPL", "gradeTime": _grade_time(2026, 6, 2), "company": "Barclays", "fromGrade": "Buy", "toGrade": "Hold"},
+        {"symbol": "AAPL", "gradeTime": _grade_time(2026, 6, 3), "company": "UBS",
+         "fromGrade": "Hold", "toGrade": "Buy", "action": "up"},
+    ]
+
+    def stub(endpoint, params, key):
+        if "upgrade-downgrade" in endpoint:
+            return ud_payload, None
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("AAPL", use_cache=False)
+
+    assert len(data.analyst_actions) == 1
+    assert data.analyst_actions[0]["firm"] == "UBS"
+
+
+def test_upgrade_downgrade_error_accumulates_with_other_endpoints():
+    def stub(endpoint, params, key):
+        if "upgrade-downgrade" in endpoint:
+            return None, "rate_limited"
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("AAPL", use_cache=False)
+
+    assert data.error == "upgrade_downgrade:rate_limited"
+    assert data.analyst_actions == []
+
+
+def test_upgrade_downgrade_caps_at_10_most_recent():
+    ud_payload = [
+        {"symbol": "AAPL", "gradeTime": _grade_time(2020, 1, i + 1), "company": f"Firm{i}",
+         "fromGrade": "Hold", "toGrade": "Buy", "action": "up"}
+        for i in range(1, 15)
+    ]
+
+    def stub(endpoint, params, key):
+        if "upgrade-downgrade" in endpoint:
+            return ud_payload, None
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("AAPL", use_cache=False)
+
+    assert len(data.analyst_actions) == 10
+    # Le plus récent (jour 15) doit être en tête.
+    assert data.analyst_actions[0]["firm"] == "Firm14"
+
+
+def test_upgrade_downgrade_empty_list_is_not_an_error():
+    """Ticker sans couverture analyste nominative — liste vide légitime, pas
+    un échec (même philosophie que les autres endpoints, Étape 5)."""
+    def stub(endpoint, params, key):
+        if "upgrade-downgrade" in endpoint:
+            return [], None
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("AAPL", use_cache=False)
+
+    assert data.error is None
+    assert data.analyst_actions == []

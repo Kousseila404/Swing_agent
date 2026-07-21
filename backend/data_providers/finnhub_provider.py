@@ -10,8 +10,13 @@ Endpoints utilisés (tous free tier) :
        → 4 derniers earnings : actual/estimate/period/surprise
   • GET /api/v1/calendar/earnings?symbol=AAPL&from=...&to=...
        → prochain earnings + estimés EPS
-  • GET /api/v1/stock/upgrade-downgrade?symbol=AAPL
+  • GET /api/v1/stock/upgrade-downgrade?symbol=AAPL&from=...&to=...
        → liste **datée nominative** des upgrades/downgrades par firm
+         (champ `FinnhubData.analyst_actions` — Étape 13 roadmap : jusqu'ici
+         documenté ci-dessus mais jamais réellement appelé, le 4e call
+         tombait sur /stock/price-target à la place ; distinct de
+         `upgrade_downgrade_log`, qui reste un agrégat mensuel dérivé de
+         /stock/recommendation)
 
 Ce provider **n'écrase PAS** les données yfinance — il les **enrichit**. Le
 caller (universe_engine) appelle `enrich_with_finnhub()` après le scrape
@@ -80,6 +85,7 @@ class FinnhubData:
     next_earnings_eps_estimate: float | None = None
     target_price_consensus: float | None = None
     upgrade_downgrade_log: list[dict[str, Any]] = field(default_factory=list)
+    analyst_actions: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     fetched_at: str | None = None
 
@@ -140,7 +146,8 @@ def _cache_path(ticker: str) -> Path:
 # champ dans FinnhubData, incrémenter cette constante : les caches d'une
 # version antérieure seront ignorés (et re-fetchés) au lieu d'être désérialisés
 # en silence avec des champs manquants.
-_CACHE_SCHEMA_VERSION = 1
+# v2 (Étape 13 roadmap) : ajout de `analyst_actions`.
+_CACHE_SCHEMA_VERSION = 2
 
 
 def _read_cache(ticker: str) -> dict[str, Any] | None:
@@ -188,8 +195,9 @@ class FinnhubProvider:
     def get_revisions_and_earnings(self, ticker: str, *, use_cache: bool = True) -> FinnhubData:
         """Récupère tous les champs Revisions / Earnings d'un ticker.
 
-        Effectue 4 calls Finnhub (recommendation, earnings, calendar, upgrade-downgrade).
-        Délais entre calls = ~4s pour respecter la limite 60/min avec marge.
+        Effectue 5 calls Finnhub (recommendation, earnings, calendar,
+        price-target, upgrade-downgrade). Délais entre calls = ~5s pour
+        respecter la limite 60/min avec marge.
 
         Fail-open : champs None si un endpoint pète.
         """
@@ -304,6 +312,44 @@ class FinnhubProvider:
             fetch_errors.append(f"price_target:{pt_err}")
         if isinstance(pt, dict):
             data.target_price_consensus = _safe_float(pt.get("targetMean"))
+
+        # 5. Upgrade/downgrade nominatif — liste datée par firm (Étape 13
+        # roadmap : cet endpoint était documenté "utilisé" depuis Lot 17 mais
+        # jamais réellement appelé — le 4e call tombait sur /stock/price-target
+        # à la place). Distinct de `upgrade_downgrade_log` (compteurs mensuels
+        # agrégés dérivés de /stock/recommendation, conservé tel quel pour ne
+        # pas casser sa consommation actuelle par revisions_net_score/UI).
+        past = today - timedelta(days=365)
+        ud, ud_err = _fetch_json(
+            "/stock/upgrade-downgrade",
+            {"symbol": ticker, "from": past.isoformat(), "to": today.isoformat()},
+            self._api_key,
+        )
+        if ud_err:
+            fetch_errors.append(f"upgrade_downgrade:{ud_err}")
+        if isinstance(ud, list) and ud:
+            actions: list[dict[str, Any]] = []
+            for item in ud:
+                if not isinstance(item, dict):
+                    continue
+                grade_time = _safe_int(item.get("gradeTime"))
+                firm = item.get("company")
+                action = item.get("action")
+                if grade_time is None or not firm or not action:
+                    continue
+                try:
+                    action_date = datetime.utcfromtimestamp(grade_time).strftime("%Y-%m-%d")
+                except (OverflowError, OSError, ValueError):
+                    continue
+                actions.append({
+                    "date": action_date,
+                    "firm": firm,
+                    "action": action,
+                    "from_grade": item.get("fromGrade"),
+                    "to_grade": item.get("toGrade"),
+                })
+            actions.sort(key=lambda a: a["date"], reverse=True)
+            data.analyst_actions = actions[:10]
 
         # Signal d'échec explicite, distinct d'une simple absence de données
         # (Étape 5 roadmap) — persisté par `finnhub_enrich.py` sous

@@ -90,6 +90,8 @@ def enrich_universe_with_finnhub(
             row["price_target_mean"] = fdata.target_price_consensus
         if fdata.upgrade_downgrade_log:
             row["upgrade_downgrade_log"] = fdata.upgrade_downgrade_log
+        if fdata.analyst_actions:
+            row["finnhub_analyst_actions"] = fdata.analyst_actions
         row["finnhub_enriched_at"] = fdata.fetched_at
         # Toujours écrasé (même à None) — permet à un ticker de "guérir"
         # au run suivant si l'échec était transitoire (même mécanique que

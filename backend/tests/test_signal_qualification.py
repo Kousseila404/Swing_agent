@@ -279,6 +279,50 @@ def test_causal_reasons_no_10k_10q_present_no_reason():
     assert not any("10-K" in r or "10-Q" in r for r in reasons)
 
 
+def test_causal_reasons_detects_new_analyst_upgrade():
+    prior = _row(finnhub_analyst_actions=[])
+    current = _row(finnhub_analyst_actions=[
+        {"date": "2026-07-15", "firm": "Morgan Stanley", "action": "up",
+         "from_grade": "Equal-Weight", "to_grade": "Overweight"},
+    ])
+    reasons = sq.causal_reasons(prior, current)
+    assert any(
+        r == "Relevé à Overweight par Morgan Stanley (2026-07-15)" for r in reasons
+    )
+
+
+def test_causal_reasons_detects_newer_analyst_action_since_prior():
+    prior = _row(finnhub_analyst_actions=[
+        {"date": "2026-05-01", "firm": "Barclays", "action": "down",
+         "from_grade": "Buy", "to_grade": "Hold"},
+    ])
+    current = _row(finnhub_analyst_actions=[
+        {"date": "2026-07-15", "firm": "Morgan Stanley", "action": "up",
+         "from_grade": "Equal-Weight", "to_grade": "Overweight"},
+        {"date": "2026-05-01", "firm": "Barclays", "action": "down",
+         "from_grade": "Buy", "to_grade": "Hold"},
+    ])
+    reasons = sq.causal_reasons(prior, current)
+    assert any("Morgan Stanley" in r for r in reasons)
+    assert not any("Barclays" in r for r in reasons)
+
+
+def test_causal_reasons_same_latest_analyst_action_not_reported_again():
+    action = {"date": "2026-07-15", "firm": "Morgan Stanley", "action": "up",
+               "from_grade": "Equal-Weight", "to_grade": "Overweight"}
+    prior = _row(finnhub_analyst_actions=[action])
+    current = _row(finnhub_analyst_actions=[action])
+    reasons = sq.causal_reasons(prior, current)
+    assert not any("Morgan Stanley" in r for r in reasons)
+
+
+def test_causal_reasons_no_analyst_actions_present_no_reason():
+    prior = _row(finnhub_analyst_actions=[])
+    current = _row(finnhub_analyst_actions=[])
+    reasons = sq.causal_reasons(prior, current)
+    assert not any("Relevé" in r or "Abaissé" in r for r in reasons)
+
+
 # ─────────────────────────────────────────────────────────────────
 # qualify_proposal (intégration)
 # ─────────────────────────────────────────────────────────────────

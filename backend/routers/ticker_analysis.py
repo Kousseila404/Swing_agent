@@ -504,6 +504,7 @@ def ticker_analysis(ticker: str, _auth: None = Security(api_core.require_auth)) 
         "downgrades_90d":      scored.get("downgrades_90d"),
         "revisions_net_score": scored.get("revisions_net_score"),
         "upgrade_downgrade_log": scored.get("upgrade_downgrade_log"),
+        "analyst_actions": scored.get("finnhub_analyst_actions"),
     }
     # Lot 17 — Insider (smart money) block.
     insider_block = {

@@ -13,8 +13,9 @@ couche de LECTURE/SYNTHÈSE pure au-dessus de l'existant :
   • Narratif une-phrase par ticker, synthèse pure des ingrédients déjà
     présents dans `context` (Piotroski, momentum, support, earnings, tilt).
   • Fraîcheur causale : quand le verdict a changé, croise earnings_surprise /
-    insider (cluster buying + 8-K événement matériel) / revisions entre
-    l'instantané de référence et aujourd'hui pour esquisser un "pourquoi".
+    insider (cluster buying + 8-K/10-K/10-Q) / revisions / actions
+    nominatives d'analystes (upgrade-downgrade Finnhub) entre l'instantané
+    de référence et aujourd'hui pour esquisser un "pourquoi".
 
 Ne touche JAMAIS à la logique de scoring/sizing/exit — lecture seule sur
 `universe_history` + `scored_universe`, aucune écriture, aucun impact sur
@@ -73,6 +74,15 @@ _TILT_NARRATIVE_LABELS = {
     "qarp": "profil QARP (qualité à prix raisonnable)",
     "garp": "profil GARP (croissance à prix raisonnable)",
     "consistent": "régularité historique des fondamentaux",
+}
+
+# Verbe narratif par type d'action Finnhub nominative (`analyst_actions`,
+# Étape 13 roadmap) — `action` vient tel quel de /stock/upgrade-downgrade.
+_ANALYST_ACTION_VERBS = {
+    "up": "Relevé",
+    "down": "Abaissé",
+    "init": "Initié",
+    "main": "Maintenu",
 }
 
 
@@ -231,10 +241,10 @@ def causal_reasons(
 ) -> list[str]:
     """Quand le verdict a changé, tente d'expliquer *pourquoi* en croisant
     earnings_surprise / insider (cluster buying + 8-K événement matériel +
-    10-K/10-Q rapports périodiques) / revisions entre l'instantané de
-    référence et aujourd'hui. [] si `prior_row` est absent ou si aucune
-    cause précise n'est identifiable (le narratif générique reste alors la
-    seule info).
+    10-K/10-Q rapports périodiques) / revisions / action nominative
+    d'analyste (upgrade-downgrade Finnhub) entre l'instantané de référence et
+    aujourd'hui. [] si `prior_row` est absent ou si aucune cause précise
+    n'est identifiable (le narratif générique reste alors la seule info).
     """
     if prior_row is None:
         return []
@@ -277,6 +287,19 @@ def causal_reasons(
     current_10q = current_row.get("insider_most_recent_10q")
     if current_10q and current_10q != prior_10q and (prior_10q is None or current_10q > prior_10q):
         reasons.append(f"Nouveau rapport trimestriel déposé (10-Q, {current_10q})")
+
+    prior_actions = prior_row.get("finnhub_analyst_actions") or []
+    current_actions = current_row.get("finnhub_analyst_actions") or []
+    current_latest = current_actions[0] if current_actions else None
+    prior_latest = prior_actions[0] if prior_actions else None
+    if current_latest:
+        current_date = current_latest.get("date")
+        prior_date = prior_latest.get("date") if prior_latest else None
+        if current_date and current_date != prior_date and (prior_date is None or current_date > prior_date):
+            verb = _ANALYST_ACTION_VERBS.get(current_latest.get("action"), "Note ajustée")
+            grade = current_latest.get("to_grade") or "note révisée"
+            firm = current_latest.get("firm") or "un analyste"
+            reasons.append(f"{verb} à {grade} par {firm} ({current_date})")
 
     return reasons
 

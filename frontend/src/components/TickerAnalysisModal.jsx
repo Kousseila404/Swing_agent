@@ -771,6 +771,23 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                   <KV label="Downgrades 90j" value={fmtNum(data.revisions.downgrades_90d, 0)} />
                   <KV label="Data quality" value={fmtPct(data.revisions.data_quality, 0)} />
                 </Grid>
+
+                {Array.isArray(data.revisions.analyst_actions) && data.revisions.analyst_actions.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                      Actions récentes (nominatif) :
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: '0.72rem' }}>
+                      {data.revisions.analyst_actions.slice(0, 5).map((a, i) => (
+                        <li key={`${a.date}-${a.firm}-${i}`}>
+                          {a.date} — {a.firm} : {a.from_grade || '—'} → {a.to_grade || '—'}
+                          {a.action === 'up' && <span style={{ color: '#4ade80' }}> (relevé)</span>}
+                          {a.action === 'down' && <span style={{ color: '#f87171' }}> (abaissé)</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </Section>
             )}
 
