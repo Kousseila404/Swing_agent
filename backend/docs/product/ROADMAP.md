@@ -796,7 +796,36 @@ cantonnés au narratif causal, purement informatif.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 enrichissement du narratif causal déjà en place (Étape 1, Étape 9).
 
-### Étape 12 — Dédupliquer les articles de news ré-syndiqués — PAS COMMENCÉE
+### Étape 12 — Dédupliquer les articles de news ré-syndiqués — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+`dedup_key()`/`dedup_articles()` (`modules/finnhub_news.py`) — clé de dédup
+sur le headline normalisé (lowercase, ponctuation/espaces collapsés), repli
+sur l'URL si headline vide. `fetch_news()` dédup la liste normalisée
+**avant** le tri par date et le cap `max_items` (sinon un doublon prend la
+place d'un article distinct dans une fenêtre déjà limitée). Point 2 tranché :
+`routers/news.py::portfolio_news_firehose` fait une 2e passe de dédup (même
+fonction réutilisée) *après* l'agrégation multi-tickers et le tri par date
+desc — nécessaire car chaque ticker est dédupliqué individuellement par son
+propre `fetch_news()`, mais pas contre les autres tickers de l'agrégat (deux
+tickers d'un même secteur peuvent partager un article macro identique).
+Aucun changement de shape de payload (toujours une liste de dicts), comme
+prévu — le frontend n'a rien à changer.
+Tests : 6 nouveaux dans `test_finnhub_news.py` (normalisation clé, repli
+URL, garde la première occurrence, ne collapse pas deux clés vides
+distinctes, dédup avant cap `max_items` avec/sans troncature) + 2 nouveaux
+dans `test_news_router.py` (dédup d'un article partagé entre deux tickers,
+non-dédup d'articles réellement distincts).
+Vérifié : suite backend complète sous Python 3.12 (même version que le
+Dockerfile de prod) — 1044 tests passent, mêmes 3 échecs pré-existants sans
+lien que les étapes précédentes (confirmés identiques : `/nonexistent/...`
+writable en root et mapping secteur différent, artefacts du sandbox) + ruff
+clean + mypy clean sur les 2 modules touchés. Aucun fichier frontend ni
+schéma d'API touché — `npm run build`/`test`/`check:types` non applicables
+à ce step (uniquement `modules/finnhub_news.py` et `routers/news.py` côté
+backend).
+Aucun changement à la logique de fetch/cache (`_read_cache`/`_write_cache`,
+TTL 1h inchangé) ni à `data_confidence.py`/`_multi_source_factor` — pur
+filtrage de présentation sur une donnée déjà fetchée, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `fetch_news()`
 (`modules/finnhub_news.py:86-169`) normalise chaque article Finnhub
