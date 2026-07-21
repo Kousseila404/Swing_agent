@@ -716,7 +716,40 @@ digest quotidien (`daily_digest.py`, déjà qualifié), ni à
 envoyé par `_notify_new_proposals` — couche présentation/notification pure,
 aucune logique trading/risk/sizing touchée.
 
-### Étape 11 — Croiser les 10-K/10-Q (rapports périodiques) dans le narratif causal — PAS COMMENCÉE
+### Étape 11 — Croiser les 10-K/10-Q (rapports périodiques) dans le narratif causal — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous (celui
+de l'Étape 9 pour le 8-K) : `InsiderActivity.most_recent_10k_date`/
+`most_recent_10q_date` (`modules/sec_edgar.py`), peuplés dans la même boucle
+`fetch_insider_activity()` qui extrait déjà le 8-K — deux branches
+supplémentaires (`10-K`/`10-K/A` et `10-Q`/`10-Q/A`), aucun nouveau fetch
+réseau. `insider_enrich._enrich_one` persiste les deux champs dans
+`universe.json` sous `insider_most_recent_10k`/`insider_most_recent_10q`
+(même mécanique que `insider_most_recent_8k`). `signal_qualification.
+causal_reasons` ajoute deux comparaisons : si la date du 10-K ou du 10-Q le
+plus récent a avancé entre l'instantané de référence et aujourd'hui, ajoute
+respectivement "Nouveau rapport annuel déposé (10-K, {date})" / "Nouveau
+rapport trimestriel déposé (10-Q, {date})" — même garde-fou que les 4
+comparaisons existantes (lecture seule, aucun nouveau calcul de score,
+aucun impact sur `compute_buy_signal`/sizing/exit).
+Tests : 3 nouveaux dans `test_sec_edgar.py` (extraction 10-K/10-Q distincts
+parmi plusieurs filings, absence des deux, amendements `10-K/A`/`10-Q/A`
+comptés) + 2 dans `test_insider_enrich.py` (propagation présente/absente)
++ 5 dans `test_signal_qualification.py` (nouveau 10-K depuis rien, nouveau
+10-Q depuis rien, 10-K plus récent que la référence, même 10-K/10-Q non
+re-signalés, aucun des deux des deux côtés).
+Vérifié : suite backend complète sous Python 3.12 (même version que le
+Dockerfile de prod) — 1036 tests passent, mêmes 3 échecs pré-existants sans
+lien que les étapes précédentes (confirmés identiques sur le commit de base
+avant ce changement : `/nonexistent/...` writable en root et mapping
+secteur différent, artefacts du sandbox) + ruff clean + mypy clean sur les
+3 modules touchés. Aucun fichier frontend ni schéma d'API touché — `npm run
+build`/`test`/`check:types` non applicables à ce step (uniquement
+`modules/sec_edgar.py`, `modules/insider_enrich.py`,
+`modules/signal_qualification.py` côté backend).
+Aucun changement au pilier Insider (`compute_insider_pillar_score`) ni à
+aucun poids de scoring, ni à `data_confidence.py`/`_multi_source_factor` —
+pure extraction de donnée déjà fetchée (data-provider layer) + ajout de
+raison narrative (présentation/qualification layer), comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `fetch_insider_activity()`
 (`modules/sec_edgar.py:366-491`) itère déjà tous les filings du payload
