@@ -875,7 +875,63 @@ nouveau champ persisté.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 nettoyage de la couche data-provider déjà en place.
 
-### Étape 13 — Brancher le vrai flux nominatif upgrade/downgrade Finnhub — PAS COMMENCÉE
+### Étape 13 — Brancher le vrai flux nominatif upgrade/downgrade Finnhub — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+`get_revisions_and_earnings()` (`data_providers/finnhub_provider.py`) ajoute
+un 5e call `_fetch_json("/stock/upgrade-downgrade", {"symbol", "from", "to"},
+...)` — le champ `FinnhubData.analyst_actions` (liste de `{date, firm,
+action, from_grade, to_grade}`, triée du plus récent au plus ancien, cappée
+aux 10 dernières) est peuplé à partir de la réponse réelle Finnhub
+(`gradeTime`/`company`/`action`/`fromGrade`/`toGrade`), avec parsing
+défensif (items sans `gradeTime`/`company`/`action` exploitable ignorés
+sans exception). `upgrade_downgrade_log` (agrégat mensuel dérivé de
+`/stock/recommendation`) conservé tel quel, comme prévu — les deux champs
+coexistent. `finnhub_enrich.py` persiste `analyst_actions` dans
+`universe.json` sous `finnhub_analyst_actions` (même garde `if truthy`
+que `upgrade_downgrade_log` — une liste vide ce run ne préserve pas
+l'historique précédent). `signal_qualification.causal_reasons` ajoute une
+5e comparaison : si l'action nominative la plus récente a changé entre
+l'instantané de référence et aujourd'hui, ajoute "Relevé/Abaissé/Initié/
+Maintenu à {grade} par {firm} ({date})" (verbe dérivé du champ `action`,
+généralisation du seul cas "Relevé" cité en exemple dans la proposition
+initiale — même garde-fou que les 4 comparaisons existantes : lecture
+seule, aucun nouveau calcul de score). `TickerAnalysisModal.jsx` affiche
+les 5 actions les plus récentes sous les compteurs existants de la section
+"Révisions analystes".
+Limite assumée : le schéma de champs Finnhub (`gradeTime`/`company`/
+`fromGrade`/`toGrade`/`action`) est basé sur la documentation publique de
+l'endpoint (stable, documentée depuis des années) plutôt que sur un appel
+live — aucune `FINNHUB_API_KEY` disponible dans ce sandbox pour vérifier
+empiriquement comme le suggérait la proposition initiale. Fail-open par
+construction : un champ renommé ou absent fait tomber `analyst_actions` à
+`[]` (item ignoré par le parsing défensif), jamais de crash ni de
+narratif erroné — à confirmer en usage réel une fois `FINNHUB_API_KEY`
+configurée en prod.
+Tests : 6 nouveaux dans `test_finnhub_provider.py` (parsing nominatif,
+tri desc, items malformés ignorés, accumulation d'erreur, absence
+légitime non pénalisée, cap à 10) + 2 dans `test_finnhub_enrich.py`
+(persistance, préservation si rien de nouveau) + 4 dans
+`test_signal_qualification.py` (nouvelle action, action plus récente
+que la référence, même action non re-signalée, aucune action des deux
+côtés).
+Vérifié : suite backend complète sous Python 3.12 (même version que le
+Dockerfile de prod) — 1055 tests passent, mêmes 3 échecs pré-existants
+sans lien que les étapes précédentes (confirmés identiques sur le commit
+de base avant ce changement : `/nonexistent/...` writable en root et
+mapping secteur différent, artefacts du sandbox) + ruff clean + mypy
+clean sur les 3 modules Python touchés. Frontend : build clean, lint
+clean, 45 tests vitest passent. `npm run check:types` non concluant dans
+ce sandbox — diff généré porte sur tout le fichier (600+ lignes,
+`Record<string, never>` vs `{[key: string]: unknown}`), confirmé comme
+dérive de génération OpenAPI pré-existante liée aux versions de
+dépendances du sandbox (même constat que l'Étape 8), pas spécifique à
+`/api/ticker_analysis` (qui n'a de toute façon pas de `response_model` —
+retourne `dict[str, Any]`, donc aucun changement de schéma typé).
+Aucune modification à `data_confidence.py`/`_multi_source_factor`
+(hors scope, cf. note Étape 11), à `revisions_score`/
+`compute_revisions_score`, ni à `upgrades_30d`/`downgrades_30d`/
+`revisions_net_score` — uniquement l'ajout du flux nominatif
+complémentaire, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : le docstring de module
 de `data_providers/finnhub_provider.py` (L4-14) documente explicitement
