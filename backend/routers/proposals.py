@@ -969,6 +969,12 @@ def reject_proposals_batch(
 def _notify_new_proposals(items: list[dict[str, Any]]) -> None:
     """Envoie 1 message Telegram récapitulatif des propositions ajoutées.
 
+    Étape 10 roadmap : préfixe chaque ligne du badge de conviction (même
+    mapping que `signal_qualification.CONVICTION_BADGES`/`ProposalsPage.jsx`)
+    et remplace le score brut par le narratif une-phrase déjà calculé par
+    `signal_qualification.py` (lecture seule sur `context.qualification`,
+    fail-open : absent/`None` ne change rien au comportement précédent).
+
     Fail-open : un échec Telegram n'invalide pas le refresh.
     """
     try:
@@ -976,15 +982,26 @@ def _notify_new_proposals(items: list[dict[str, Any]]) -> None:
     except Exception:
         return
 
+    from modules.signal_qualification import CONVICTION_BADGES
+
     n = len(items)
     lines = [f"📬 <b>{n} nouvelle{'s' if n > 1 else ''} proposition{'s' if n > 1 else ''} TITAN</b>"]
     lines.append("━" * 28)
     for p in items[:10]:  # cap pour rester sous la limite Telegram
-        score = (p.get("context") or {}).get("titan_score")
-        score_str = f" — score {score:.1f}" if isinstance(score, (int, float)) else ""
+        ctx = p.get("context") or {}
+        qualification = ctx.get("qualification") or {}
+        badge = CONVICTION_BADGES.get(qualification.get("conviction"))
+        narrative = qualification.get("narrative")
+
+        detail = f" — {narrative}" if narrative else ""
+        if not detail:
+            score = ctx.get("titan_score")
+            detail = f" — score {score:.1f}" if isinstance(score, (int, float)) else ""
+
+        prefix = f"{badge} " if badge else ""
         lines.append(
-            f"• <b>{p['ticker']}</b> ({p.get('sector') or '?'}) "
-            f"{p['size']} @ ${p['entry']:.2f}{score_str}"
+            f"• {prefix}<b>{p['ticker']}</b> ({p.get('sector') or '?'}) "
+            f"{p['size']} @ ${p['entry']:.2f}{detail}"
         )
     if n > 10:
         lines.append(f"…+ {n - 10} autres")

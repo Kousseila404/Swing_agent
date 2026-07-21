@@ -54,6 +54,15 @@ CONVICTION_CONFIRMED = "confirmed"
 CONVICTION_WATCH = "watch"
 CONVICTION_OTHER = "other"
 
+# Badge affiché — même mapping que `ProposalsPage.jsx` (CONVICTION_META),
+# réutilisé côté notifications Telegram (digest + `_notify_new_proposals`,
+# Étape 10) pour rester cohérent avec ce que l'utilisateur voit dans l'UI.
+CONVICTION_BADGES = {
+    CONVICTION_NEW: "\U0001f525 Nouveau",
+    CONVICTION_CONFIRMED: "⭐ Confirmé",
+    CONVICTION_WATCH: "\U0001f441 Surveillance",
+}
+
 _ACTIONABLE_VERDICTS = {"STRONG_BUY", "BUY"}
 
 _ES_LEVEL_RANK = {
