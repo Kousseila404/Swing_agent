@@ -1306,7 +1306,39 @@ Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 alignement de fiabilité entre les 4 sources déjà affichées côte à côte dans
 `/api/data_health`.
 
-### Étape 17 — Exposer l'historique `metrics_history.jsonl` dans `/api/data_health` (tendance dans le temps) — PAS COMMENCÉE
+### Étape 17 — Exposer l'historique `metrics_history.jsonl` dans `/api/data_health` (tendance dans le temps) — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+`GET /api/data_health` (`routers/data_health.py`) expose désormais une clé
+`history` — les `_HISTORY_LAST_N` (30) derniers points de
+`data/metrics_history.jsonl`, lus via `metrics_agent._read_history()` (déjà
+écrite par l'Étape 0bis, réutilisée telle quelle) dans un bloc `try/except`
+fail-open (liste vide si le fichier n'existe pas, cas attendu en
+local/sandbox — gitignored, VPS-only). Aucun changement à `metrics_agent.py`
+lui-même ni à ce qui est calculé/persisté par le cron. Côté
+`DataHealthPage.jsx`, nouvelle card "📈 Historique — tendance
+metrics_history.jsonl" avec deux `LineChart` Recharts (`% tickers stale`,
+`tickers dq_sanitize`), même patron que `AuditPage.jsx`/`PerformancePage.jsx`
+— message explicite ("aucun historique disponible") plutôt qu'un graphe vide
+quand `history` est `[]`.
+Tests : 3 nouveaux dans `test_data_health.py` (liste vide si fichier absent,
+points réexposés tels quels, cap correct à `_HISTORY_LAST_N`).
+Vérifié : suite backend complète sous Python 3.12 (même version que le
+Dockerfile de prod, venv recréé dans ce sandbox) — 1068 tests passent, mêmes
+3 échecs pré-existants sans lien que les étapes précédentes (confirmés
+identiques sur le commit de base avant ce changement : `/nonexistent/...`
+writable en root et mapping secteur différent, artefacts du sandbox) + ruff
+clean + mypy clean sur `routers/data_health.py`. Frontend : build clean,
+lint clean, 45 tests vitest passent. `npm run check:types` non concluant
+dans ce sandbox — même dérive de génération OpenAPI pré-existante déjà
+documentée aux Étapes 8/13/15 (confirmée identique en régénérant sur
+`origin/main` tel quel, sans mes changements), pas spécifique à ce step :
+`/api/data_health` n'a de toute façon pas de `response_model` (retourne
+`dict[str, Any]`), donc aucun changement de schéma typé — fichiers générés
+écartés du commit.
+Aucun changement à `_global_severity()`, à `metrics_agent.py`/au cron
+lui-même, ni à aucune décision d'activation de tier payant — pur ajout de
+lecture/présentation sur une donnée déjà persistée par l'Étape 0bis, comme
+prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `modules/metrics_agent.py`
 (branché quotidiennement dans `run_titan.sh` depuis l'Étape 0bis) écrit à
