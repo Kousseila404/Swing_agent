@@ -24,10 +24,12 @@ import {
 import { fmtNum, fmtPctRaw, fmtPrice } from '../utils/format';
 import { factorColor } from '../utils/colors';
 import ApiErrorBanner from './common/ApiErrorBanner';
+import ConvictionBadge from './common/ConvictionBadge';
 import EmptyState from './common/EmptyState';
 import PresetBar from './common/PresetBar';
 import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
+import { CONVICTION_RANK } from '../utils/conviction';
 import { loadProposalDefaults } from '../utils/preferences';
 
 // Lot 14 — palette tilt flags (qarp/garp/consistent/cheap-junk/falling-knife).
@@ -476,40 +478,8 @@ function isInBuyZone(ctx) {
 
 // Étape 1 roadmap — segmentation conviction (backend modules/signal_qualification.py).
 // Remplace le tri plat par 3 catégories : signal frais / confirmé / à surveiller.
-const CONVICTION_STYLE = {
-  new_signal: { label: '🔥 Nouveau', bg: 'rgba(251,146,60,0.18)', fg: '#fb923c' },
-  confirmed:  { label: '⭐ Confirmé', bg: 'rgba(34,197,94,0.16)', fg: '#22c55e' },
-  watch:      { label: '👁 Surveillance', bg: 'rgba(251,191,36,0.16)', fg: '#fbbf24' },
-};
-const CONVICTION_RANK = { new_signal: 3, confirmed: 2, watch: 1, other: 0 };
-
-function ConvictionBadge({ qualification }) {
-  const conviction = qualification?.conviction;
-  const s = CONVICTION_STYLE[conviction];
-  if (!s) return null;
-  const tooltipParts = [qualification.narrative];
-  if (qualification.causal_reasons?.length) {
-    tooltipParts.push(qualification.causal_reasons.join(' · '));
-  }
-  const trend = qualification.trend;
-  if (trend?.score_delta != null) {
-    tooltipParts.push(
-      `Score ${trend.score_delta >= 0 ? '+' : ''}${trend.score_delta.toFixed(1)} vs il y a ${trend.lookback_days}j`
-    );
-  }
-  return (
-    <span title={tooltipParts.filter(Boolean).join('\n')} style={{
-      display: 'inline-flex', alignItems: 'center',
-      fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.02em',
-      padding: '0.15rem 0.5rem', borderRadius: 4,
-      background: s.bg, color: s.fg,
-      border: `1px solid ${s.fg}`,
-      whiteSpace: 'nowrap', cursor: 'help',
-    }}>
-      {s.label}
-    </span>
-  );
-}
+// `ConvictionBadge`/`CONVICTION_RANK` extraits vers common/ConvictionBadge.jsx
+// (Étape 15) pour être réutilisés par TickerAnalysisModal.jsx.
 
 // ─────────────────────────────────────────────────────────────────
 // Étape 2 roadmap — vue résumé (3-5 top picks en cartes) au-dessus de la

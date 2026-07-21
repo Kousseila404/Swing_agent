@@ -28,7 +28,8 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Security
 
-from modules import api_core
+from modules import api_core, signal_qualification
+from modules.auto_proposer import _days_until_earnings
 from modules.buy_signal import compute_buy_signal
 from modules.dividend_safety import compute_dividend_safety
 from modules.earnings_surprise import compute_earnings_surprise_score
@@ -527,6 +528,29 @@ def ticker_analysis(ticker: str, _auth: None = Security(api_core.require_auth)) 
     buy_signal_block = compute_buy_signal(enriched_row).to_dict()
     entry_plan_block = _build_entry_plan(price_action, support, buy_signal_block)
 
+    # Étape 15 roadmap — qualification du signal (Étape 1) sur la fiche ticker.
+    # Lecture seule, mêmes ingrédients que `auto_proposer.plan_proposals` (alloc)
+    # pour ce même ticker. Fail-open : une erreur de qualification ne doit
+    # jamais faire échouer la factsheet elle-même.
+    try:
+        qualification = signal_qualification.qualify_proposal(
+            ticker,
+            scored_row=scored,
+            context_ingredients={
+                "buy_signal": buy_signal_block,
+                "f_score": scored.get("f_score"),
+                "f_score_max": scored.get("f_score_max"),
+                "momentum_score": scored.get("momentum_score"),
+                "support": support,
+                "revisions_score": scored.get("revisions_score"),
+                "days_until_earnings": _days_until_earnings(scored.get("next_earnings_date")),
+                "titan_tilt_flags": scored.get("titan_tilt_flags") or [],
+            },
+        )
+    except Exception as e:
+        logger.warning(f"[ticker_analysis] signal_qualification failed for {ticker}: {e}")
+        qualification = None
+
     return {
         "ticker": ticker,
         "identity": {
@@ -612,6 +636,7 @@ def ticker_analysis(ticker: str, _auth: None = Security(api_core.require_auth)) 
         "quant_rating":    quant_rating,
         "buy_signal":      buy_signal_block,
         "entry_plan":      entry_plan_block,
+        "qualification":   qualification,
         "revisions":       revisions_block,
         "insider":         insider_block,
         "earnings_surprise": surprise_data,

@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { addPriceAlert, fetchTickerAnalysis } from '../api/client.js';
 import { fmtMarketCap, fmtNum, fmtPct } from '../utils/format.js';
 import PeerComparison from './PeerComparison.jsx';
+import ConvictionBadge from './common/ConvictionBadge.jsx';
 import TickerPriceChart from './common/TickerPriceChart.jsx';
 import TitanScoreChart from './common/TitanScoreChart.jsx';
 import TradingViewWidget from './common/TradingViewWidget.jsx';
@@ -565,6 +566,15 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
               {data.buy_signal && (
                 <div style={{ marginBottom: '0.7rem' }}>
                   <BuySignalBadge signal={data.buy_signal} />
+                  {/* Étape 15 roadmap — qualification (Étape 1) : badge conviction
+                      + narratif/causal_reasons en tooltip. Rien ne s'affiche si
+                      qualification est None/absent (fail-open), même garde-fou
+                      que ProposalsPage.jsx. */}
+                  {data.qualification && (
+                    <span style={{ marginLeft: 8 }}>
+                      <ConvictionBadge qualification={data.qualification} />
+                    </span>
+                  )}
                   {data.buy_signal.reasons_pos?.length > 0 && data.buy_signal.verdict !== 'SKIP' && (
                     <details style={{ marginTop: 6, fontSize: '0.7rem' }}>
                       <summary style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>
