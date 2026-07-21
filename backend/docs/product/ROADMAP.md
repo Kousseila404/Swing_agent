@@ -1195,7 +1195,36 @@ Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 raccordement d'une qualification déjà calculée et déjà testée à une surface
 où elle manque encore.
 
-### Étape 16 — Persister le signal d'échec de `finnhub_news`/`sec_edgar` (actuellement invisible dans `/api/data_health`) — PAS COMMENCÉE
+### Étape 16 — Persister le signal d'échec de `finnhub_news`/`sec_edgar` (actuellement invisible dans `/api/data_health`) — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+`finnhub_news.fetch_news()` appelle désormais `_write_cache` sur les 3
+branches d'échec réseau/HTTP (`HTTPError`, exception générique, forme de
+réponse inattendue) — laissées volontairement non persistées : "ticker
+vide" et "clé API absente" (config locale, pas une panne de service à
+observer dans le temps). `sec_edgar.fetch_insider_activity()` et
+`fetch_recent_filings()` persistent désormais `sec_fetch_failed` (payload
+non-dict) via `_write_cache`/`_write_filings_cache`, même mécanique que la
+branche `cik_unknown` déjà persistée juste au-dessus. Aucun nouveau TTL,
+aucun changement de shape de payload/`/api/data_health` — `n_errors`
+(`dir_cache_stats()`) remonte désormais correctement dès qu'un fichier de
+cache contient le signal d'échec. Un run suivant réussi écrase l'entrée en
+erreur (guérison), pas d'accumulation.
+Tests : 5 nouveaux dans `test_finnhub_news.py` (persistance HTTPError/
+exception réseau/forme inattendue, non-persistance si clé API absente,
+guérison au run suivant) + 4 dans `test_sec_edgar.py` (persistance
+`sec_fetch_failed` + guérison pour `fetch_insider_activity` et
+`fetch_recent_filings`).
+Vérifié : suite backend complète sous Python 3.12 (même version que le
+Dockerfile de prod) — 1065 tests passent, mêmes 3 échecs pré-existants
+sans lien que les étapes précédentes (confirmés identiques sur le commit
+de base avant ce changement : `/nonexistent/...` writable en root et
+mapping secteur différent, artefacts du sandbox) + ruff clean + mypy
+clean sur les 2 modules touchés. Aucun fichier frontend ni schéma d'API
+touché — `npm run build`/`test`/`check:types` non applicables à ce step.
+Aucun changement à `_global_severity()`, à `data_confidence.py`/
+`_multi_source_factor`, ni à la logique de fetch elle-même (URLs, retries,
+parsing) — uniquement le moment où un résultat déjà calculé est écrit sur
+disque, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `dir_cache_stats()`
 (`data_providers/_disk_cache.py:138-139`) calcule `n_errors` en scannant les
