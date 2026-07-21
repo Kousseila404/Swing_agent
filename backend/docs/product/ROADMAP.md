@@ -716,6 +716,53 @@ digest quotidien (`daily_digest.py`, déjà qualifié), ni à
 envoyé par `_notify_new_proposals` — couche présentation/notification pure,
 aucune logique trading/risk/sizing touchée.
 
+### Étape 11 — Croiser les 10-K/10-Q (rapports périodiques) dans le narratif causal — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `fetch_insider_activity()`
+(`modules/sec_edgar.py:366-491`) itère déjà tous les filings du payload
+`submissions/CIK{cik}.json` — depuis l'Étape 9, la boucle (L429-437) extrait
+en plus la date du 8-K le plus récent sans requête réseau supplémentaire.
+Mais la même boucle jette toujours silencieusement les formes `10-K`/`10-K/A`/
+`10-Q`/`10-Q/A` (L438 : `if form not in ("4", "4/A"): continue`, exécuté
+juste après la branche 8-K), alors que ces formes sont déjà traitées comme
+premier ordre ailleurs dans le même module : `_DEFAULT_FORMS`/`_FORM_LABELS`
+(`sec_edgar.py:254-278`) les liste explicitement ("Rapport annuel"/"Rapport
+trimestriel"), et `fetch_recent_filings()` (utilisé à la demande par
+`routers/sec_filings.py`) sait déjà les dater avec `days_ago`. Un nouveau
+dépôt 10-Q (résultats trimestriels officiels, distinct de l'estimation
+`earnings_surprise` qui se base sur le calendrier d'annonce, pas le dépôt
+SEC lui-même) est un catalyseur "pourquoi maintenant" au moins aussi direct
+que le 8-K déjà croisé par l'Étape 9 — exactement le type de trou qu'a comblé
+l'Étape 9 pour le 8-K, une forme de plus qui traîne dans le même payload déjà
+en mémoire.
+
+Implémenter demanderait, sur le patron exact de l'Étape 9 :
+1. `sec_edgar.InsiderActivity` : ajouter `most_recent_10k_date` et
+   `most_recent_10q_date` (`str | None`), peuplés dans la même boucle
+   `fetch_insider_activity()` qui extrait déjà le 8-K (L429-437) — une 3e/4e
+   branche de forme, aucun nouveau fetch.
+2. `insider_enrich._enrich_one` : persister les deux champs dans
+   `universe.json` (même mécanique que `insider_most_recent_8k`).
+3. `signal_qualification.causal_reasons` : ajouter une comparaison — si la
+   date du 10-K ou du 10-Q le plus récent a avancé entre l'instantané de
+   référence et aujourd'hui, ajouter une raison du type "Nouveau rapport
+   {annuel|trimestriel} déposé (10-K/10-Q, {date})". Même garde-fou que les
+   4 comparaisons existantes : lecture seule sur des champs déjà dans
+   `scored_row`/`universe_history`, aucun nouveau calcul de score, aucun
+   impact sur `compute_buy_signal`/sizing/exit.
+
+Hors scope explicite : ne touche pas au pilier Insider
+(`compute_insider_pillar_score`) ni à aucun poids de scoring — uniquement une
+extraction de donnée déjà fetchée (data-provider layer) et un ajout de raison
+narrative (présentation/qualification layer), comme l'Étape 9. Ne touche pas
+non plus `data_confidence.py`/`_multi_source_factor` — ce facteur alimente
+`_sizing_buffett.apply_buffett_tilt` et `lt_exit_policy.decide` (logique de
+sizing/exit), hors limite de ce roadmap ; les deux nouveaux champs restent
+cantonnés au narratif causal, purement informatif.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+enrichissement du narratif causal déjà en place (Étape 1, Étape 9).
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
