@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Security
 
 from data_providers import finnhub_provider
-from modules import api_core, finnhub_news, sec_edgar
+from modules import api_core, finnhub_news, metrics_agent, sec_edgar
 from modules.fundamentals_cache import (
     cache_sanitize_stats,
     cache_stats,
@@ -52,6 +52,10 @@ _FETCHED_AT_STALE_DAYS_WARNING = 14
 _SANITIZE_WARNING_N = 20
 _SANITIZE_CRITICAL_N = 100
 _FETCHED_AT_STALE_DAYS_CRITICAL = 30
+
+# Étape 17 — nombre de points d'historique metrics_history.jsonl exposés
+# (~30 derniers runs quotidiens, cf. cron run_titan.sh).
+_HISTORY_LAST_N = 30
 
 
 def _universe_inventory() -> dict[str, Any]:
@@ -239,6 +243,9 @@ def get_data_health():
       - fmp : quota_used / quota_max si dispo
       - providers : cache stats finnhub/insider/SEC filings/news (Étape 0 —
         dashboard toutes-sources, pas seulement fondamentaux)
+      - history : N derniers points de `data/metrics_history.jsonl` (Étape
+        0bis/17) — tendance dans le temps (stale_ratio, n_dq_sanitize, WFO,
+        trades), liste vide si le fichier n'existe pas encore (local/sandbox)
 
     Endpoint **public** — pas d'info sensible, just observability.
     """
@@ -291,6 +298,16 @@ def get_data_health():
     except (OSError, ValueError, KeyError) as e:
         logger.warning(f"[data_health] provider_sources_health failed: {e}")
         payload["providers"] = {"error": str(e)}
+
+    # 4c. Historique metrics_history.jsonl (Étape 0bis/17) — tendance dans
+    # le temps (stale_ratio, dq_sanitize, WFO, trades), pas juste l'instantané
+    # du jour. Fail-open : liste vide si le fichier n'existe pas (attendu en
+    # local/sandbox — gitignored, VPS-only par construction).
+    try:
+        payload["history"] = metrics_agent._read_history(last_n=_HISTORY_LAST_N)
+    except (OSError, ValueError, KeyError) as e:
+        logger.warning(f"[data_health] metrics_agent history read failed: {e}")
+        payload["history"] = []
 
     # 5. Severity globale
     payload["severity_global"] = _global_severity(payload)

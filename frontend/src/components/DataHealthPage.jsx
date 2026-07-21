@@ -10,6 +10,15 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 import { refreshFlaggedTickers } from '../api/client';
 import { useDataHealth } from '../hooks/useApi';
@@ -98,6 +107,12 @@ export default function DataHealthPage() {
   const nFlagged = sanitize.n_tickers_flagged || 0;
   const providers = data.providers || {};
   const enrichmentErrors = inv.enrichment_errors || {};
+  const history = data.history || [];
+  const historyChartData = history.map((h) => ({
+    date: (h.timestamp || '').slice(0, 10),
+    stalePct: h.stale_ratio != null ? h.stale_ratio * 100 : null,
+    dqSanitize: h.n_dq_sanitize ?? null,
+  }));
 
   return (
     <div className="page-content">
@@ -397,6 +412,56 @@ export default function DataHealthPage() {
         )}
         {fmp.quota_exhausted && (
           <Row label="Quota épuisée" value="🔴 oui" color="var(--danger)" />
+        )}
+      </Card>
+
+      {/* ── Historique metrics_history.jsonl (Étape 17) ── */}
+      <Card title="📈 Historique — tendance metrics_history.jsonl">
+        {history.length === 0 ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            Aucun historique disponible — fichier alimenté quotidiennement par
+            le cron VPS (<code>run_titan.sh</code> → <code>metrics_agent</code>),
+            gitignored et donc absent en local/sandbox.
+          </div>
+        ) : (
+          <>
+            <div style={{ height: 180, marginBottom: 20 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                % tickers stale (fondamentaux)
+              </div>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={historyChartData} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="date" stroke="var(--text-muted)"
+                          tick={{ fontSize: 10 }} minTickGap={20} />
+                  <YAxis stroke="var(--text-muted)" tick={{ fontSize: 11 }}
+                          tickFormatter={(v) => `${v.toFixed(0)}%`} />
+                  <Tooltip contentStyle={{ background: '#0d0d1a',
+                                             border: '1px solid rgba(255,255,255,0.1)' }}
+                            formatter={(v) => `${fmtNum(v, 2)}%`} />
+                  <Line type="monotone" dataKey="stalePct" stroke="#fbbf24"
+                        strokeWidth={2} dot={{ r: 2 }} name="% stale" connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ height: 180 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                Tickers dq_sanitize (valeurs aberrantes neutralisées)
+              </div>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={historyChartData} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="date" stroke="var(--text-muted)"
+                          tick={{ fontSize: 10 }} minTickGap={20} />
+                  <YAxis stroke="var(--text-muted)" tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip contentStyle={{ background: '#0d0d1a',
+                                             border: '1px solid rgba(255,255,255,0.1)' }} />
+                  <Line type="monotone" dataKey="dqSanitize" stroke="#60a5fa"
+                        strokeWidth={2} dot={{ r: 2 }} name="dq_sanitize" connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </>
         )}
       </Card>
     </div>

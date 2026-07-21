@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api
-from modules import api_core
+from modules import api_core, metrics_agent
 from modules import fundamentals_cache as fc
 from modules.yf_circuit_breaker import yf_breaker
 
@@ -318,6 +318,49 @@ def test_data_health_severity_ok_when_few_flagged(
     body = client.get("/api/data_health").json()
     # Pas de bump severity à 5 flags.
     assert body["severity_global"] == "ok"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Historique metrics_history.jsonl (Étape 17)
+# ─────────────────────────────────────────────────────────────────
+
+def test_data_health_history_empty_when_file_missing(client, tmp_path, monkeypatch):
+    """Fichier absent (cas attendu en local/sandbox) → liste vide, jamais d'erreur."""
+    monkeypatch.setattr(metrics_agent, "METRICS_HISTORY_PATH", tmp_path / "missing.jsonl")
+    body = client.get("/api/data_health").json()
+    assert body["history"] == []
+
+
+def test_data_health_history_exposes_last_n_points(client, tmp_path, monkeypatch):
+    """Points JSONL déjà persistés par metrics_agent sont réexposés tels quels."""
+    hist_path = tmp_path / "metrics_history.jsonl"
+    entries = [
+        {"timestamp": f"2026-07-{10 + i:02d}T06:00:00+00:00",
+         "severity_global": "ok", "stale_ratio": 0.1 + i * 0.01,
+         "n_dq_sanitize": i}
+        for i in range(3)
+    ]
+    hist_path.write_text(
+        "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics_agent, "METRICS_HISTORY_PATH", hist_path)
+    body = client.get("/api/data_health").json()
+    assert body["history"] == entries
+
+
+def test_data_health_history_caps_to_last_n(client, tmp_path, monkeypatch):
+    """Plus de points que _HISTORY_LAST_N → seuls les N derniers sont retournés."""
+    from routers import data_health
+
+    hist_path = tmp_path / "metrics_history.jsonl"
+    entries = [{"timestamp": f"idx-{i}"} for i in range(data_health._HISTORY_LAST_N + 5)]
+    hist_path.write_text(
+        "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics_agent, "METRICS_HISTORY_PATH", hist_path)
+    body = client.get("/api/data_health").json()
+    assert len(body["history"]) == data_health._HISTORY_LAST_N
+    assert body["history"][-1] == {"timestamp": f"idx-{data_health._HISTORY_LAST_N + 4}"}
 
 
 # ─────────────────────────────────────────────────────────────────
