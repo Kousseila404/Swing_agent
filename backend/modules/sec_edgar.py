@@ -321,8 +321,10 @@ def fetch_recent_filings(
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     payload = _fetch_json(url)
     if not isinstance(payload, dict):
-        return {"ticker": t, "cik": cik, "filings": [],
-                "n_filings": 0, "error": "sec_fetch_failed"}
+        out = {"ticker": t, "cik": cik, "filings": [],
+               "n_filings": 0, "error": "sec_fetch_failed"}
+        _write_filings_cache(t, out)
+        return out
 
     recent = payload.get("filings", {}).get("recent") or {}
     rec_forms     = recent.get("form")             or []
@@ -403,7 +405,9 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     payload = _fetch_json(url)
     if not isinstance(payload, dict):
-        return InsiderActivity(ticker=ticker, cik=cik, error="sec_fetch_failed")
+        result = InsiderActivity(ticker=ticker, cik=cik, error="sec_fetch_failed")
+        _write_cache(ticker, result.to_dict())
+        return result
 
     recent = payload.get("filings", {}).get("recent") or {}
     forms = recent.get("form") or []

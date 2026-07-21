@@ -156,22 +156,28 @@ def fetch_news(ticker: str, days: int = 14, max_items: int = 30) -> dict[str, An
             raw = json.loads(resp.read().decode("utf-8"))
     except urlerror.HTTPError as exc:
         logger.warning(f"[finnhub_news] {t} HTTP {exc.code}")
-        return {
+        out = {
             "ticker": t, "articles": [], "n_articles": 0,
             "cached": False, "error": f"HTTP {exc.code}",
         }
+        _write_cache(t, days, out)
+        return out
     except Exception as exc:
         logger.warning(f"[finnhub_news] {t} fail: {exc}")
-        return {
+        out = {
             "ticker": t, "articles": [], "n_articles": 0,
             "cached": False, "error": str(exc),
         }
+        _write_cache(t, days, out)
+        return out
 
     if not isinstance(raw, list):
-        return {
+        out = {
             "ticker": t, "articles": [], "n_articles": 0,
             "cached": False, "error": "unexpected response shape",
         }
+        _write_cache(t, days, out)
+        return out
 
     # Dédup des ré-syndications (même headline/URL, id Finnhub différent) avant
     # le cap : sinon un doublon prend la place d'un article réellement distinct

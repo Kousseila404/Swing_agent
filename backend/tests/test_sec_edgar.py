@@ -9,6 +9,7 @@ from modules.sec_edgar import (
     InsiderActivity,
     compute_insider_pillar_score,
     fetch_insider_activity,
+    fetch_recent_filings,
 )
 
 
@@ -204,3 +205,73 @@ def test_fetch_insider_activity_10k_10q_amendments_also_counted():
         activity = fetch_insider_activity("CCC", use_cache=False)
     assert activity.most_recent_10k_date == "2026-03-01"
     assert activity.most_recent_10q_date == "2026-06-01"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Persistance du signal d'échec transitoire `sec_fetch_failed`
+# (Étape 16 roadmap) — jusqu'ici seul `cik_unknown` était persisté,
+# une panne réseau/HTTP transitoire (payload non-dict) ne l'était pas.
+# ─────────────────────────────────────────────────────────────────
+
+def test_fetch_insider_activity_persists_sec_fetch_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(sec_edgar, "_CACHE_DIR", tmp_path)
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=None):
+        activity = fetch_insider_activity("AAA", use_cache=False)
+
+    assert activity.error == "sec_fetch_failed"
+    # Le cache disque doit avoir été écrit — sinon dir_cache_stats() (utilisé
+    # par /api/data_health) ne peut jamais remonter n_errors > 0 pour une
+    # panne réseau transitoire (contrairement à cik_unknown, déjà persisté).
+    cached = sec_edgar._read_cache("AAA")
+    assert cached is not None
+    assert cached["error"] == "sec_fetch_failed"
+
+
+def test_fetch_insider_activity_sec_fetch_failed_heals_on_next_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(sec_edgar, "_CACHE_DIR", tmp_path)
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=None):
+        fetch_insider_activity("AAA", use_cache=False)
+    assert sec_edgar._read_cache("AAA")["error"] == "sec_fetch_failed"
+
+    payload = _mock_submissions_payload(forms=["4"], dates=["2026-06-15"], accessions=["0001-26-000002"])
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload):
+        activity = fetch_insider_activity("AAA", use_cache=False)
+
+    # Le run suivant réussi écrase l'entrée en erreur — pas d'accumulation.
+    assert activity.error is None
+    assert sec_edgar._read_cache("AAA")["error"] is None
+
+
+def test_fetch_recent_filings_persists_sec_fetch_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(sec_edgar, "_FILINGS_CACHE_DIR", tmp_path)
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=None):
+        out = fetch_recent_filings("BBB", use_cache=False)
+
+    assert out["error"] == "sec_fetch_failed"
+    cached = sec_edgar._read_filings_cache("BBB")
+    assert cached is not None
+    assert cached["error"] == "sec_fetch_failed"
+
+
+def test_fetch_recent_filings_sec_fetch_failed_heals_on_next_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(sec_edgar, "_FILINGS_CACHE_DIR", tmp_path)
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=None):
+        fetch_recent_filings("BBB", use_cache=False)
+    assert sec_edgar._read_filings_cache("BBB")["error"] == "sec_fetch_failed"
+
+    payload = {"filings": {"recent": {
+        "form": ["10-K"], "filingDate": ["2026-06-01"],
+        "accessionNumber": ["0001-26-000001"], "primaryDocument": ["doc.htm"],
+    }}}
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload):
+        out = fetch_recent_filings("BBB", use_cache=False)
+
+    # Le run suivant réussi écrase l'entrée en erreur — pas d'accumulation.
+    assert out["error"] is None
+    assert sec_edgar._read_filings_cache("BBB")["error"] is None
