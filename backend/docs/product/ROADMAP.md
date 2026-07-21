@@ -1004,6 +1004,49 @@ Zéro coût (endpoint déjà free tier Finnhub, déjà documenté comme utilisé
 zéro nouvelle source, aucune logique trading/risk touchée — corrige un
 écart doc/code et enrichit le narratif causal déjà en place (Étape 1, 9, 11).
 
+### Étape 14 — Lister les tickers `insider_error`/`finnhub_error` (pas juste le compteur) dans `/api/data_health` — PAS COMMENCÉE
+Preuve concrète relevée en code (pas une hypothèse) : l'Étape 6 a exposé
+`enrichment_errors.{insider_error,finnhub_error}` (`routers/data_health.py:
+118-119,135-138`) comme deux **compteurs** agrégés — mêmes champs bruts que
+`insider_enrich.py:50` (`"insider_error": pillar.get("reason")`) et
+`finnhub_enrich.py:99` (`row["finnhub_error"] = fdata.error`), qui persistent
+déjà par ticker dans `universe.json` la **chaîne d'erreur elle-même** (ex.
+`"cik_unknown"`, `"http_429; rate_limited"`), pas un simple booléen. Côté UI,
+`DataHealthPage.jsx:99,327,329,344-350` n'affiche que ce compteur ("Tickers
+en échec (universe.json)", un nombre nu) dans la card "🌐 Sources
+enrichissement". Résultat vécu : un utilisateur qui voit "12 tickers en
+échec finnhub_error" n'a aucun moyen de savoir **lesquels** ni **pourquoi**
+(rate-limit passager vs CIK introuvable de façon permanente) sans lire
+`universe.json` brut sur le VPS — c'est exactement le même trou que celui
+qu'ont comblé, pour `dq_sanitize`, l'Étape 7 (liste des tickers) puis
+l'Étape 8 (tag par ticker) ; ici le "tag" est encore plus direct puisque le
+message d'erreur est déjà stocké tel quel, sans parsing à inventer.
+
+Implémenter demanderait : dans `_universe_inventory()`
+(`routers/data_health.py`), à côté des deux compteurs existants, construire
+une liste `{ticker, error}` pour chaque ticker où `insider_error`/
+`finnhub_error` est truthy (même boucle que le comptage actuel, aucune
+E/S supplémentaire — la donnée est déjà en mémoire dans `tickers.values()`),
+exposée sous `enrichment_errors.{insider_error,finnhub_error}_tickers` (ou
+structure équivalente qui garde les compteurs existants inchangés pour ne
+rien casser côté consommateurs actuels du payload). Côté
+`DataHealthPage.jsx`, afficher cette liste de la même façon que la card
+"🧹 Qualité données" le fait déjà pour `sanitize.tickers` depuis l'Étape 7
+(bouton repliable "▸ Tickers (N)", chips au clic, message d'erreur en
+`title=` tooltip comme l'Étape 8 l'a fait pour les tags `dq_sanitize`) —
+réutilisation du même patron UI, pas un nouveau composant.
+
+Hors scope explicite : ne touche pas à `_global_severity()` ni à aucun
+nouveau seuil d'alerte (calibrage toujours différé à un historique réel via
+`data/metrics_history.jsonl`, Étape 0bis, comme rappelé par l'Étape 6) ; ne
+touche pas à `data_confidence._multi_source_factor` (logique de pénalité de
+confiance déjà stable depuis l'Étape 0/5) ni à la mécanique de fetch/retry
+des providers Finnhub/SEC. Pur ajout de lecture/présentation sur une donnée
+déjà calculée et déjà persistée, comme les Étapes 7 et 8.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+complément d'observabilité sur la couche data déjà en place.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
