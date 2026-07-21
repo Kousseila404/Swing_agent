@@ -200,6 +200,35 @@ def test_data_health_enrichment_errors_counted(client, tmp_path, monkeypatch):
     assert errs["finnhub_error"] == 2
 
 
+def test_data_health_enrichment_errors_lists_tickers(client, tmp_path, monkeypatch):
+    """Étape 14 — en plus du compteur, la liste {ticker, error} elle-même,
+    triée, insensible aux valeurs falsy/absentes, séparée par source."""
+    p = tmp_path / "universe.json"
+    p.write_text(json.dumps({
+        "updated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tickers": {
+            "B": {"ticker": "B", "finnhub_error": "http_429"},
+            "A": {"ticker": "A", "insider_error": "cik_unknown"},
+            "C": {"ticker": "C", "insider_error": "sec_fetch_failed",
+                  "finnhub_error": "rate_limited"},
+            "D": {"ticker": "D", "insider_error": None, "finnhub_error": None},
+            "E": {"ticker": "E"},
+        },
+    }))
+    monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", p)
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    errs = body["universe"]["enrichment_errors"]
+    assert errs["insider_error_tickers"] == [
+        {"ticker": "A", "error": "cik_unknown"},
+        {"ticker": "C", "error": "sec_fetch_failed"},
+    ]
+    assert errs["finnhub_error_tickers"] == [
+        {"ticker": "B", "error": "http_429"},
+        {"ticker": "C", "error": "rate_limited"},
+    ]
+
+
 def test_data_health_no_universe_file(client, tmp_path, monkeypatch):
     """Universe absent → loaded=False, severity reste calculable."""
     monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", tmp_path / "missing.json")

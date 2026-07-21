@@ -114,9 +114,27 @@ def _universe_inventory() -> dict[str, Any]:
 
     # Compteurs insider_error/finnhub_error (Étape 0/5) — jusqu'ici lus
     # uniquement par data_confidence._multi_source_factor, jamais agrégés
-    # (Étape 6).
+    # (Étape 6). Étape 14 : en plus du compteur, la liste {ticker, error}
+    # elle-même — la chaîne d'erreur est déjà persistée telle quelle dans
+    # universe.json, aucun nouveau calcul.
     n_insider_error = sum(1 for r in tickers.values() if r.get("insider_error"))
     n_finnhub_error = sum(1 for r in tickers.values() if r.get("finnhub_error"))
+    insider_error_tickers = sorted(
+        (
+            {"ticker": t, "error": r.get("insider_error")}
+            for t, r in tickers.items()
+            if r.get("insider_error")
+        ),
+        key=lambda x: x["ticker"],
+    )
+    finnhub_error_tickers = sorted(
+        (
+            {"ticker": t, "error": r.get("finnhub_error")}
+            for t, r in tickers.items()
+            if r.get("finnhub_error")
+        ),
+        key=lambda x: x["ticker"],
+    )
 
     return {
         "loaded": True,
@@ -135,6 +153,8 @@ def _universe_inventory() -> dict[str, Any]:
         "enrichment_errors": {
             "insider_error": n_insider_error,
             "finnhub_error": n_finnhub_error,
+            "insider_error_tickers": insider_error_tickers,
+            "finnhub_error_tickers": finnhub_error_tickers,
         },
     }
 
@@ -215,7 +235,7 @@ def get_data_health():
       - fundamentals_cache : n_cached, ages
       - universe : fields_missing par champ, fetched_at distribution, sources,
         enrichment_errors (compteurs tickers insider_error/finnhub_error —
-        Étape 6)
+        Étape 6 — + liste {ticker, error} par source — Étape 14)
       - fmp : quota_used / quota_max si dispo
       - providers : cache stats finnhub/insider/SEC filings/news (Étape 0 —
         dashboard toutes-sources, pas seulement fondamentaux)

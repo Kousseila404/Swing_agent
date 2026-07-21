@@ -60,6 +60,7 @@ export default function DataHealthPage() {
   const qc = useQueryClient();
   const [lastResult, setLastResult] = useState(null);
   const [showTickers, setShowTickers] = useState(false);
+  const [showErrorTickers, setShowErrorTickers] = useState({});
 
   const refreshMut = useMutation({
     mutationFn: refreshFlaggedTickers,
@@ -324,11 +325,11 @@ export default function DataHealthPage() {
       {/* ── Sources non-fondamentales (finnhub/insider/SEC/news) ── */}
       <Card title="🌐 Sources enrichissement (finnhub / insider / SEC / news)">
         {[
-          ['finnhub', 'Finnhub (revisions/earnings)', providers.finnhub, enrichmentErrors.finnhub_error],
-          ['news', 'Finnhub news', providers.news, null],
-          ['insider', 'SEC insider (Form 4)', providers.insider, enrichmentErrors.insider_error],
-          ['sec_filings', 'SEC filings', providers.sec_filings, null],
-        ].map(([key, label, src, nErrTickers]) => {
+          ['finnhub', 'Finnhub (revisions/earnings)', providers.finnhub, enrichmentErrors.finnhub_error, enrichmentErrors.finnhub_error_tickers],
+          ['news', 'Finnhub news', providers.news, null, null],
+          ['insider', 'SEC insider (Form 4)', providers.insider, enrichmentErrors.insider_error, enrichmentErrors.insider_error_tickers],
+          ['sec_filings', 'SEC filings', providers.sec_filings, null, null],
+        ].map(([key, label, src, nErrTickers, errTickers]) => {
           const c = (src && src.cache) || {};
           return (
             <div key={key} style={{ marginBottom: 10 }}>
@@ -348,6 +349,33 @@ export default function DataHealthPage() {
                   mono
                   color={nErrTickers > 0 ? 'var(--warning, #fbbf24)' : undefined}
                 />
+              )}
+              {nErrTickers > 0 && errTickers && errTickers.length > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  <button
+                    className="action-btn"
+                    style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                    onClick={() => setShowErrorTickers((v) => ({ ...v, [key]: !v[key] }))}
+                  >
+                    {showErrorTickers[key] ? '▾' : '▸'} Tickers ({errTickers.length})
+                  </button>
+                  {showErrorTickers[key] && (
+                    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {errTickers.map((t) => (
+                        <span
+                          key={t.ticker}
+                          title={t.error || undefined}
+                          style={{
+                            background: 'rgba(255,255,255,0.06)',
+                            padding: '2px 8px', borderRadius: 12,
+                            fontSize: '0.75rem', fontFamily: 'monospace',
+                            cursor: t.error ? 'help' : 'default',
+                          }}
+                        >{t.ticker}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           );
