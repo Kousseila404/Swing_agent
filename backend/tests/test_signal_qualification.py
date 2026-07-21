@@ -244,6 +244,41 @@ def test_causal_reasons_no_8k_present_no_reason():
     assert not any("8-K" in r for r in reasons)
 
 
+def test_causal_reasons_detects_new_10k_filing():
+    prior = _row(insider_most_recent_10k=None)
+    current = _row(insider_most_recent_10k="2026-02-01")
+    reasons = sq.causal_reasons(prior, current)
+    assert any("10-K" in r and "2026-02-01" in r for r in reasons)
+
+
+def test_causal_reasons_detects_new_10q_filing():
+    prior = _row(insider_most_recent_10q=None)
+    current = _row(insider_most_recent_10q="2026-07-10")
+    reasons = sq.causal_reasons(prior, current)
+    assert any("10-Q" in r and "2026-07-10" in r for r in reasons)
+
+
+def test_causal_reasons_detects_newer_10k_since_prior():
+    prior = _row(insider_most_recent_10k="2025-02-01")
+    current = _row(insider_most_recent_10k="2026-02-01")
+    reasons = sq.causal_reasons(prior, current)
+    assert any("10-K" in r for r in reasons)
+
+
+def test_causal_reasons_same_10k_10q_not_reported_again():
+    prior = _row(insider_most_recent_10k="2026-02-01", insider_most_recent_10q="2026-07-10")
+    current = _row(insider_most_recent_10k="2026-02-01", insider_most_recent_10q="2026-07-10")
+    reasons = sq.causal_reasons(prior, current)
+    assert not any("10-K" in r or "10-Q" in r for r in reasons)
+
+
+def test_causal_reasons_no_10k_10q_present_no_reason():
+    prior = _row(insider_most_recent_10k=None, insider_most_recent_10q=None)
+    current = _row(insider_most_recent_10k=None, insider_most_recent_10q=None)
+    reasons = sq.causal_reasons(prior, current)
+    assert not any("10-K" in r or "10-Q" in r for r in reasons)
+
+
 # ─────────────────────────────────────────────────────────────────
 # qualify_proposal (intégration)
 # ─────────────────────────────────────────────────────────────────

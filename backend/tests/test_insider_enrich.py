@@ -71,3 +71,28 @@ def test_enrich_one_no_8k_is_none(monkeypatch):
     )
     _, fields = insider_enrich._enrich_one("FFF")
     assert fields["insider_most_recent_8k"] is None
+
+
+def test_enrich_one_propagates_most_recent_10k_10q(monkeypatch):
+    """Étape 11 — les dates 10-K/10-Q les plus récentes doivent être persistées."""
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(
+            ticker=ticker, n_filings_scanned=3,
+            most_recent_10k_date="2026-02-01",
+            most_recent_10q_date="2026-07-10",
+        ),
+    )
+    _, fields = insider_enrich._enrich_one("GGG")
+    assert fields["insider_most_recent_10k"] == "2026-02-01"
+    assert fields["insider_most_recent_10q"] == "2026-07-10"
+
+
+def test_enrich_one_no_10k_10q_is_none(monkeypatch):
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(ticker=ticker, n_filings_scanned=3),
+    )
+    _, fields = insider_enrich._enrich_one("HHH")
+    assert fields["insider_most_recent_10k"] is None
+    assert fields["insider_most_recent_10q"] is None

@@ -183,6 +183,8 @@ class InsiderActivity:
     cluster_buying: bool = False  # 3+ insiders bullish dans 7j
     most_recent_filing_date: str | None = None
     most_recent_8k_date: str | None = None  # dernier événement matériel SEC
+    most_recent_10k_date: str | None = None  # dernier rapport annuel SEC
+    most_recent_10q_date: str | None = None  # dernier rapport trimestriel SEC
     n_filings_scanned: int = 0
     error: str | None = None
 
@@ -421,11 +423,14 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
     filings_with_filer: list[tuple[datetime, str]] = []
     most_recent: str | None = None
     most_recent_8k: str | None = None
+    most_recent_10k: str | None = None
+    most_recent_10q: str | None = None
     n_form4 = 0
 
     # SEC retourne tous les filings, déjà en mémoire pour ce payload — on
-    # extrait aussi la date du 8-K le plus récent (événement matériel) sans
-    # requête réseau supplémentaire, en plus du filtre Form 4 (transactions).
+    # extrait aussi la date du 8-K/10-K/10-Q le plus récent (événement
+    # matériel / rapports périodiques) sans requête réseau supplémentaire,
+    # en plus du filtre Form 4 (transactions).
     for form, dstr, acc in zip(forms, dates, accession_nums, strict=False):
         if form in ("8-K", "8-K/A"):
             try:
@@ -434,6 +439,22 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
                 continue
             if most_recent_8k is None or dstr > most_recent_8k:
                 most_recent_8k = dstr
+            continue
+        if form in ("10-K", "10-K/A"):
+            try:
+                datetime.strptime(dstr, "%Y-%m-%d")
+            except (ValueError, TypeError):
+                continue
+            if most_recent_10k is None or dstr > most_recent_10k:
+                most_recent_10k = dstr
+            continue
+        if form in ("10-Q", "10-Q/A"):
+            try:
+                datetime.strptime(dstr, "%Y-%m-%d")
+            except (ValueError, TypeError):
+                continue
+            if most_recent_10q is None or dstr > most_recent_10q:
+                most_recent_10q = dstr
             continue
         if form not in ("4", "4/A"):
             continue
@@ -485,6 +506,8 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
         cluster_buying=cluster,
         most_recent_filing_date=most_recent,
         most_recent_8k_date=most_recent_8k,
+        most_recent_10k_date=most_recent_10k,
+        most_recent_10q_date=most_recent_10q,
         n_filings_scanned=n_form4,
     )
     _write_cache(ticker, result.to_dict())

@@ -150,3 +150,57 @@ def test_fetch_insider_activity_8ka_amendment_also_counted():
          patch.object(sec_edgar, "_write_cache"):
         activity = fetch_insider_activity("CCC", use_cache=False)
     assert activity.most_recent_8k_date == "2026-07-05"
+
+
+# ─────────────────────────────────────────────────────────────────
+# fetch_insider_activity — extraction 10-K/10-Q (Étape 11 roadmap)
+# ─────────────────────────────────────────────────────────────────
+
+def test_fetch_insider_activity_extracts_most_recent_10k_and_10q():
+    payload = _mock_submissions_payload(
+        forms=["10-K", "4", "10-Q", "10-Q", "8-K"],
+        dates=["2026-02-01", "2026-06-15", "2026-05-01", "2026-07-10", "2026-04-01"],
+        accessions=[
+            "0001-26-000001", "0001-26-000002", "0001-26-000003",
+            "0001-26-000004", "0001-26-000005",
+        ],
+    )
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload), \
+         patch.object(sec_edgar, "_read_cache", return_value=None), \
+         patch.object(sec_edgar, "_write_cache"):
+        activity = fetch_insider_activity("AAA", use_cache=False)
+    assert activity.most_recent_10k_date == "2026-02-01"
+    # Le 10-Q du 2026-07-10 est plus récent que celui du 2026-05-01.
+    assert activity.most_recent_10q_date == "2026-07-10"
+    assert activity.most_recent_8k_date == "2026-04-01"
+
+
+def test_fetch_insider_activity_no_10k_10q_present():
+    payload = _mock_submissions_payload(
+        forms=["4", "8-K"],
+        dates=["2026-06-15", "2026-04-01"],
+        accessions=["0001-26-000002", "0001-26-000005"],
+    )
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload), \
+         patch.object(sec_edgar, "_read_cache", return_value=None), \
+         patch.object(sec_edgar, "_write_cache"):
+        activity = fetch_insider_activity("BBB", use_cache=False)
+    assert activity.most_recent_10k_date is None
+    assert activity.most_recent_10q_date is None
+
+
+def test_fetch_insider_activity_10k_10q_amendments_also_counted():
+    payload = _mock_submissions_payload(
+        forms=["10-K/A", "10-Q/A", "4"],
+        dates=["2026-03-01", "2026-06-01", "2026-06-15"],
+        accessions=["0001-26-000006", "0001-26-000007", "0001-26-000002"],
+    )
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload), \
+         patch.object(sec_edgar, "_read_cache", return_value=None), \
+         patch.object(sec_edgar, "_write_cache"):
+        activity = fetch_insider_activity("CCC", use_cache=False)
+    assert activity.most_recent_10k_date == "2026-03-01"
+    assert activity.most_recent_10q_date == "2026-06-01"

@@ -230,10 +230,11 @@ def causal_reasons(
     prior_row: dict[str, Any] | None, current_row: dict[str, Any],
 ) -> list[str]:
     """Quand le verdict a changé, tente d'expliquer *pourquoi* en croisant
-    earnings_surprise / insider (cluster buying + 8-K événement matériel) /
-    revisions entre l'instantané de référence et aujourd'hui. [] si
-    `prior_row` est absent ou si aucune cause précise n'est identifiable (le
-    narratif générique reste alors la seule info).
+    earnings_surprise / insider (cluster buying + 8-K événement matériel +
+    10-K/10-Q rapports périodiques) / revisions entre l'instantané de
+    référence et aujourd'hui. [] si `prior_row` est absent ou si aucune
+    cause précise n'est identifiable (le narratif générique reste alors la
+    seule info).
     """
     if prior_row is None:
         return []
@@ -266,6 +267,16 @@ def causal_reasons(
     current_8k = current_row.get("insider_most_recent_8k")
     if current_8k and current_8k != prior_8k and (prior_8k is None or current_8k > prior_8k):
         reasons.append(f"Événement matériel déposé (8-K, {current_8k})")
+
+    prior_10k = prior_row.get("insider_most_recent_10k")
+    current_10k = current_row.get("insider_most_recent_10k")
+    if current_10k and current_10k != prior_10k and (prior_10k is None or current_10k > prior_10k):
+        reasons.append(f"Nouveau rapport annuel déposé (10-K, {current_10k})")
+
+    prior_10q = prior_row.get("insider_most_recent_10q")
+    current_10q = current_row.get("insider_most_recent_10q")
+    if current_10q and current_10q != prior_10q and (prior_10q is None or current_10q > prior_10q):
+        reasons.append(f"Nouveau rapport trimestriel déposé (10-Q, {current_10q})")
 
     return reasons
 
