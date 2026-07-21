@@ -796,6 +796,56 @@ cantonnés au narratif causal, purement informatif.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 enrichissement du narratif causal déjà en place (Étape 1, Étape 9).
 
+### Étape 12 — Dédupliquer les articles de news ré-syndiqués — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `fetch_news()`
+(`modules/finnhub_news.py:86-169`) normalise chaque article Finnhub
+(`_normalize_article`, L65-83) puis se contente de trier par date et de
+capper à `max_items` (L152-157 : `sorted(... key=lambda a: a.get("datetime")
+...)[:max_items]`) — **aucune déduplication n'existe nulle part dans le
+pipeline**. Or l'endpoint `company-news` de Finnhub est connu pour renvoyer
+la même dépêche plusieurs fois, ré-syndiquée par différents partenaires
+(Zacks, Benzinga, Motley Fool…) avec un `id` différent mais un `headline`/
+`url` identique ou quasi-identique. Ce doublon remonte tel quel jusqu'aux
+deux consommateurs :
+- `routers/news.py::portfolio_news_firehose` (L67-82) agrège les articles de
+  tous les tickers OPEN+watchlist et ne fait qu'un tri global par date
+  (L84), sans jamais collapser par `headline`/`url` ;
+- `frontend/src/components/tickerAnalysis/NewsSection.jsx` et
+  `frontend/src/components/NewsFirehosePage.jsx` rendent `articles.map(...)`
+  directement, sans dédup côté client non plus.
+
+Effet vécu : un ticker à fort volume de news peut afficher 3-4 fois le même
+titre dans la liste cappée à `max_items`/`max_per_ticker`, ce qui prend la
+place d'articles réellement distincts dans une fenêtre déjà limitée —
+exactement le type de friction "signal noyé" que le diagnostic initial du
+document vise (le narratif doit informer, pas répéter du bruit).
+
+Implémenter demanderait :
+1. Ajouter une déduplication dans `fetch_news()` (`modules/finnhub_news.py`),
+   après normalisation et avant le cap `max_items` — clé de dédup sur
+   `headline` normalisé (lowercase, ponctuation/espaces réduits) ou `url`,
+   en gardant la première occurrence rencontrée (plus ancienne source
+   listée par Finnhub, généralement la dépêche d'origine plutôt que la
+   ré-syndication).
+2. Vérifier si `routers/news.py::portfolio_news_firehose` a besoin d'une
+   passe de dédup supplémentaire *après* agrégation multi-tickers (deux
+   tickers d'un même secteur peuvent partager un article macro identique) —
+   à trancher en implémentant, sur la même logique que le point 1.
+3. Aucun changement de shape de payload (toujours une liste de dicts
+   `{headline, summary, source, url, ...}`) — le frontend n'a rien à
+   changer, seul le nombre d'articles renvoyés diminue légèrement.
+
+Hors scope explicite : ne touche pas à la logique de fetch/cache
+(`_read_cache`/`_write_cache`, TTL 1h inchangé), ni à
+`data_confidence.py`/`_multi_source_factor` (news reste hors scope de ce
+facteur, comme documenté depuis l'Étape 0/5) — uniquement un filtrage de
+présentation sur une donnée déjà fetchée. Aucune nouvelle source, aucun
+nouveau champ persisté.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+nettoyage de la couche data-provider déjà en place.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
