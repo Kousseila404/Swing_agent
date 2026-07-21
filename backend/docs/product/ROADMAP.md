@@ -875,6 +875,79 @@ nouveau champ persisté.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 nettoyage de la couche data-provider déjà en place.
 
+### Étape 13 — Brancher le vrai flux nominatif upgrade/downgrade Finnhub — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : le docstring de module
+de `data_providers/finnhub_provider.py` (L4-14) documente explicitement
+`GET /stock/upgrade-downgrade` comme un des 4 endpoints "utilisés" par ce
+provider, avec la valeur ajoutée précise *"liste **datée nominative** des
+upgrades/downgrades par firm"* — c'est-à-dire des événements du type "Morgan
+Stanley relève AAPL à Buy le 2026-07-15", pas un agrégat. Le docstring de la
+méthode qui fait le vrai travail, `get_revisions_and_earnings()` (L191), dit
+la même chose : *"Effectue 4 calls Finnhub (recommendation, earnings,
+calendar, upgrade-downgrade)"*. Mais en lisant le corps de la méthode,
+l'endpoint réellement appelé en 4e position n'est pas `/stock/upgrade-
+downgrade` — c'est `/stock/price-target` (L302, `pt, pt_err = _fetch_json(
+"/stock/price-target", ...)`). `/stock/upgrade-downgrade` n'est appelé nulle
+part dans le fichier (`grep upgrade-downgrade` ne remonte que la mention
+docstring L13 et ce commentaire de méthode L191). Le champ
+`FinnhubData.upgrade_downgrade_log` existe bel et bien et est persisté dans
+`universe.json` puis exposé par `/api/ticker_analysis`
+(`routers/ticker_analysis.py:506`), mais son contenu réel (L240-255) n'a
+rien de nominatif : ce sont des compteurs bull/bear **mensuels agrégés**
+dérivés de `/stock/recommendation` (`{"period": "2026-06", "bull": 12,
+"bear": 3, "hold": 5}`), sans nom de firme, sans note avant/après, sans
+date précise de l'action — le nom du champ promet un log d'événements
+nominatifs, le contenu livre un consensus agrégé déjà couvert par
+ailleurs (`upgrades_30d`/`downgrades_30d`/`revisions_net_score`).
+
+Effet vécu : côté UI, `TickerAnalysisModal.jsx` (section "Révisions
+analystes", L755-772) n'affiche que des compteurs (upgrades/downgrades
+30j/90j, net score) — aucun narratif "qui a fait quoi, quand", alors que
+c'est exactement le type de catalyseur "pourquoi maintenant" que la Vision
+du document cible et que les Étapes 9/11 sont allées chercher côté SEC
+(8-K/10-K/10-Q). Côté narratif causal, `signal_qualification.causal_reasons`
+ne compare aujourd'hui que le score agrégé `revisions_score` avant/après
+(générique, "révisions analystes positives"), faute de mieux — avec le vrai
+flux nominatif, une raison du type "Relevé à Buy par Morgan Stanley
+(2026-07-15)" serait bien plus concrète et vérifiable par l'utilisateur.
+
+Implémenter demanderait :
+1. `get_revisions_and_earnings()` (`data_providers/finnhub_provider.py`) :
+   ajouter un 5e call `_fetch_json("/stock/upgrade-downgrade", {"symbol":
+   ticker, "from": ..., "to": ...}, self._api_key)` (toujours free tier,
+   même throttle existant), et vérifier la forme réelle de la réponse
+   Finnhub (champs firm/fromGrade/toGrade/action/gradeTime — à confirmer en
+   lisant la réponse live, pas en la devinant) avant de mapper vers un champ
+   dédié, par exemple `FinnhubData.analyst_actions` (garder
+   `upgrade_downgrade_log` tel quel pour ne pas casser sa consommation
+   actuelle par `revisions_net_score`/UI existante, ou le renommer
+   proprement si un seul call suffit à remplacer les deux — à trancher en
+   implémentant selon ce que retourne vraiment l'endpoint).
+2. `finnhub_enrich.py` : persister ce nouveau champ dans `universe.json`
+   (même mécanique que les champs Finnhub existants).
+3. `signal_qualification.causal_reasons` : si une action nominative est
+   apparue entre l'instantané de référence et aujourd'hui, ajouter une
+   raison du type "Relevé à {grade} par {firm} ({date})" — même garde-fou
+   que les comparaisons existantes (lecture seule, aucun nouveau calcul de
+   score, aucun impact sur `compute_buy_signal`/sizing/exit).
+4. `TickerAnalysisModal.jsx` (section "Révisions analystes") : afficher les
+   3-5 actions les plus récentes du log nominatif (firme, action, date) sous
+   les compteurs existants — présentation pure, pas de nouveau composant.
+
+Hors scope explicite : ne touche pas `data_confidence.py`/
+`_multi_source_factor` — ce facteur alimente le sizing/exit (cf. note
+Étape 11), hors limite de ce roadmap ; le nouveau champ reste cantonné au
+narratif causal et à l'affichage, purement informatif. Ne touche pas non
+plus `revisions_score`/`compute_revisions_score` (poids de scoring) ni
+`upgrades_30d`/`downgrades_30d`/`revisions_net_score` existants (dérivés de
+`/stock/recommendation`, conservés tels quels) — uniquement l'ajout d'un
+flux nominatif complémentaire.
+
+Zéro coût (endpoint déjà free tier Finnhub, déjà documenté comme utilisé),
+zéro nouvelle source, aucune logique trading/risk touchée — corrige un
+écart doc/code et enrichit le narratif causal déjà en place (Étape 1, 9, 11).
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
