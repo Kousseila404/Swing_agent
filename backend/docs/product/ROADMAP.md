@@ -1075,6 +1075,86 @@ déjà calculée et déjà persistée, comme les Étapes 7 et 8.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
+### Étape 15 — Qualification du signal dans la fiche ticker (`TickerAnalysisModal`) — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `signal_qualification.
+qualify_proposal()` (`modules/signal_qualification.py:307-349`) est explicitement
+documenté comme *"point d'entrée unique appelé par `auto_proposer`"* (docstring
+L314), et c'est vrai au sens littéral — un seul appelant dans tout le repo :
+`auto_proposer.plan_proposals` (`modules/auto_proposer.py:1006-1014`), qui
+peuple `alloc["qualification"]` (badge conviction 🔥/⭐/👁, narratif une-phrase,
+`causal_reasons` incluant désormais 8-K/10-K/10-Q/analyst actions depuis les
+Étapes 9/11/13). Ce champ irrigue ensuite `ProposalsPage.jsx` (top picks +
+table, tri "Conviction"), `daily_digest.py` (Étape 3) et
+`_notify_new_proposals` (Étape 10) — 3 surfaces différentes. Mais
+`routers/ticker_analysis.py::ticker_analysis()` (endpoint `/api/ticker_analysis/
+{ticker}`, L465-530), qui alimente `TickerAnalysisModal.jsx` — la fiche
+factsheet 11 sections citée dans l'État des lieux de ce document comme LE lieu
+où un utilisateur va chercher le détail d'un ticker — ne référence
+`qualification`/`causal_reasons`/`narrative` **nulle part** (confirmé :
+`grep qualification frontend/src/components/TickerAnalysisModal.jsx` ne
+retourne rien). Résultat vécu : un utilisateur qui clique sur un ticker
+n'importe où en dehors des cartes "Top picks" de Proposals (Watchlist,
+Universe Manager, Portfolio, Compare) atterrit sur la fiche la plus détaillée
+de l'appli sans jamais voir le "pourquoi maintenant" que le reste du produit
+sait déjà calculer — exactement la friction n°1 du diagnostic initial
+("le signal qualitatif existe déjà mais n'est qu'affiché par endroits épars"),
+version fiche-détail.
+
+Ce qui rend l'ajout bon marché : toutes les données d'entrée de
+`qualify_proposal()` (`buy_signal`, `f_score`/`f_score_max`, `momentum_score`,
+`support`, `revisions_score`, `titan_tilt_flags` — cf. `build_narrative()`,
+`signal_qualification.py:188-236`) sont déjà calculées dans
+`ticker_analysis()` avant son `return` (`buy_signal_block` L527, `support`
+L480-486, `scored.get(...)` pour le reste) ; seul `days_until_earnings`
+manque et se calcule avec le même utilitaire à une ligne déjà utilisé par
+`auto_proposer._days_until_earnings` (`auto_proposer.py:35`). Côté frontend,
+`ConvictionBadge` (`ProposalsPage.jsx:486-508`, avec son style
+`CONVICTION_STYLE` L477-482) existe déjà, tooltip narratif + causal_reasons +
+delta de score inclus, mais n'est ni exporté ni partagé — actuellement piégé
+dans `ProposalsPage.jsx`.
+
+Implémenter demanderait :
+1. `routers/ticker_analysis.py` : assembler un `context_ingredients` minimal
+   à partir des valeurs déjà calculées dans la fonction (mêmes clés que
+   `alloc` dans `auto_proposer.py` : `buy_signal`, `f_score`, `f_score_max`,
+   `momentum_score`, `support`, `revisions_score`, `days_until_earnings`,
+   `titan_tilt_flags`), puis appeler `signal_qualification.qualify_proposal(
+   ticker, scored_row=scored, context_ingredients=...)` dans un
+   `try/except` fail-open identique à celui d'`auto_proposer.py:1006-1014`
+   (`qualification=None` sur toute exception, jamais de 500 sur l'endpoint) ;
+   exposer le résultat sous une nouvelle clé `qualification` dans le payload
+   retourné.
+2. Frontend : extraire `ConvictionBadge`/`CONVICTION_STYLE`
+   (`ProposalsPage.jsx:477-508`) vers un module partagé (même geste que
+   l'extraction `utils/kpiCompare.js` de l'Étape 4 pour éviter la
+   duplication entre `ComparePage`/`PeerComparison`), puis l'utiliser dans
+   `TickerAnalysisModal.jsx` — par exemple une nouvelle sous-ligne sous le
+   titre ou à côté de la section "🎯 Plan d'entrée recommandé"
+   (`TickerAnalysisModal.jsx:245`) affichant badge + narratif + tooltip
+   causal reasons, avec le même garde `{qualification && <ConvictionBadge
+   .../>}` qu'utilise déjà `ProposalsPage.jsx` — rien ne s'affiche si
+   `qualification` est `None`/absent, jamais de "nouveau signal" affirmé
+   sans preuve (même garde-fou que les Étapes 1/3/10).
+3. Aucun nouveau calcul de score, aucune nouvelle source, aucun changement
+   de `lookback_days` (garder `DEFAULT_LOOKBACK_DAYS` tel quel, comme
+   `auto_proposer`) — pure réutilisation en lecture seule d'une fonction
+   déjà testée (26 tests `test_signal_qualification.py` + les tests
+   d'intégration des Étapes 9/11/13).
+
+Hors scope explicite : ne touche pas à `auto_proposer.plan_proposals`, au
+`buy_signal`/sizing/exit, ni à `data_confidence.py`/`_multi_source_factor`
+(sizing/exit, hors limite de ce roadmap, cf. note Étape 11). Ne change rien
+au comportement de `ProposalsPage.jsx`/`daily_digest.py`/
+`_notify_new_proposals`, qui gardent leur propre appel/consommation de
+`qualification` inchangés — uniquement un nouveau consommateur en lecture
+sur `/api/ticker_analysis`, plus le partage d'un composant d'affichage déjà
+existant.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+raccordement d'une qualification déjà calculée et déjà testée à une surface
+où elle manque encore.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
