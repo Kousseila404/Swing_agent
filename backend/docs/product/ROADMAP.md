@@ -1195,6 +1195,88 @@ Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 raccordement d'une qualification déjà calculée et déjà testée à une surface
 où elle manque encore.
 
+### Étape 16 — Persister le signal d'échec de `finnhub_news`/`sec_edgar` (actuellement invisible dans `/api/data_health`) — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `dir_cache_stats()`
+(`data_providers/_disk_cache.py:138-139`) calcule `n_errors` en scannant les
+fichiers de cache **déjà écrits sur disque** et en comptant ceux dont le
+champ `"error"` est truthy — c'est le helper partagé utilisé par les 4
+sources non-fondamentaux de `/api/data_health` (`routers/data_health.py`
+`_provider_sources_health()`, L171-186), et `DataHealthPage.jsx` (L326-341)
+affiche le même champ `c.n_errors` pour les 4 blocs (finnhub / news /
+insider / sec_filings) en laissant croire qu'ils sont tous fiables de la
+même façon. Ce n'est vrai que pour un des quatre :
+- `data_providers/finnhub_provider.py:359` — `get_revisions_and_earnings()`
+  appelle `_write_cache(ticker, data.to_dict())` **inconditionnellement**,
+  même quand `data.error` est renseigné (L357, mécanisme de l'Étape 5) —
+  `n_errors` est donc fiable ici.
+- `modules/finnhub_news.py` — `_write_cache` n'est appelé **qu'une seule
+  fois**, sur le chemin succès (L197). Toutes les branches d'échec (ticker
+  vide L125, clé API absente L135-142, `HTTPError`/`Exception` L159-168,
+  forme de réponse inattendue L171-174) font un `return` direct **sans
+  jamais appeler `_write_cache`**. Résultat : `finnhub_news.cache_stats()`
+  (L45-47, qui délègue à `dir_cache_stats(_CACHE_DIR)`) ne peut **jamais**
+  remonter `n_errors > 0`, quelle que soit la gravité d'une panne Finnhub
+  News — la métrique est morte, toujours 0.
+- `modules/sec_edgar.py` — même asymétrie, mais partielle : l'échec
+  **permanent** (`cik_unknown`, aucun CIK trouvé) est bien persisté
+  (`fetch_insider_activity` L399-400, `fetch_recent_filings` L316-318),
+  mais l'échec **transitoire** (`sec_fetch_failed`, un vrai problème
+  réseau/HTTP — exactement ce qu'un dashboard d'observabilité doit
+  détecter) `return` sans `_write_cache` dans les deux fonctions
+  (`fetch_insider_activity` L405-406, `fetch_recent_filings` L323-325).
+
+Vérifié en lisant le code des trois modules (pas une supposition) : les
+citations ci-dessus correspondent exactement au code actuel sur `main`
+(confirmé pendant ce run). Effet vécu : un utilisateur qui regarde la card
+"🌐 Sources enrichissement" de `/api/data_health` pendant une panne Finnhub
+News (rate-limit, clé invalide, timeout réseau) verra "0 erreurs" sur cette
+ligne alors que 100% des fetch échouent — même chose pour une panne réseau
+SEC transitoire (contrairement à un CIK durablement introuvable, qui lui
+remonte correctement). C'est le même type d'incohérence entre modules que
+celle déjà résolue par les Étapes 0/5 pour `insider_error`/`finnhub_error`
+(signal d'échec explicite et toujours réécrit pour qu'un ticker "guérisse"
+au run suivant) — ici le trou n'est pas dans le calcul du signal d'échec
+lui-même (`error` est déjà correctement défini dans le dict/objet retourné)
+mais dans le fait qu'il n'est jamais persisté sur les branches d'échec.
+
+Implémenter demanderait, sur le patron déjà en place dans
+`finnhub_provider.py:359` ("toujours écrire, `error` peut être renseigné")
+et la philosophie déjà documentée pour `insider_error`/`finnhub_error`
+(ROADMAP.md, Étape 0 : "toujours réécrit... pour qu'un ticker guérisse au
+run suivant si l'échec était transitoire") :
+1. `modules/finnhub_news.py::fetch_news()` : appeler `_write_cache` (avec
+   `error` renseigné) sur les branches d'échec réseau/HTTP (`HTTPError`,
+   `Exception`, forme de réponse inattendue) — probablement pas sur "clé
+   API absente"/"ticker vide" qui ne sont pas des pannes de service à
+   observer dans le temps, à trancher en implémentant.
+2. `modules/sec_edgar.py::fetch_insider_activity()` et
+   `fetch_recent_filings()` : appeler `_write_cache`/`_write_filings_cache`
+   (avec `error="sec_fetch_failed"`) sur la branche `payload` non-dict,
+   même mécanique que la branche `cik_unknown` juste au-dessus dans le même
+   fichier.
+3. Vérifier que ces nouvelles écritures de cache sur échec sont bien
+   couvertes par le TTL existant de chaque module (pas de nouveau TTL à
+   inventer) et qu'un run suivant réussi écrase bien l'entrée en erreur
+   (guérison), pas d'accumulation d'entrées fantômes.
+4. Aucun changement de shape de payload `/api/data_health` ni de
+   `DataHealthPage.jsx` — `n_errors` remonte déjà correctement dès que les
+   fichiers de cache contiennent le signal, le fix est uniquement côté
+   "quand persister", pas côté lecture/agrégation.
+
+Hors scope explicite : ne touche pas à `_global_severity()` ni à aucun
+nouveau seuil d'alerte (calibrage toujours différé à un historique réel via
+`data/metrics_history.jsonl`, Étape 0bis, comme rappelé par les Étapes 6/14) ;
+ne touche pas à `data_confidence.py`/`_multi_source_factor` (news et SEC
+filings restent hors scope de ce facteur, comme documenté depuis
+l'Étape 0/5/11) ; ne touche pas à la logique de fetch elle-même (URLs,
+retries, parsing) — uniquement le moment où un résultat déjà calculé est
+écrit sur disque.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+alignement de fiabilité entre les 4 sources déjà affichées côte à côte dans
+`/api/data_health`.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
