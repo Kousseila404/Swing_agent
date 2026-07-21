@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import patch
 
+from modules import sec_edgar
 from modules.sec_edgar import (
     InsiderActivity,
     compute_insider_pillar_score,
+    fetch_insider_activity,
 )
 
 
@@ -93,3 +96,57 @@ def test_pillar_score_components_exposed():
     assert c["sell_count_30d"] == 1
     assert c["distinct_insiders_30d"] == 2
     assert c["cluster_buying"] is False
+
+
+# ─────────────────────────────────────────────────────────────────
+# fetch_insider_activity — extraction 8-K (Étape 9 roadmap)
+# ─────────────────────────────────────────────────────────────────
+
+def _mock_submissions_payload(forms, dates, accessions):
+    return {"filings": {"recent": {
+        "form": forms, "filingDate": dates, "accessionNumber": accessions,
+    }}}
+
+
+def test_fetch_insider_activity_extracts_most_recent_8k():
+    payload = _mock_submissions_payload(
+        forms=["8-K", "4", "8-K", "10-Q"],
+        dates=["2026-06-01", "2026-06-15", "2026-07-10", "2026-05-01"],
+        accessions=["0001-26-000001", "0001-26-000002", "0001-26-000003", "0001-26-000004"],
+    )
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload), \
+         patch.object(sec_edgar, "_read_cache", return_value=None), \
+         patch.object(sec_edgar, "_write_cache"):
+        activity = fetch_insider_activity("AAA", use_cache=False)
+    # Le 8-K du 2026-07-10 est plus récent que celui du 2026-06-01.
+    assert activity.most_recent_8k_date == "2026-07-10"
+    assert activity.error is None
+
+
+def test_fetch_insider_activity_no_8k_present():
+    payload = _mock_submissions_payload(
+        forms=["4", "10-Q"],
+        dates=["2026-06-15", "2026-05-01"],
+        accessions=["0001-26-000002", "0001-26-000004"],
+    )
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload), \
+         patch.object(sec_edgar, "_read_cache", return_value=None), \
+         patch.object(sec_edgar, "_write_cache"):
+        activity = fetch_insider_activity("BBB", use_cache=False)
+    assert activity.most_recent_8k_date is None
+
+
+def test_fetch_insider_activity_8ka_amendment_also_counted():
+    payload = _mock_submissions_payload(
+        forms=["8-K/A", "4"],
+        dates=["2026-07-05", "2026-06-15"],
+        accessions=["0001-26-000005", "0001-26-000002"],
+    )
+    with patch.object(sec_edgar, "ticker_to_cik", return_value="0000320193"), \
+         patch.object(sec_edgar, "_fetch_json", return_value=payload), \
+         patch.object(sec_edgar, "_read_cache", return_value=None), \
+         patch.object(sec_edgar, "_write_cache"):
+        activity = fetch_insider_activity("CCC", use_cache=False)
+    assert activity.most_recent_8k_date == "2026-07-05"

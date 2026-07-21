@@ -50,3 +50,24 @@ def test_enrich_one_propagates_cik_unknown(monkeypatch):
     )
     _, fields = insider_enrich._enrich_one("DDD")
     assert fields["insider_error"] == "cik_unknown"
+
+
+def test_enrich_one_propagates_most_recent_8k(monkeypatch):
+    """Étape 9 — la date du 8-K le plus récent doit être persistée."""
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(
+            ticker=ticker, n_filings_scanned=3, most_recent_8k_date="2026-07-10",
+        ),
+    )
+    _, fields = insider_enrich._enrich_one("EEE")
+    assert fields["insider_most_recent_8k"] == "2026-07-10"
+
+
+def test_enrich_one_no_8k_is_none(monkeypatch):
+    monkeypatch.setattr(
+        insider_enrich, "fetch_insider_activity",
+        lambda ticker: InsiderActivity(ticker=ticker, n_filings_scanned=3),
+    )
+    _, fields = insider_enrich._enrich_one("FFF")
+    assert fields["insider_most_recent_8k"] is None

@@ -182,6 +182,7 @@ class InsiderActivity:
     distinct_insiders_buying_30d: int = 0
     cluster_buying: bool = False  # 3+ insiders bullish dans 7j
     most_recent_filing_date: str | None = None
+    most_recent_8k_date: str | None = None  # dernier événement matériel SEC
     n_filings_scanned: int = 0
     error: str | None = None
 
@@ -419,10 +420,21 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
     # une fenêtre 7j contenant ≥ 3 filers DISTINCTS (pas 3 filings).
     filings_with_filer: list[tuple[datetime, str]] = []
     most_recent: str | None = None
+    most_recent_8k: str | None = None
     n_form4 = 0
 
-    # SEC retourne tous les filings — on filtre Form 4 (transactions) et Form 4/A.
+    # SEC retourne tous les filings, déjà en mémoire pour ce payload — on
+    # extrait aussi la date du 8-K le plus récent (événement matériel) sans
+    # requête réseau supplémentaire, en plus du filtre Form 4 (transactions).
     for form, dstr, acc in zip(forms, dates, accession_nums, strict=False):
+        if form in ("8-K", "8-K/A"):
+            try:
+                datetime.strptime(dstr, "%Y-%m-%d")
+            except (ValueError, TypeError):
+                continue
+            if most_recent_8k is None or dstr > most_recent_8k:
+                most_recent_8k = dstr
+            continue
         if form not in ("4", "4/A"):
             continue
         try:
@@ -472,6 +484,7 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
         distinct_insiders_buying_30d=len(insiders_30),
         cluster_buying=cluster,
         most_recent_filing_date=most_recent,
+        most_recent_8k_date=most_recent_8k,
         n_filings_scanned=n_form4,
     )
     _write_cache(ticker, result.to_dict())

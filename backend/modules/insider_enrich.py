@@ -40,6 +40,7 @@ def _enrich_one(ticker: str) -> tuple[str, dict[str, object]]:
         "insider_buy_count_30d": activity.buy_count_30d,
         "insider_distinct_30d": activity.distinct_insiders_buying_30d,
         "insider_most_recent": activity.most_recent_filing_date,
+        "insider_most_recent_8k": activity.most_recent_8k_date,
         # Propagation explicite de activity.error (ex: "cik_unknown",
         # "sec_fetch_failed") — jusqu'ici calculé (via pillar["reason"])
         # mais jamais persisté, donc invisible pour data_confidence.

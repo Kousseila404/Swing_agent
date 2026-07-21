@@ -216,6 +216,34 @@ def test_causal_reasons_no_change_no_reasons():
     assert sq.causal_reasons(row, row) == []
 
 
+def test_causal_reasons_detects_new_8k_filing():
+    prior = _row(insider_most_recent_8k=None)
+    current = _row(insider_most_recent_8k="2026-07-10")
+    reasons = sq.causal_reasons(prior, current)
+    assert any("8-K" in r and "2026-07-10" in r for r in reasons)
+
+
+def test_causal_reasons_detects_newer_8k_since_prior():
+    prior = _row(insider_most_recent_8k="2026-05-01")
+    current = _row(insider_most_recent_8k="2026-07-10")
+    reasons = sq.causal_reasons(prior, current)
+    assert any("8-K" in r for r in reasons)
+
+
+def test_causal_reasons_same_8k_not_reported_again():
+    prior = _row(insider_most_recent_8k="2026-07-10")
+    current = _row(insider_most_recent_8k="2026-07-10")
+    reasons = sq.causal_reasons(prior, current)
+    assert not any("8-K" in r for r in reasons)
+
+
+def test_causal_reasons_no_8k_present_no_reason():
+    prior = _row(insider_most_recent_8k=None)
+    current = _row(insider_most_recent_8k=None)
+    reasons = sq.causal_reasons(prior, current)
+    assert not any("8-K" in r for r in reasons)
+
+
 # ─────────────────────────────────────────────────────────────────
 # qualify_proposal (intégration)
 # ─────────────────────────────────────────────────────────────────
