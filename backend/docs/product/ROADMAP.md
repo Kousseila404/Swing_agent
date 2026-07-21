@@ -573,7 +573,33 @@ l'Étape 7. Aucun nouveau seuil de `severity_global`.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur la couche data déjà en place.
 
-### Étape 9 — Croiser les 8-K (événements matériels SEC) dans le narratif causal — PAS COMMENCÉE
+### Étape 9 — Croiser les 8-K (événements matériels SEC) dans le narratif causal — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+`InsiderActivity.most_recent_8k_date` (`modules/sec_edgar.py`), peuplé dans
+la même boucle `fetch_insider_activity()` qui itère déjà `forms`/`dates` —
+aucun nouveau fetch réseau, juste une 2e branche (`8-K`/`8-K/A`) dans la
+boucle existante, à côté du filtre Form 4. `insider_enrich._enrich_one`
+persiste ce champ dans `universe.json` sous `insider_most_recent_8k` (même
+mécanique que `insider_error`/`insider_most_recent`, Étape 0). `signal_
+qualification.causal_reasons` ajoute une 4e comparaison : si la date du 8-K
+le plus récent a avancé entre l'instantané de référence et aujourd'hui,
+ajoute la raison "Événement matériel déposé (8-K, {date})" — même garde-fou
+que les 3 sources existantes (lecture seule, aucun nouveau calcul de score,
+aucun impact sur `compute_buy_signal`/sizing/exit).
+Tests : 3 nouveaux dans `test_sec_edgar.py` (extraction du 8-K le plus
+récent parmi plusieurs, absence de 8-K, amendement `8-K/A` compté) + 2 dans
+`test_insider_enrich.py` (propagation présente/absente) + 4 dans
+`test_signal_qualification.py` (nouveau 8-K depuis rien, 8-K plus récent que
+la référence, même 8-K non re-signalé, aucun 8-K des deux côtés).
+Vérifié : suite backend complète (1021 tests, mêmes 3 échecs pré-existants
+sans lien que les étapes précédentes — confirmés identiques sur le commit
+de base avant ce changement, environnement sandbox) + ruff clean + mypy
+clean sur les 3 modules touchés. Aucun fichier frontend ni schéma d'API
+touché — `npm run build`/`test`/`check:types` non applicables à ce step.
+Aucun changement au pilier Insider (`compute_insider_pillar_score`) ni à
+aucun poids de scoring — pure extraction de donnée déjà fetchée
+(data-provider layer) + ajout de raison narrative (présentation/
+qualification layer), comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `causal_reasons()`
 (`modules/signal_qualification.py:220-255`) construit le "pourquoi maintenant"
