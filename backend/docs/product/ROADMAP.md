@@ -1004,7 +1004,35 @@ Zéro coût (endpoint déjà free tier Finnhub, déjà documenté comme utilisé
 zéro nouvelle source, aucune logique trading/risk touchée — corrige un
 écart doc/code et enrichit le narratif causal déjà en place (Étape 1, 9, 11).
 
-### Étape 14 — Lister les tickers `insider_error`/`finnhub_error` (pas juste le compteur) dans `/api/data_health` — PAS COMMENCÉE
+### Étape 14 — Lister les tickers `insider_error`/`finnhub_error` (pas juste le compteur) dans `/api/data_health` — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+`_universe_inventory()` (`routers/data_health.py`) construit désormais, à
+côté des deux compteurs existants (Étape 6), une liste triée `{ticker,
+error}` par source truthy (`insider_error`/`finnhub_error`), exposée sous
+`enrichment_errors.{insider_error,finnhub_error}_tickers` — les compteurs
+existants sont inchangés, aucune E/S supplémentaire (même boucle en
+mémoire que le comptage). Côté `DataHealthPage.jsx`, la card "🌐 Sources
+enrichissement" affiche un bouton repliable "▸ Tickers (N)" par source
+sous la ligne "Tickers en échec (universe.json)" — chips au clic, message
+d'erreur en `title=` tooltip, même patron que `sanitize.tickers`
+(Étapes 7/8), pas de nouveau composant.
+Tests : 1 nouveau dans `test_data_health.py` (liste triée, correcte par
+source, insensible aux valeurs `None`/absentes).
+Vérifié : suite backend complète sous Python 3.12 (même version que le
+Dockerfile de prod) — 1059 tests passent, mêmes 3 échecs pré-existants
+sans lien que les étapes précédentes (confirmés identiques sur le commit
+de base avant ce changement : `/nonexistent/...` writable en root et
+mapping secteur différent, artefacts du sandbox) + ruff clean + mypy
+clean. Frontend : build clean, lint clean, 45 tests vitest passent (pas
+de nouveau test frontend, comme les Étapes 7/8 — aucun fichier de test
+dédié à `DataHealthPage.jsx` n'existe). `npm run check:types` non
+applicable : `/api/data_health` n'a pas de `response_model` (retourne
+`dict[str, Any]`), aucun changement de schéma typé.
+Aucun changement à `_global_severity()`, à `data_confidence.py`/
+`_multi_source_factor`, ni à la mécanique de fetch/retry des providers —
+pur ajout de lecture/présentation sur une donnée déjà calculée et déjà
+persistée, comme prévu.
+
 Preuve concrète relevée en code (pas une hypothèse) : l'Étape 6 a exposé
 `enrichment_errors.{insider_error,finnhub_error}` (`routers/data_health.py:
 118-119,135-138`) comme deux **compteurs** agrégés — mêmes champs bruts que
