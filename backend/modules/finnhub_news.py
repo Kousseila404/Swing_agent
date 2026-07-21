@@ -23,7 +23,12 @@ from typing import Any
 from urllib import error as urlerror
 from urllib import parse, request
 
-from data_providers._disk_cache import dir_cache_stats, read_json_cache, write_json_cache
+from data_providers._disk_cache import (
+    dir_cache_error_entries,
+    dir_cache_stats,
+    read_json_cache,
+    write_json_cache,
+)
 from modules.log import logger
 
 _BASE_URL = "https://finnhub.io/api/v1"
@@ -45,6 +50,20 @@ def is_configured() -> bool:
 def cache_stats() -> dict[str, Any]:
     """Stats diagnostiques du cache disque — pour `/api/data_health`."""
     return dir_cache_stats(_CACHE_DIR)
+
+
+def error_tickers() -> list[dict[str, Any]]:
+    """Liste `{ticker, error}` des tickers en échec (signal persisté depuis
+    l'Étape 16) — pour `/api/data_health` (Étape 18).
+
+    Nom de fichier `{TICKER}_{days}d.json` : un même ticker peut avoir
+    plusieurs fenêtres de jours en cache, la ticker part (préfixe avant le
+    dernier `_<N>d`) est extraite pour dédupliquer.
+    """
+    return dir_cache_error_entries(
+        _CACHE_DIR,
+        ticker_from_name=lambda stem: re.sub(r"_\d+d$", "", stem),
+    )
 
 
 def _cache_path(ticker: str, days: int) -> Path:

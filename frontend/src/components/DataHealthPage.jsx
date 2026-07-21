@@ -341,9 +341,9 @@ export default function DataHealthPage() {
       <Card title="🌐 Sources enrichissement (finnhub / insider / SEC / news)">
         {[
           ['finnhub', 'Finnhub (revisions/earnings)', providers.finnhub, enrichmentErrors.finnhub_error, enrichmentErrors.finnhub_error_tickers],
-          ['news', 'Finnhub news', providers.news, null, null],
+          ['news', 'Finnhub news', providers.news, providers.news?.error_tickers?.length ?? null, providers.news?.error_tickers ?? null],
           ['insider', 'SEC insider (Form 4)', providers.insider, enrichmentErrors.insider_error, enrichmentErrors.insider_error_tickers],
-          ['sec_filings', 'SEC filings', providers.sec_filings, null, null],
+          ['sec_filings', 'SEC filings', providers.sec_filings, providers.sec_filings?.error_tickers?.length ?? null, providers.sec_filings?.error_tickers ?? null],
         ].map(([key, label, src, nErrTickers, errTickers]) => {
           const c = (src && src.cache) || {};
           return (
@@ -359,7 +359,7 @@ export default function DataHealthPage() {
               )}
               {nErrTickers != null && (
                 <Row
-                  label="Tickers en échec (universe.json)"
+                  label="Tickers en échec"
                   value={nErrTickers}
                   mono
                   color={nErrTickers > 0 ? 'var(--warning, #fbbf24)' : undefined}

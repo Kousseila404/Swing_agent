@@ -179,12 +179,14 @@ def _provider_sources_health() -> dict[str, Any]:
         "news": {
             "configured": finnhub_news.is_configured(),
             "cache": finnhub_news.cache_stats(),
+            "error_tickers": finnhub_news.error_tickers(),
         },
         "insider": {
             "cache": sec_edgar.insider_cache_stats(),
         },
         "sec_filings": {
             "cache": sec_edgar.filings_cache_stats(),
+            "error_tickers": sec_edgar.filings_error_tickers(),
         },
         "cik_map_age_sec": sec_edgar.cik_map_age_sec(),
     }
@@ -242,7 +244,9 @@ def get_data_health():
         Étape 6 — + liste {ticker, error} par source — Étape 14)
       - fmp : quota_used / quota_max si dispo
       - providers : cache stats finnhub/insider/SEC filings/news (Étape 0 —
-        dashboard toutes-sources, pas seulement fondamentaux)
+        dashboard toutes-sources, pas seulement fondamentaux) + liste
+        {ticker, error} par ticker en échec pour news/sec_filings (Étape 18,
+        même geste que enrichment_errors.*_tickers pour insider/finnhub)
       - history : N derniers points de `data/metrics_history.jsonl` (Étape
         0bis/17) — tendance dans le temps (stale_ratio, n_dq_sanitize, WFO,
         trades), liste vide si le fichier n'existe pas encore (local/sandbox)

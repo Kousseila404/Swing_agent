@@ -28,7 +28,12 @@ from typing import Any
 from urllib import error as urlerror
 from urllib import request
 
-from data_providers._disk_cache import dir_cache_stats, read_json_cache, write_json_cache
+from data_providers._disk_cache import (
+    dir_cache_error_entries,
+    dir_cache_stats,
+    read_json_cache,
+    write_json_cache,
+)
 from modules.log import logger
 
 _USER_AGENT = "SwingQuant TITAN research@swingquant.local"
@@ -234,6 +239,14 @@ def _write_filings_cache(ticker: str, payload: dict[str, Any]) -> None:
 def filings_cache_stats() -> dict[str, Any]:
     """Stats diagnostiques du cache disque filings — pour `/api/data_health`."""
     return dir_cache_stats(_FILINGS_CACHE_DIR)
+
+
+def filings_error_tickers() -> list[dict[str, Any]]:
+    """Liste `{ticker, error}` des tickers en échec du cache filings (signal
+    `sec_fetch_failed`/`cik_unknown` persisté depuis l'Étape 16) — pour
+    `/api/data_health` (Étape 18). Nom de fichier `{TICKER}.json`.
+    """
+    return dir_cache_error_entries(_FILINGS_CACHE_DIR)
 
 
 def _archive_url(cik: str, accession: str, primary_doc: str | None) -> str:

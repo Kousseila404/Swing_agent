@@ -176,3 +176,32 @@ def test_fetch_news_error_cache_heals_on_next_successful_run(tmp_path, monkeypat
     cached = finnhub_news._read_cache("AAPL", 7)
     assert cached["error"] is None
     assert cached["n_articles"] == 1
+
+
+# ─────────────────────────────────────────────────────────────────
+# error_tickers() — liste {ticker, error} par ticker (Étape 18 roadmap)
+# ─────────────────────────────────────────────────────────────────
+
+def test_error_tickers_lists_only_failing_tickers(tmp_path, monkeypatch):
+    monkeypatch.setattr(finnhub_news, "_CACHE_DIR", tmp_path)
+    finnhub_news._write_cache("AAPL", 7, {"error": "HTTP 429", "articles": []})
+    finnhub_news._write_cache("MSFT", 7, {"error": None, "articles": []})
+
+    assert finnhub_news.error_tickers() == [{"ticker": "AAPL", "error": "HTTP 429"}]
+
+
+def test_error_tickers_dedups_across_day_windows(tmp_path, monkeypatch):
+    """Un même ticker peut avoir plusieurs fenêtres de jours en cache — un
+    seul {ticker, error} doit remonter, pas un par fichier."""
+    monkeypatch.setattr(finnhub_news, "_CACHE_DIR", tmp_path)
+    finnhub_news._write_cache("AAPL", 7, {"error": "HTTP 429", "articles": []})
+    finnhub_news._write_cache("AAPL", 30, {"error": "timed out", "articles": []})
+
+    out = finnhub_news.error_tickers()
+    assert len(out) == 1
+    assert out[0]["ticker"] == "AAPL"
+
+
+def test_error_tickers_empty_cache_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(finnhub_news, "_CACHE_DIR", tmp_path / "missing")
+    assert finnhub_news.error_tickers() == []

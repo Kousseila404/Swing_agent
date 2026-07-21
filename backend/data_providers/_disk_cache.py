@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -144,3 +145,43 @@ def dir_cache_stats(cache_dir: Path, *, pattern: str = "*.json") -> dict[str, An
         "median_age_sec": round(sorted(ages)[len(ages) // 2], 1) if ages else None,
         "n_errors": n_errors,
     }
+
+
+def dir_cache_error_entries(
+    cache_dir: Path,
+    *,
+    pattern: str = "*.json",
+    ticker_from_name: Callable[[str], str] = lambda stem: stem,
+) -> list[dict[str, Any]]:
+    """Liste `{ticker, error}` des entrées en erreur d'un cache disque — pendant
+    de `dir_cache_stats` (Étape 18 : détail par ticker plutôt que compteur
+    agrégé, même geste que l'Étape 14 pour `insider_error`/`finnhub_error`
+    dans `universe.json`).
+
+    `ticker_from_name` extrait le ticker depuis le nom de fichier (stem, sans
+    extension) — les conventions de nommage diffèrent selon la source
+    (`insider_{TICKER}.json`, `{TICKER}.json`, `{TICKER}_{days}d.json`...).
+    Un même ticker peut apparaître dans plusieurs fichiers (ex. plusieurs
+    fenêtres de jours pour `finnhub_news`) — la première erreur rencontrée
+    est gardée, dédupliqué par ticker. Fail-open : fichier illisible/corrompu
+    ignoré silencieusement, jamais levé.
+    """
+    if not cache_dir.exists():
+        return []
+    seen: dict[str, str] = {}
+    for path in sorted(cache_dir.glob(pattern)):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        error = payload.get("error")
+        if not error:
+            continue
+        ticker = ticker_from_name(path.stem)
+        if ticker and ticker not in seen:
+            seen[ticker] = error
+    return [{"ticker": t, "error": e} for t, e in sorted(seen.items())]

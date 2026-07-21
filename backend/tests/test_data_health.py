@@ -229,6 +229,30 @@ def test_data_health_enrichment_errors_lists_tickers(client, tmp_path, monkeypat
     ]
 
 
+def test_data_health_exposes_news_and_sec_filings_error_tickers(client, tmp_path, monkeypatch):
+    """Étape 18 — pendant de l'Étape 14 mais pour les caches disque
+    finnhub_news/sec_edgar (persistés depuis l'Étape 16), pas universe.json."""
+    from modules import finnhub_news, sec_edgar
+
+    news_dir = tmp_path / "news_cache"
+    monkeypatch.setattr(finnhub_news, "_CACHE_DIR", news_dir)
+    finnhub_news._write_cache("AAPL", 7, {"error": "HTTP 429", "articles": []})
+    finnhub_news._write_cache("MSFT", 7, {"error": None, "articles": []})
+
+    filings_dir = tmp_path / "filings_cache"
+    monkeypatch.setattr(sec_edgar, "_FILINGS_CACHE_DIR", filings_dir)
+    sec_edgar._write_filings_cache("BBB", {"error": "sec_fetch_failed", "filings": []})
+    sec_edgar._write_filings_cache("CCC", {"error": None, "filings": []})
+
+    resp = client.get("/api/data_health")
+    body = resp.json()
+    providers = body["providers"]
+    assert providers["news"]["error_tickers"] == [{"ticker": "AAPL", "error": "HTTP 429"}]
+    assert providers["sec_filings"]["error_tickers"] == [
+        {"ticker": "BBB", "error": "sec_fetch_failed"},
+    ]
+
+
 def test_data_health_no_universe_file(client, tmp_path, monkeypatch):
     """Universe absent → loaded=False, severity reste calculable."""
     monkeypatch.setattr(api_core, "UNIVERSE_QUANTAMENTAL_PATH", tmp_path / "missing.json")

@@ -275,3 +275,20 @@ def test_fetch_recent_filings_sec_fetch_failed_heals_on_next_run(tmp_path, monke
     # Le run suivant réussi écrase l'entrée en erreur — pas d'accumulation.
     assert out["error"] is None
     assert sec_edgar._read_filings_cache("BBB")["error"] is None
+
+
+# ─────────────────────────────────────────────────────────────────
+# filings_error_tickers() — liste {ticker, error} par ticker (Étape 18)
+# ─────────────────────────────────────────────────────────────────
+
+def test_filings_error_tickers_lists_only_failing_tickers(tmp_path, monkeypatch):
+    monkeypatch.setattr(sec_edgar, "_FILINGS_CACHE_DIR", tmp_path)
+    sec_edgar._write_filings_cache("BBB", {"error": "sec_fetch_failed", "filings": []})
+    sec_edgar._write_filings_cache("CCC", {"error": None, "filings": []})
+
+    assert sec_edgar.filings_error_tickers() == [{"ticker": "BBB", "error": "sec_fetch_failed"}]
+
+
+def test_filings_error_tickers_empty_cache_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(sec_edgar, "_FILINGS_CACHE_DIR", tmp_path / "missing")
+    assert sec_edgar.filings_error_tickers() == []
