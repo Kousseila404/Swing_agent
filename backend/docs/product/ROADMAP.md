@@ -651,7 +651,32 @@ précédentes.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 enrichissement du narratif causal déjà en place (Étape 1).
 
-### Étape 10 — Qualifier la notification Telegram `_notify_new_proposals` — PAS COMMENCÉE
+### Étape 10 — Qualifier la notification Telegram `_notify_new_proposals` — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+nouvelle constante `CONVICTION_BADGES` (`modules/signal_qualification.py`,
+même mapping emoji→label que `ProposalsPage.jsx`/`CONVICTION_META`) ;
+`_notify_new_proposals` (`routers/proposals.py`) lit désormais
+`(p.get("context") or {}).get("qualification") or {}` pour chaque
+proposition, préfixe la ligne du badge de conviction correspondant si
+présent, et remplace le score brut par le narratif une-phrase
+(`qualification.narrative`) quand il est disponible — sinon garde
+exactement l'ancien affichage (score brut, aucun badge). Fail-open
+identique aux Étapes 1/3 : `qualification` absent/`None`/vide ne change
+rien au comportement précédent, jamais traité comme "nouveau" sans preuve.
+Tests : 5 nouveaux dans `test_notify_new_proposals.py` (badge 🔥/⭐/👁 +
+narratif affiché, fail-open `qualification=None` garde le score brut,
+fail-open `qualification={}` idem, envoi Telegram fail-open sur exception).
+Vérifié : suite backend complète (1026 tests passent avec Python 3.12 —
+même version que le Dockerfile de prod ; 3 échecs pré-existants sans lien,
+identiques à ceux déjà documentés aux Étapes 7/8, confirmés inchangés sur
+le commit de base avant ce changement : `/nonexistent/...` writable en
+root et mapping secteur différent, artefacts du sandbox). Aucun fichier
+frontend touché — `npm run build`/`test`/`check:types` non applicables à
+ce step (uniquement `routers/proposals.py` et `modules/
+signal_qualification.py` côté backend).
+Aucune modification de la logique de sélection "nouvelles propositions"
+(DB), du digest quotidien, ni de `auto_proposer.plan_proposals` — pur
+formatage du message Telegram, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : l'Étape 3 a explicitement
 noté dans son propre done-note (ci-dessus) que `_notify_new_proposals`
