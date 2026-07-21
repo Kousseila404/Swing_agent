@@ -1386,7 +1386,48 @@ l'utilisateur.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur une donnée déjà persistée par l'Étape 0bis.
 
-### Étape 18 — Lister les tickers en échec `finnhub_news`/`sec_edgar` (pas juste le compteur agrégé `n_errors`) — PAS COMMENCÉE
+### Étape 18 — Lister les tickers en échec `finnhub_news`/`sec_edgar` (pas juste le compteur agrégé `n_errors`) — [FAIT 2026-07-21]
+[FAIT 2026-07-21] Implémenté exactement sur le patron décrit ci-dessous :
+nouveau helper générique `dir_cache_error_entries()` (`data_providers/
+_disk_cache.py`), pendant de `dir_cache_stats()` — scanne le même répertoire
+de cache et retourne une liste `{ticker, error}` (au lieu d'un compteur),
+dédupliquée par ticker via un callback `ticker_from_name` fourni par chaque
+appelant (les conventions de nommage diffèrent : `{TICKER}_{days}d.json`
+pour `finnhub_news`, `{TICKER}.json` pour les filings SEC). Deux nouvelles
+fonctions branchées sur ce helper : `finnhub_news.error_tickers()` et
+`sec_edgar.filings_error_tickers()`. `routers/data_health.py::
+_provider_sources_health()` expose ces listes sous
+`providers.news.error_tickers`/`providers.sec_filings.error_tickers` — même
+forme `{ticker, error}` que `enrichment_errors.*_tickers` (Étape 14), pour
+rester cohérent. Côté `DataHealthPage.jsx`, les deux `null, null` codés en
+dur pour `news`/`sec_filings` sont remplacés par ces nouvelles listes — la
+boucle/le rendu conditionnel (chips repliables, tooltip `title=`) existaient
+déjà pour `finnhub`/`insider`, aucun nouveau composant. Label de la ligne
+"Tickers en échec" allégé de son suffixe `(universe.json)` (devenu inexact
+puisque la même ligne sert désormais aussi des sources basées sur le cache
+disque, pas seulement `universe.json`).
+Tests : 3 nouveaux dans `test_finnhub_news.py` (liste correcte, dédup entre
+fenêtres de jours d'un même ticker, répertoire absent) + 2 dans
+`test_sec_edgar.py` (liste correcte, répertoire absent) + 1 dans
+`test_data_health.py` (les deux nouvelles listes exposées par l'endpoint).
+Vérifié : suite backend complète sous Python 3.12 (même version que le
+Dockerfile de prod, venv recréé dans ce sandbox) — 1077 tests passent,
+mêmes 3 échecs pré-existants sans lien que les étapes précédentes
+(confirmés identiques sur le commit de base avant ce changement :
+`/nonexistent/...` writable en root et mapping secteur différent, artefacts
+du sandbox) + ruff clean + mypy clean sur les 4 modules Python touchés.
+Frontend : build clean, lint clean, 45 tests vitest passent (pas de nouveau
+test frontend, comme les Étapes 7/8/14 — aucun fichier de test dédié à
+`DataHealthPage.jsx` n'existe). `npm run check:types` non concluant dans ce
+sandbox — même dérive de génération OpenAPI pré-existante déjà documentée
+aux Étapes 8/13/15/17 (confirmée identique en régénérant sur `origin/main`
+tel quel, sans mes changements), pas spécifique à ce step :
+`/api/data_health` n'a de toute façon pas de `response_model` (retourne
+`dict[str, Any]`), donc aucun changement de schéma typé.
+Aucun changement à `_global_severity()`, à `data_confidence.py`/
+`_multi_source_factor`, ni à la logique de fetch/retry elle-même (URLs,
+TTL, parsing) — pur ajout de lecture/présentation sur une donnée déjà
+persistée par l'Étape 16, comme prévu.
 
 Preuve concrète relevée en code (pas une hypothèse) : `dir_cache_stats()`
 (`data_providers/_disk_cache.py:102-141`) scanne déjà chaque fichier de
