@@ -1306,6 +1306,54 @@ Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 alignement de fiabilité entre les 4 sources déjà affichées côte à côte dans
 `/api/data_health`.
 
+### Étape 17 — Exposer l'historique `metrics_history.jsonl` dans `/api/data_health` (tendance dans le temps) — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `modules/metrics_agent.py`
+(branché quotidiennement dans `run_titan.sh` depuis l'Étape 0bis) écrit à
+chaque run un constat structuré dans `data/metrics_history.jsonl`
+(`_append_history()`, L72-79) — `timestamp`, `severity_global`,
+`stale_ratio`, `n_severe_stale`, `n_dq_sanitize`, `n_snapshots`,
+`wfo.{n_folds,avg_ic_test,status}`, `trades` (WIN/LOSS clos). Ce fichier est
+relu par le module lui-même (`_read_history()`, L82-98) mais uniquement pour
+comparer le run du jour au précédent dans le digest Telegram
+(`_build_digest_text`) — `grep -rn "metrics_history" backend/routers
+frontend/src` ne retourne aucun résultat : aucun endpoint ne l'expose,
+aucune page ne l'affiche. C'est exactement la lacune que ce document pointe
+lui-même : la section "3. La donnée elle-même n'est peut-être pas fiable"
+dit *"Décision payant vs gratuit : différée, prise avec des chiffres réels
+(taux de panne mesuré) plutôt qu'à l'instinct — cf. Étape 0bis"*, et
+l'Étape 0bis reformule dans son propre done-note *"Telegram est éphémère et
+ne suffit pas pour juger une tendance sur plusieurs semaines... la décision
+payant/gratuit a besoin d'un historique consultable, pas du dernier
+message"*. Aujourd'hui "consultable" veut dire en pratique se connecter en
+SSH sur le VPS et lire le JSONL brut — `/api/data_health`/
+`DataHealthPage.jsx`, déjà unifiée "toutes-sources" par l'Étape 0 et
+enrichie de listes détaillées par les Étapes 6/7/8/14, n'affiche toujours
+qu'un instantané du jour, jamais une tendance dans le temps.
+
+Implémenter demanderait : un nouvel endpoint (ou une extension de
+`/api/data_health` sous une clé `history`) qui lit
+`data/metrics_history.jsonl` via `metrics_agent._read_history()` (déjà
+écrite, réutilisable telle quelle) et retourne les N derniers points (ex.
+30 derniers jours) — fail-open, liste vide si le fichier n'existe pas
+(cas attendu en local/sandbox, le fichier étant explicitement gitignored
+et VPS-only par construction). Côté `DataHealthPage.jsx`, une card
+supplémentaire avec un petit graphe de `stale_ratio`/`n_dq_sanitize` dans
+le temps, en réutilisant `LineChart` (Recharts, déjà utilisé tel quel dans
+`AuditPage.jsx`/`PerformancePage.jsx`/`PortfolioPage.jsx` — aucune nouvelle
+dépendance) pour visualiser si le taux de panne yfinance monte ou descend,
+sans avoir à lire le fichier brut sur le VPS.
+
+Hors scope explicite : ne touche à aucun seuil de `_global_severity()`, à
+`metrics_agent.py`/au cron lui-même (aucun changement de ce qui est
+calculé ou persisté, uniquement une nouvelle lecture en aval), ni à aucune
+décision d'activation de tier payant — cette étape se contente d'afficher
+la donnée qui informera cette décision, laquelle reste réservée à
+l'utilisateur.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+complément d'observabilité sur une donnée déjà persistée par l'Étape 0bis.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
