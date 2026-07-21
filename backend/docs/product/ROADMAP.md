@@ -1386,6 +1386,65 @@ l'utilisateur.
 Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
 complément d'observabilité sur une donnée déjà persistée par l'Étape 0bis.
 
+### Étape 18 — Lister les tickers en échec `finnhub_news`/`sec_edgar` (pas juste le compteur agrégé `n_errors`) — PAS COMMENCÉE
+
+Preuve concrète relevée en code (pas une hypothèse) : `dir_cache_stats()`
+(`data_providers/_disk_cache.py:102-141`) scanne déjà chaque fichier de
+cache disque et compte `n_errors` (`payload.get("error")` truthy), mais
+jette l'information de **quel** ticker est en échec — seul le total est
+retourné. C'est le même trou que celui déjà comblé par l'Étape 14 pour
+`insider_error`/`finnhub_error` (compteur → liste `{ticker, error}`), sauf
+que pour `finnhub_news`/`sec_edgar` ce compteur `n_errors` n'a été rendu
+**vivant** que par l'Étape 16 (avant ça, les branches d'échec ne persistaient
+jamais rien sur disque, donc `n_errors` était toujours 0 — voir done-note
+Étape 16). Résultat : depuis l'Étape 16, un utilisateur peut désormais voir
+"news : 8 erreurs" ou "sec_filings : 3 erreurs" sur `/api/data_health` sans
+aucun moyen de savoir lesquels ni pourquoi — exactement la même friction que
+"12 tickers en échec finnhub_error" avant l'Étape 14.
+
+Preuve additionnelle côté frontend : `DataHealthPage.jsx` (L341-397) a déjà
+la boucle générique + les colonnes `nErrTickers`/`errTickers` par source
+(chips repliables au clic, tooltip `title=` avec le message d'erreur — même
+patron que `sanitize.tickers` des Étapes 7/8) branchées pour `finnhub` et
+`insider` (L343, L345), mais les entrées `news` et `sec_filings` (L344, L346)
+passent `null, null` en dur pour ces deux colonnes — la UI conditionnelle
+est prête et attend juste les données, aucun nouveau composant à écrire côté
+frontend.
+
+Implémenter demanderait :
+1. `data_providers/_disk_cache.py` : ajouter un helper (ex.
+   `dir_cache_error_entries(cache_dir, pattern, ticker_from_name)`) qui
+   réutilise la même boucle de scan que `dir_cache_stats()` mais retourne
+   une liste `{ticker, error}` au lieu d'un simple compteur — `ticker_from_name`
+   est un petit callback fourni par chaque appelant, car les conventions de
+   nommage de fichier diffèrent déjà entre sources (`insider_{TICKER}.json`
+   dans `sec_edgar.py:105`, `filings/{TICKER}.json` dans `sec_edgar.py:218`,
+   `{TICKER}_{days}d.json` dans `finnhub_news.py:51` — le ticker n'est stocké
+   nulle part *dans* le payload lui-même, seulement dans le nom de fichier).
+2. `modules/finnhub_news.py` et `modules/sec_edgar.py` : exposer une nouvelle
+   fonction (ex. `news_error_tickers()`, `sec_error_tickers()`) qui appelle ce
+   helper avec le bon extracteur de ticker pour leur convention de nommage.
+3. `routers/data_health.py::_provider_sources_health()` (L166-186) : inclure
+   ces listes dans le payload `news`/`sec_filings`, même forme que
+   `enrichment_errors.{insider_error,finnhub_error}_tickers` (Étape 14) pour
+   rester cohérent.
+4. `DataHealthPage.jsx` : remplacer les `null, null` en dur (L344, L346) par
+   les nouvelles listes — aucun nouveau composant, la boucle/le rendu
+   conditionnel existent déjà pour `finnhub`/`insider`.
+
+Hors scope explicite : ne touche pas à `_global_severity()` ni à aucun
+nouveau seuil d'alerte (calibrage toujours différé à un historique réel via
+`data/metrics_history.jsonl`, comme rappelé par les Étapes 6/14/17) ; ne
+touche pas à `data_confidence.py`/`_multi_source_factor` (`news`/SEC filings
+restent hors scope de ce facteur, documenté depuis l'Étape 0/5/11 — ce
+facteur alimente le sizing/exit, hors limite de ce roadmap) ; ne touche pas
+à la logique de fetch/retry elle-même (URLs, TTL, parsing) — uniquement de
+la lecture/présentation sur une donnée déjà persistée par l'Étape 16.
+
+Zéro coût, zéro nouvelle source, aucune logique trading/risk touchée — pur
+complément d'observabilité sur la couche data déjà en place, même geste que
+l'Étape 14 appliqué aux deux dernières sources qui en manquaient encore.
+
 ## Notes de méthode
 
 - Aucune étape ne touche à la logique trading/risk (gates, killswitch,
