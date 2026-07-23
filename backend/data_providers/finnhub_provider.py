@@ -9,14 +9,20 @@ Endpoints utilisés (tous free tier) :
   • GET /api/v1/stock/earnings?symbol=AAPL
        → 4 derniers earnings : actual/estimate/period/surprise
   • GET /api/v1/calendar/earnings?symbol=AAPL&from=...&to=...
-       → prochain earnings + estimés EPS
-  • GET /api/v1/stock/upgrade-downgrade?symbol=AAPL&from=...&to=...
-       → liste **datée nominative** des upgrades/downgrades par firm
-         (champ `FinnhubData.analyst_actions` — Étape 13 roadmap : jusqu'ici
-         documenté ci-dessus mais jamais réellement appelé, le 4e call
-         tombait sur /stock/price-target à la place ; distinct de
-         `upgrade_downgrade_log`, qui reste un agrégat mensuel dérivé de
-         /stock/recommendation)
+       → prochain earnings + estimés EPS (trié par Finnhub date DESCENDANTE —
+         on sélectionne explicitement l'entrée la plus proche, pas `[0]`)
+
+Endpoints RETIRÉS (2026-07-23) — plan payant requis, 403 confirmé sur 489/489
+tickers en prod, tout le temps :
+  • GET /api/v1/stock/price-target      → `target_price_consensus` (jamais
+    peuplé ; `price_target_mean` déjà couvert par yfinance, aucune perte)
+  • GET /api/v1/stock/upgrade-downgrade → `analyst_actions` (log nominatif
+    daté par firme, jamais peuplé depuis sa création Étape 13 — l'un des 2
+    bugs successifs sur ce champ : d'abord mauvais endpoint appelé, puis bon
+    endpoint mais hors plan free. `upgrade_downgrade_log`, l'agrégat mensuel
+    dérivé de /stock/recommendation, reste fonctionnel et inchangé.)
+  Ces 2 calls consommaient ~40 % du budget Finnhub par ticker pour un
+  résultat garanti vide — retirés pour accélérer l'enrichissement.
 
 Ce provider **n'écrase PAS** les données yfinance — il les **enrichit**. Le
 caller (universe_engine) appelle `enrich_with_finnhub()` après le scrape
@@ -83,6 +89,10 @@ class FinnhubData:
     earnings_beat_rate_8q: float | None = None
     next_earnings_date: str | None = None
     next_earnings_eps_estimate: float | None = None
+    # target_price_consensus / analyst_actions : endpoints retirés (2026-07-23,
+    # 403 plan payant) — champs conservés pour la stabilité du schéma cache/
+    # consommateurs, restent toujours None/[] désormais (jamais peuplés
+    # depuis la création de ce provider de toute façon).
     target_price_consensus: float | None = None
     upgrade_downgrade_log: list[dict[str, Any]] = field(default_factory=list)
     analyst_actions: list[dict[str, Any]] = field(default_factory=list)
