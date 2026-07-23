@@ -301,10 +301,17 @@ class FinnhubProvider:
             fetch_errors.append(f"calendar:{cal_err}")
         if isinstance(cal, dict):
             entries = cal.get("earningsCalendar") or []
-            if entries and isinstance(entries[0], dict):
-                first = entries[0]
-                data.next_earnings_date = first.get("date")
-                data.next_earnings_eps_estimate = _safe_float(first.get("epsEstimate"))
+            # Finnhub renvoie les entrées triées date DESCENDANTE (la plus
+            # lointaine d'abord dans la fenêtre [today, today+365j]) — pas
+            # ascendante. `entries[0]` pointait donc systématiquement vers le
+            # 4e trimestre futur (~1 an plus tard) au lieu du prochain. Bug
+            # confirmé en prod : 479/489 tickers avec next_earnings_date à
+            # 250-680 j d'écart de la période fiscale la plus récente connue.
+            dated = [e for e in entries if isinstance(e, dict) and e.get("date")]
+            nearest = min(dated, key=lambda e: e["date"]) if dated else None
+            if nearest is not None:
+                data.next_earnings_date = nearest.get("date")
+                data.next_earnings_eps_estimate = _safe_float(nearest.get("epsEstimate"))
 
         # 4. Price target consensus.
         pt, pt_err = _fetch_json("/stock/price-target", {"symbol": ticker}, self._api_key)

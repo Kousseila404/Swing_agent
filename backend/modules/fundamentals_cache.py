@@ -60,10 +60,20 @@ STALE_FALLBACK_MAX_AGE_SECONDS = 7 * 86_400
 # considérer "frais" alors qu'il a 240j. Conséquence : Piotroski Y/Y, Quality,
 # Value reposent sur des comparables stale sans warning.
 #   • Q-latest > 200 j  (~2 trimestres) → flag REPORT_STALE
-#   • Y-1     > 450 j  (publication 10-K + 1 année fiscale) → flag YOY_STALE
+#   • Y-1     > 900 j  (publication 10-K + 1 année fiscale) → flag YOY_STALE
 # Ces flags sont injectés dans `error` pour propagation au pipeline data_confidence.
+#
+# Calibration Y-1 (2026-07-23) — 450j déclenchait 482/489 tickers (99 %) de
+# l'univers en continu : par construction du cycle annuel, Y-1 (colonne
+# annuelle n-1) reste fixe pendant ~12-14 mois entre deux publications de
+# Y0, donc son âge oscille naturellement entre ~365j (juste après le
+# roll de Y0) et ~820j (juste avant le prochain roll) — jamais sous 450j
+# la majeure partie de l'année. Mesuré en prod : p10=569j, max=783j pour
+# tout l'univers. 900j laisse une marge de sécurité (~2,5 ans) au-delà du
+# cycle annuel normal et ne cible plus que les Y-1 réellement bloqués
+# (ticker dont les annuels ne roulent plus du tout, données provider mortes).
 PERIOD_END_MAX_AGE_DAYS = 200
-PERIOD_END_Y1_MAX_AGE_DAYS = 450
+PERIOD_END_Y1_MAX_AGE_DAYS = 900
 
 
 def _now() -> float:

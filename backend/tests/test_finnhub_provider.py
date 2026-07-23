@@ -70,6 +70,34 @@ def test_recommendation_parsing():
     assert data.error is None  # tous les endpoints ont répondu, même vide
 
 
+def test_earnings_calendar_picks_nearest_not_first():
+    """Finnhub renvoie earningsCalendar trié date DESCENDANTE (le plus
+    lointain trimestre en premier) sur la fenêtre [today, today+365j] —
+    confirmé en prod (NSC/ADM/CAT). `entries[0]` sélectionnait donc
+    systématiquement le earnings le plus lointain (~1 an) au lieu du
+    prochain réel. Régression du bug next_earnings_date."""
+    cal_payload = {"earningsCalendar": [
+        {"date": "2027-05-03", "epsEstimate": 1.28},
+        {"date": "2027-02-01", "epsEstimate": 1.29},
+        {"date": "2026-11-02", "epsEstimate": 1.27},
+        {"date": "2026-08-04", "epsEstimate": 1.35},
+    ]}
+
+    def stub(endpoint, params, key):
+        if "calendar/earnings" in endpoint:
+            return cal_payload, None
+        return None, None
+
+    p = FinnhubProvider(api_key="test")
+    with patch("data_providers.finnhub_provider._fetch_json", side_effect=stub), \
+         patch("data_providers.finnhub_provider._read_cache", return_value=None), \
+         patch("data_providers.finnhub_provider._write_cache"):
+        data = p.get_revisions_and_earnings("ADM", use_cache=False)
+
+    assert data.next_earnings_date == "2026-08-04"
+    assert data.next_earnings_eps_estimate == 1.35
+
+
 def test_handles_endpoint_failures_gracefully():
     """Si tous les endpoints renvoient (None, None) — "0 résultat légitime",
     pas un échec —, on retourne FinnhubData neutre sans `error`."""
