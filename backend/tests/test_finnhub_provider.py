@@ -38,7 +38,6 @@ def test_recommendation_parsing():
         {"surprisePercent": 3.6,  "actual": 1.35, "estimate": 1.30, "period": "2025-Q2"},
     ]
     cal_payload = {"earningsCalendar": [{"date": "2026-07-29", "epsEstimate": 1.76}]}
-    pt_payload = {"targetMean": 220.5}
 
     def stub(endpoint, params, key):
         if "recommendation" in endpoint:
@@ -47,8 +46,6 @@ def test_recommendation_parsing():
             return earnings_payload, None
         if "calendar/earnings" in endpoint:
             return cal_payload, None
-        if "price-target" in endpoint:
-            return pt_payload, None
         return None, None
 
     p = FinnhubProvider(api_key="test")
@@ -64,7 +61,10 @@ def test_recommendation_parsing():
     assert data.revisions_net_score == 1.0
     assert data.next_earnings_date == "2026-07-29"
     assert data.next_earnings_eps_estimate == 1.76
-    assert data.target_price_consensus == 220.5
+    # price-target / upgrade-downgrade retirés (403 plan payant) — restent
+    # à leur défaut, plus jamais fetchés.
+    assert data.target_price_consensus is None
+    assert data.analyst_actions == []
     assert data.earnings_beat_rate_8q == 1.0  # 4/4 positives
     assert abs(data.earnings_surprise_avg_4q - 3.3225) < 1e-6
     assert data.error is None  # tous les endpoints ont répondu, même vide

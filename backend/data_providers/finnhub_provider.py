@@ -70,11 +70,6 @@ def _safe_float(v: Any) -> float | None:
         return None
 
 
-def _safe_int(v: Any) -> int | None:
-    f = _safe_float(v)
-    return int(f) if f is not None else None
-
-
 @dataclass
 class FinnhubData:
     """Champs enrichis par Finnhub pour un ticker."""
@@ -323,50 +318,14 @@ class FinnhubProvider:
                 data.next_earnings_date = nearest.get("date")
                 data.next_earnings_eps_estimate = _safe_float(nearest.get("epsEstimate"))
 
-        # 4. Price target consensus.
-        pt, pt_err = _fetch_json("/stock/price-target", {"symbol": ticker}, self._api_key)
-        if pt_err:
-            fetch_errors.append(f"price_target:{pt_err}")
-        if isinstance(pt, dict):
-            data.target_price_consensus = _safe_float(pt.get("targetMean"))
-
-        # 5. Upgrade/downgrade nominatif — liste datée par firm (Étape 13
-        # roadmap : cet endpoint était documenté "utilisé" depuis Lot 17 mais
-        # jamais réellement appelé — le 4e call tombait sur /stock/price-target
-        # à la place). Distinct de `upgrade_downgrade_log` (compteurs mensuels
-        # agrégés dérivés de /stock/recommendation, conservé tel quel pour ne
-        # pas casser sa consommation actuelle par revisions_net_score/UI).
-        past = today - timedelta(days=365)
-        ud, ud_err = _fetch_json(
-            "/stock/upgrade-downgrade",
-            {"symbol": ticker, "from": past.isoformat(), "to": today.isoformat()},
-            self._api_key,
-        )
-        if ud_err:
-            fetch_errors.append(f"upgrade_downgrade:{ud_err}")
-        if isinstance(ud, list) and ud:
-            actions: list[dict[str, Any]] = []
-            for item in ud:
-                if not isinstance(item, dict):
-                    continue
-                grade_time = _safe_int(item.get("gradeTime"))
-                firm = item.get("company")
-                action = item.get("action")
-                if grade_time is None or not firm or not action:
-                    continue
-                try:
-                    action_date = datetime.utcfromtimestamp(grade_time).strftime("%Y-%m-%d")
-                except (OverflowError, OSError, ValueError):
-                    continue
-                actions.append({
-                    "date": action_date,
-                    "firm": firm,
-                    "action": action,
-                    "from_grade": item.get("fromGrade"),
-                    "to_grade": item.get("toGrade"),
-                })
-            actions.sort(key=lambda a: a["date"], reverse=True)
-            data.analyst_actions = actions[:10]
+        # 4/5. Price target consensus + upgrade/downgrade nominatif RETIRÉS
+        # (2026-07-23) — /stock/price-target et /stock/upgrade-downgrade
+        # renvoient 403 "You don't have access to this resource." sur le
+        # plan free, confirmé sur 489/489 tickers en prod à chaque run.
+        # `target_price_consensus`/`analyst_actions` restent None/[] (cf.
+        # dataclass) ; `price_target_mean` déjà couvert par yfinance et
+        # `upgrade_downgrade_log` (agrégat mensuel via /stock/recommendation,
+        # gratuit) reste fonctionnel et inchangé.
 
         # Signal d'échec explicite, distinct d'une simple absence de données
         # (Étape 5 roadmap) — persisté par `finnhub_enrich.py` sous
