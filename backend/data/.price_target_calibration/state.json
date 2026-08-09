@@ -1,12 +1,12 @@
 {
   "phase": "calibrate",
-  "round": 2,
-  "best_ic_model": 0.104,
+  "round": 3,
+  "best_ic_model": 0.1129,
   "best_ic_baseline": 0.0087,
   "best_weights": {
-    "w_multiple": 0.4197,
-    "w_peg": 0.1729,
-    "w_buffett": 0.4074,
+    "w_multiple": 0.4663,
+    "w_peg": 0.081,
+    "w_buffett": 0.4527,
     "band_pct": 0.15
   },
   "rounds_since_improvement": 0,
@@ -37,6 +37,23 @@
       },
       "band_pct_tested": 0.15,
       "ic_model": 0.104,
+      "ic_baseline": 0.0087,
+      "n_pairs": 54,
+      "n_pairs_valid": 54,
+      "avg_n_tickers": 457.4,
+      "n_candidates_evaluated": 9,
+      "window_days": 60,
+      "improved": true
+    },
+    {
+      "round": 3,
+      "weights_tested": {
+        "w_multiple": 0.4663,
+        "w_peg": 0.081,
+        "w_buffett": 0.4527
+      },
+      "band_pct_tested": 0.15,
+      "ic_model": 0.1129,
       "ic_baseline": 0.0087,
       "n_pairs": 54,
       "n_pairs_valid": 54,
