@@ -31,6 +31,14 @@ Objectif : intégrer un prix cible algorithmique (pas un chiffre random) dans le
 
 Chaque calcul de `price_target` doit être **horodaté et journalisé** (nouveau fichier ou table, ex. `data/.price_target_history/`) pour que le vrai hit-rate 12 mois puisse être mesuré rétroactivement dès que l'échéance est atteinte, sans dépendre de `universe_history` (qui pourrait évoluer). Voir §7.
 
+### 2.1 Pont data pour la routine cloud (résolu 2026-08-09)
+
+`data/.universe_history/` est **gitignored** (donnée de production régénérable, pas du code) — une routine cloud (sandbox = clone git frais, aucun accès au disque du VPS) n'a donc **aucun accès** aux snapshots bruts. Résolu par un nouveau module `backend/modules/price_target_calibration_export.py` (`export_full()`) qui réécrit intégralement un export trié (champs de la §3.1/§6 uniquement — pas les 117 champs bruts) vers `backend/data/calibration/universe_history_export.jsonl.gz`, un chemin **non couvert par les patterns du `.gitignore`** donc suivi par git et propagé par `git_auto_sync.sh` comme le reste du repo.
+
+Câblé dans `run_titan.sh` (nouveau Step 3a, juste après le snapshot `universe_history` Step 3) — tourne quotidiennement, indépendamment de l'état de la calibration. Premier export généré le 2026-08-09 : 52 620 lignes (109 jours × ~490 tickers), 3.5 MB compressé.
+
+**La routine de calibration cloud (§6) doit lire ce fichier, jamais `universe_history` directement** — ce dernier n'existera simplement pas dans son sandbox.
+
 ---
 
 ## 3. Formule — Fair Value Fondamentale 12 mois
@@ -112,7 +120,7 @@ Cette baseline est gratuite à calculer (donnée déjà là) et doit être rappo
 
 **Round de calibration :**
 1. Choisir/ajuster les poids `W = (w_multiple, w_peg, w_buffett)` et `band_pct` de base (grid search ou ajustement guidé par le round précédent)
-2. Calculer `price_target` pour tout l'univers à chaque date de `universe_history` disponible (108 jours)
+2. Calculer `price_target` pour tout l'univers à chaque date disponible dans `data/calibration/universe_history_export.jsonl.gz` (voir §2.1 — **pas** `universe_history` directement, inaccessible en sandbox cloud)
 3. Pour chaque paire de dates `(t, t+N)` avec `N` = plus grande fenêtre exploitable sans trop chevaucher (proposer `N≈60j`, à ajuster selon densité de points disponibles) : calculer le rendement réalisé, et le **rank IC (Spearman)** entre le signal `(price_target_t / current_price_t - 1)` et le rendement réalisé — réutiliser `wfo_calibration._spearman` (fonction privée mais copiable, formule de corrélation de rang avec mid-ranks) plutôt que réinventer.
 4. Calculer la même IC pour la baseline consensus analystes (§4) sur le même échantillon.
 5. Logger : IC modèle, IC baseline, poids utilisés, n_paires valides, round #.
