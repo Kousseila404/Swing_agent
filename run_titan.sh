@@ -147,6 +147,22 @@ if [[ $rc_hist -ne 0 ]]; then
     echo "WARN: universe_history snapshot exit=$rc_hist"
 fi
 
+# ── 3a. Export calibration prix cible (git-tracked, hors VPS) ────
+#     data/.universe_history/ est gitignored (donnée régénérable, pas de
+#     code) — la routine cloud de calibration du prix cible (voir
+#     docs/price_target_design.md) tourne dans un sandbox avec un clone
+#     git frais, sans accès au disque du VPS. Ce step exporte un
+#     sous-ensemble trié des champs nécessaires vers
+#     data/calibration/universe_history_export.jsonl.gz, suivi par git,
+#     synchronisé par git_auto_sync.sh comme le reste du repo.
+#     Réécriture complète à chaque run (peu coûteux, ~500 tickers × Njours).
+echo "── Step 3a/4 : price_target_calibration_export"
+"$PYTHON" -m modules.price_target_calibration_export
+rc_calib_export=$?
+if [[ $rc_calib_export -ne 0 ]]; then
+    echo "WARN: price_target_calibration_export exit=$rc_calib_export (non bloquant)"
+fi
+
 # ── 3b. WFO monitor mensuel (1er du mois uniquement) ─────────────
 #     Audit S1.3 — calibration walk-forward des poids piliers TITAN sur
 #     l'historique universe_history. Compare l'IC test (out-of-sample)
