@@ -1,0 +1,15 @@
+{
+  "phase": "calibrate",
+  "round": 0,
+  "best_ic_model": null,
+  "best_ic_baseline": null,
+  "best_weights": {
+    "w_multiple": 0.34,
+    "w_peg": 0.33,
+    "w_buffett": 0.33,
+    "band_pct": 0.15
+  },
+  "rounds_since_improvement": 0,
+  "ic_history": [],
+  "stopped_reason": null
+}
