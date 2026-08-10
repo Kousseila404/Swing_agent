@@ -61,6 +61,7 @@ def load_calibrated_weights() -> tuple[dict[str, float], float]:
                 "w_multiple": bw.get("w_multiple", DEFAULT_WEIGHTS["w_multiple"]),
                 "w_peg": bw.get("w_peg", DEFAULT_WEIGHTS["w_peg"]),
                 "w_buffett": bw.get("w_buffett", DEFAULT_WEIGHTS["w_buffett"]),
+                "w_analyst": bw.get("w_analyst", DEFAULT_WEIGHTS["w_analyst"]),
             }
             band_pct = float(bw.get("band_pct", DEFAULT_BAND_PCT))
             return weights, band_pct

@@ -63,6 +63,7 @@ def test_nominal_all_components_available():
     assert out["components"]["peg"] is not None
     assert out["components"]["buffett"] is not None
     assert out["price_target_confidence"] is not None
+    assert out["components"]["analyst"] is None  # _row() ne fixe pas price_target_mean
     assert isinstance(out["upside_pct"], float)
 
 
@@ -85,7 +86,7 @@ def test_fallback_no_price_returns_unavailable():
     assert out["price_target_low"] is None
     assert out["price_target_high"] is None
     assert out["upside_pct"] is None
-    assert out["components"] == {"multiple": None, "peg": None, "buffett": None}
+    assert out["components"] == {"multiple": None, "peg": None, "buffett": None, "analyst": None}
 
 
 def test_fallback_invalid_price_returns_unavailable():

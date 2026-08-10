@@ -50,7 +50,7 @@ _WINDOW_DAYS_TARGET = 60
 _WINDOW_TOLERANCE_DAYS = 5
 _MIN_PAIRS_REQUIRED = 5
 
-_DEFAULT_WEIGHTS_NEUTRAL = {"w_multiple": 1 / 3, "w_peg": 1 / 3, "w_buffett": 1 / 3}
+_DEFAULT_WEIGHTS_NEUTRAL = {"w_multiple": 0.25, "w_peg": 0.25, "w_buffett": 0.25, "w_analyst": 0.25}
 
 # Walk-forward — plus courts que wfo_calibration (60j train/20j test) car
 # l'historique dispo pour ce module est bien plus court aujourd'hui (~110j
@@ -206,32 +206,33 @@ def evaluate_weights(
     }
 
 
+_WEIGHT_KEYS = ("w_multiple", "w_peg", "w_buffett", "w_analyst")
+
+
 def _normalize_weights(w: dict[str, float]) -> dict[str, float]:
-    keys = ("w_multiple", "w_peg", "w_buffett")
-    total = sum(max(0.0, w.get(k, 0.0)) for k in keys)
+    total = sum(max(0.0, w.get(k, 0.0)) for k in _WEIGHT_KEYS)
     if total <= 0:
-        return {"w_multiple": 1 / 3, "w_peg": 1 / 3, "w_buffett": 1 / 3}
-    return {k: round(max(0.0, w.get(k, 0.0)) / total, 4) for k in keys}
+        return {k: round(1 / len(_WEIGHT_KEYS), 4) for k in _WEIGHT_KEYS}
+    return {k: round(max(0.0, w.get(k, 0.0)) / total, 4) for k in _WEIGHT_KEYS}
 
 
 def _candidate_configs(best_weights: dict[str, float]) -> list[dict[str, Any]]:
-    """Grille de perturbations autour de `best_weights` (§6 étape 1).
+    """Grille de perturbations autour de `best_weights`.
 
-    Déterministe (pas d'aléatoire) — un round est reproductible à l'identique
-    en re-jouant le même state.json. Perturbe chaque poids +/-0.1 (renormalisé)
-    et le band_pct +/-0.05, en plus de la config courante inchangée.
+    Déterministe (pas d'aléatoire) — reproductible à l'identique en rejouant
+    le même point de départ. Perturbe chaque poids +/-0.1 (renormalisé, un
+    axe à la fois) et le band_pct +/-0.05, en plus de la config inchangée.
+    Recherche locale volontairement simple (pas un simplex complet) — avec
+    seulement 4 poids et un budget de calcul par fold, c'est amplement
+    suffisant pour départager un poids clairement dominant du bruit.
     """
-    base_w = {
-        "w_multiple": best_weights.get("w_multiple", 1 / 3),
-        "w_peg": best_weights.get("w_peg", 1 / 3),
-        "w_buffett": best_weights.get("w_buffett", 1 / 3),
-    }
+    base_w = {k: best_weights.get(k, 1 / len(_WEIGHT_KEYS)) for k in _WEIGHT_KEYS}
     base_band = best_weights.get("band_pct", 0.15)
 
     configs: list[dict[str, Any]] = [{"weights": _normalize_weights(base_w), "band_pct": base_band}]
 
     shift = 0.10
-    for dim in ("w_multiple", "w_peg", "w_buffett"):
+    for dim in _WEIGHT_KEYS:
         for direction in (+1, -1):
             w = dict(base_w)
             w[dim] = max(0.0, w[dim] + direction * shift)
@@ -349,7 +350,7 @@ def run_walk_forward(
     validated = n_folds >= min_folds_required
 
     if fold_results:
-        avg_weights = {"w_multiple": 0.0, "w_peg": 0.0, "w_buffett": 0.0}
+        avg_weights = {"w_multiple": 0.0, "w_peg": 0.0, "w_buffett": 0.0, "w_analyst": 0.0}
         for f in fold_results:
             for k in avg_weights:
                 avg_weights[k] += f["weights_selected"].get(k, 0.0)

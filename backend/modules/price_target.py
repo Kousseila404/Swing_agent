@@ -247,6 +247,7 @@ def compute_price_target(
             "multiple": fair_multiple,
             "peg": fair_peg,
             "buffett": fair_buffett,
+            "analyst": fair_analyst,
         },
         "let_it_ride": let_it_ride,
         "tilt_flags": sorted(flags),
