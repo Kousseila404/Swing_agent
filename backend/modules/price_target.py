@@ -3,13 +3,19 @@
 Voir `docs/price_target_design.md` (§3) pour la méthodologie complète et
 `price_target_calibration.py` pour la boucle qui apprend `weights`/`band_pct`.
 
-Blend de 3 composantes fondamentales (aucune nouvelle collecte de donnée,
-tout est déjà présent sur le record ticker scoré) :
+Blend de 4 composantes (aucune nouvelle collecte de donnée, tout est déjà
+présent sur le record ticker scoré) :
   A. Multiple reversion sector-relative (ev_to_ebitda préféré, fallback
      forward_pe — cf. `_fair_price_multiple`)
   B. PEG-reversion sector-relative
   C. Ancrage `fundamentals_levels.compute_fundamental_levels()["tp"]`
      (Buffett-TP déjà en prod pour `lt_exit_policy`) — appelé, jamais dupliqué.
+  D. Ancrage consensus analystes (`price_target_mean`, déjà collecté par les
+     data providers — cf. `_fair_price_analyst`). Ce même champ sert aussi de
+     baseline de comparaison dans `price_target_calibration.py` : l'inclure
+     ici comme composante ne dispense pas de comparer le blend complet à un
+     consensus pur en OOS, ça teste juste si le blend fait mieux qu'une des
+     ses propres briques utilisée seule.
 """
 from __future__ import annotations
 
@@ -26,7 +32,9 @@ _MIN_SECTOR_SIZE_FOR_RELATIVE = 12
 
 _MULTIPLE_FIELDS = ("forward_pe", "ev_to_ebitda", "peg_ratio")
 
-DEFAULT_WEIGHTS: dict[str, float] = {"w_multiple": 1 / 3, "w_peg": 1 / 3, "w_buffett": 1 / 3}
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "w_multiple": 0.25, "w_peg": 0.25, "w_buffett": 0.25, "w_analyst": 0.25,
+}
 DEFAULT_BAND_PCT = 0.15
 
 # §3.1 D — tilt flags déjà calculés par sector_metrics._scoring, pas recalculés ici.
@@ -40,7 +48,7 @@ _UNAVAILABLE: dict[str, Any] = {
     "upside_pct": None,
     "price_target_confidence": None,
     "method": "unavailable",
-    "components": {"multiple": None, "peg": None, "buffett": None},
+    "components": {"multiple": None, "peg": None, "buffett": None, "analyst": None},
     "let_it_ride": False,
     "tilt_flags": [],
 }
@@ -136,6 +144,17 @@ def _fair_price_peg(
     return current_price * (peg_median / peg)
 
 
+def _fair_price_analyst(row: dict[str, Any]) -> float | None:
+    """Consensus analystes (`price_target_mean`) comme composante D — déjà
+    collecté par les data providers (yfinance/finnhub), aucune valeur ajoutée
+    à recalculer, on l'utilise tel quel comme prix cible candidat.
+    """
+    v = _safe_float(row.get("price_target_mean"))
+    if v is None or v <= 0:
+        return None
+    return v
+
+
 def _fair_price_buffett(row: dict[str, Any]) -> tuple[float | None, bool]:
     current_price = _safe_float(row.get("current_price"))
     if current_price is None or current_price <= 0:
@@ -173,6 +192,7 @@ def compute_price_target(
     fair_multiple = _fair_price_multiple(row, sector_medians)
     fair_peg = _fair_price_peg(row, sector_medians)
     fair_buffett, let_it_ride = _fair_price_buffett(row)
+    fair_analyst = _fair_price_analyst(row)
 
     parts: list[tuple[float, float]] = []
     if fair_multiple is not None:
@@ -181,6 +201,8 @@ def compute_price_target(
         parts.append((weights.get("w_peg", 0.0), fair_peg))
     if fair_buffett is not None:
         parts.append((weights.get("w_buffett", 0.0), fair_buffett))
+    if fair_analyst is not None:
+        parts.append((weights.get("w_analyst", 0.0), fair_analyst))
 
     weight_sum = sum(w for w, _ in parts)
     if weight_sum <= 0:
