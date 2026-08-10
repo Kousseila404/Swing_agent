@@ -156,8 +156,8 @@ def test_run_walk_forward_no_folds_falls_back_to_neutral_weights():
     state = run_walk_forward(by_date, train_days=30, test_days=15)
     assert state["n_folds"] == 0
     assert state["validated_oos"] is False
-    for k in ("w_multiple", "w_peg", "w_buffett"):
-        assert abs(state["best_weights"][k] - 1 / 3) < 1e-6
+    for k in ("w_multiple", "w_peg", "w_buffett", "w_analyst"):
+        assert abs(state["best_weights"][k] - 0.25) < 1e-6
 
 
 def test_run_walk_forward_validated_when_enough_folds():
@@ -191,5 +191,5 @@ def test_run_walk_forward_validated_when_enough_folds():
     state = run_walk_forward(by_date, train_days=30, test_days=15, min_folds_required=2)
     assert state["n_folds"] >= 2
     # Le résultat doit toujours être une pondération valide, quel que soit le gate.
-    total = sum(state["best_weights"][k] for k in ("w_multiple", "w_peg", "w_buffett"))
+    total = sum(state["best_weights"][k] for k in ("w_multiple", "w_peg", "w_buffett", "w_analyst"))
     assert abs(total - 1.0) < 1e-2

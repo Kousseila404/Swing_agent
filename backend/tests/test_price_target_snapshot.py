@@ -60,7 +60,10 @@ def test_load_calibrated_weights_reads_best_weights(isolated_paths):
         },
     }))
     weights, band_pct = pts.load_calibrated_weights()
-    assert weights == {"w_multiple": 0.5638, "w_peg": 0.0, "w_buffett": 0.4362}
+    assert weights == {
+        "w_multiple": 0.5638, "w_peg": 0.0, "w_buffett": 0.4362,
+        "w_analyst": pts.DEFAULT_WEIGHTS["w_analyst"],  # absent du state.json fixture → fallback
+    }
     assert band_pct == 0.15
 
 

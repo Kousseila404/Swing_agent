@@ -106,6 +106,35 @@ def test_missing_sector_medians_disables_multiple_and_peg():
 
 
 # ─────────────────────────────────────────────────────────────────
+# Consensus analystes (composante D)
+# ─────────────────────────────────────────────────────────────────
+
+def test_analyst_component_used_when_present():
+    universe = _sector_universe(n=12)
+    medians = pt.compute_sector_medians(universe)
+    row = _row(sector="Technology", price_target_mean=130.0)
+
+    out = pt.compute_price_target(
+        row, sector_medians=medians,
+        weights={"w_multiple": 0.0, "w_peg": 0.0, "w_buffett": 0.0, "w_analyst": 1.0},
+    )
+
+    assert out["components"]["analyst"] == 130.0
+    assert out["price_target"] == 130.0
+
+
+def test_analyst_component_unavailable_when_missing_or_invalid():
+    universe = _sector_universe(n=12)
+    medians = pt.compute_sector_medians(universe)
+    for bad in (None, 0, -10.0):
+        row = _row(sector="Technology", price_target_mean=bad)
+        out = pt.compute_price_target(row, sector_medians=medians)
+        assert out["components"]["analyst"] is None
+        # Le reste du blend continue de fonctionner.
+        assert out["price_target"] is not None
+
+
+# ─────────────────────────────────────────────────────────────────
 # PEG négatif / nul
 # ─────────────────────────────────────────────────────────────────
 
