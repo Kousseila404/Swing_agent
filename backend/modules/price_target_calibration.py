@@ -1,20 +1,32 @@
-"""Boucle de calibration — prix cible fondamental 12 mois (docs/price_target_design.md §6).
+"""Boucle de calibration — prix cible fondamental 12 mois.
 
-Un round = un appel CLI = :
+Audit 2026-08-10 — la V1 (rounds de hill-climbing sur TOUT l'historique
+disponible, IC reportée sur le même échantillon qui a servi à choisir les
+poids) était en-sample par construction, et avec ~110j d'historique et une
+fenêtre forward de 60j, les 54 "paires" évaluées se chevauchaient à ~98% —
+un seul régime de marché compté 54 fois, pas 54 essais indépendants.
+`wfo_calibration.py` avait déjà résolu ce problème pour les poids des
+piliers TITAN (walk-forward train/test non-overlapping) ; cette V2 reprend
+la même discipline ici :
+
   1. Charge `data/calibration/universe_history_export.jsonl.gz` (§2.1 — jamais
      `universe_history` directement, absent du sandbox cloud).
-  2. Construit des paires de dates (t, t+N≈60j).
-  3. Pour la config de poids courante (best_weights + une petite grille de
-     perturbations autour), calcule `price_target` pour chaque (ticker, date)
-     et le rank IC (Spearman, réutilise `wfo_calibration._spearman`) entre
-     `(price_target/current_price - 1)` et le rendement réalisé à t+N, sur le
-     même échantillon que la baseline consensus analystes
-     `(price_target_mean/current_price - 1)`.
-  4. Garde la meilleure config (IC modèle le plus haut), met à jour
-     `data/.price_target_calibration/state.json` (round, ic_history,
-     best_ic_model/best_ic_baseline/best_weights, rounds_since_improvement).
-  5. Vérifie les 3 critères d'arrêt (§6) — n'agit pas dessus (juste calculé
-     et logué ; c'est la routine appelante qui décide de la suite de phase).
+  2. Construit des paires de dates (t, t+N≈60j) via `select_pairs`.
+  3. Découpe ces paires en folds (TRAIN, TEST) glissants et **non-overlapping
+     sur le TEST** via `select_folds` (même logique que
+     `wfo_calibration.run_walk_forward`).
+  4. Pour chaque fold : grid-search des poids sur TRAIN uniquement (grille
+     fixe autour de l'équi-pondération, indépendante des folds précédents —
+     pas de warm-start pour éviter toute fuite inter-fold), puis évalue l'IC
+     obtenu sur TEST (jamais vu pendant la sélection) = l'estimateur honnête
+     out-of-sample pour ce fold.
+  5. Agrège : poids moyens + IC TEST moyen sur tous les folds.
+  6. Gate `validated_oos` : tant que `n_folds < min_folds_required` (défaut
+     3), les poids optimisés ne sont PAS dignes de confiance (pas assez de
+     fenêtres indépendantes) → `best_weights` reste l'équi-pondération neutre
+     non-overfit, indépendamment de ce que le grid-search a trouvé. Ce gate
+     se lève tout seul au fil des jours à mesure que `universe_history`
+     grossit (cron quotidien) et que `n_folds` augmente.
 
 Usage :
     python -m modules.price_target_calibration
@@ -28,7 +40,7 @@ from datetime import timedelta as _timedelta
 from typing import Any
 
 from modules import api_core
-from modules.price_target import compute_for_universe
+from modules.price_target import DEFAULT_BAND_PCT, compute_for_universe
 from modules.wfo_calibration import _spearman
 
 EXPORT_PATH = api_core.BASE / "data" / "calibration" / "universe_history_export.jsonl.gz"
@@ -38,11 +50,15 @@ _WINDOW_DAYS_TARGET = 60
 _WINDOW_TOLERANCE_DAYS = 5
 _MIN_PAIRS_REQUIRED = 5
 
-# Critères d'arrêt §6.
-_CONVERGENCE_IC_MIN = 0.10
-_CONVERGENCE_STABILITY_BAND = 0.02
-_CONVERGENCE_STABILITY_ROUNDS = 3
-_PLATEAU_ROUNDS = 5
+_DEFAULT_WEIGHTS_NEUTRAL = {"w_multiple": 1 / 3, "w_peg": 1 / 3, "w_buffett": 1 / 3}
+
+# Walk-forward — plus courts que wfo_calibration (60j train/20j test) car
+# l'historique dispo pour ce module est bien plus court aujourd'hui (~110j
+# vs 500+j pour les piliers TITAN). Réévaluer à la hausse une fois que
+# `universe_history` couvre plusieurs mois de plus.
+_TRAIN_DAYS_DEFAULT = 30
+_TEST_DAYS_DEFAULT = 15
+_MIN_FOLDS_FOR_VALIDATION = 3
 _HARD_CAP_ROUNDS = 20
 
 
@@ -228,106 +244,145 @@ def _candidate_configs(best_weights: dict[str, float]) -> list[dict[str, Any]]:
     return configs
 
 
-def _check_stop_conditions(state: dict[str, Any]) -> str | None:
-    """§6 — retourne 'convergence' | 'plateau' | 'hard_cap' | None."""
-    if state["round"] >= _HARD_CAP_ROUNDS:
-        return "hard_cap"
-    if state["rounds_since_improvement"] >= _PLATEAU_ROUNDS:
-        return "plateau"
+def select_folds(
+    pairs: list[tuple[str, str]],
+    train_days: int = _TRAIN_DAYS_DEFAULT,
+    test_days: int = _TEST_DAYS_DEFAULT,
+) -> list[dict[str, list[tuple[str, str]]]]:
+    """Découpe `pairs` (par t0 croissant) en folds walk-forward.
 
-    best_ic = state.get("best_ic_model")
-    best_ic_baseline = state.get("best_ic_baseline")
-    if (
-        best_ic is not None
-        and best_ic >= _CONVERGENCE_IC_MIN
-        and best_ic_baseline is not None
-        and best_ic >= best_ic_baseline
-    ):
-        history = state.get("ic_history", [])
-        recent = [h for h in history[-_CONVERGENCE_STABILITY_ROUNDS:] if h.get("ic_model") is not None]
-        if len(recent) >= _CONVERGENCE_STABILITY_ROUNDS:
-            ics = [h["ic_model"] for h in recent]
-            if max(ics) - min(ics) <= _CONVERGENCE_STABILITY_BAND:
-                return "convergence"
-    return None
+    Même logique que `wfo_calibration.run_walk_forward` : le TRAIN accumule
+    les paires jusqu'à couvrir `train_days`, le TEST commence juste après et
+    couvre `test_days`, puis le prochain fold repart après la fin du TEST
+    (jamais de chevauchement sur le TEST, contrairement à la V1).
+    """
+    parsed = sorted(pairs, key=lambda p: p[0])
+    t0_dates = [_date.fromisoformat(p[0]) for p in parsed]
+    n = len(parsed)
+    folds: list[dict[str, list[tuple[str, str]]]] = []
+    start_idx = 0
+    while start_idx < n:
+        train_pairs: list[tuple[str, str]] = []
+        while (
+            start_idx + len(train_pairs) < n
+            and (t0_dates[start_idx + len(train_pairs)] - t0_dates[start_idx]).days < train_days
+        ):
+            train_pairs.append(parsed[start_idx + len(train_pairs)])
+        if not train_pairs:
+            break
+
+        test_idx = start_idx + len(train_pairs)
+        if test_idx >= n:
+            break
+        test_start_date = t0_dates[test_idx]
+        test_pairs: list[tuple[str, str]] = []
+        while (
+            test_idx + len(test_pairs) < n
+            and (t0_dates[test_idx + len(test_pairs)] - test_start_date).days < test_days
+        ):
+            test_pairs.append(parsed[test_idx + len(test_pairs)])
+        if not test_pairs:
+            break
+
+        folds.append({"train_pairs": train_pairs, "test_pairs": test_pairs})
+        start_idx = test_idx + len(test_pairs)
+
+    return folds
 
 
-def run_round(state: dict[str, Any], by_date: dict[str, dict[str, dict[str, Any]]] | None = None) -> dict[str, Any]:
-    """Exécute un round de calibration, retourne le state.json mis à jour."""
+def run_walk_forward(
+    by_date: dict[str, dict[str, dict[str, Any]]] | None = None,
+    *,
+    train_days: int = _TRAIN_DAYS_DEFAULT,
+    test_days: int = _TEST_DAYS_DEFAULT,
+    window_days: int = _WINDOW_DAYS_TARGET,
+    tolerance_days: int = _WINDOW_TOLERANCE_DAYS,
+    min_folds_required: int = _MIN_FOLDS_FOR_VALIDATION,
+) -> dict[str, Any]:
+    """Calibration walk-forward honnête (poids sélectionnés sur TRAIN,
+    IC reportée sur TEST jamais vu pendant la sélection).
+
+    Retourne le state.json complet — `best_weights` n'est mis à jour avec les
+    poids optimisés que si `n_folds >= min_folds_required` ; sinon on sert
+    l'équi-pondération neutre plutôt qu'un résultat non-validé.
+    """
     if by_date is None:
         by_date = load_export()
 
     dates = sorted(by_date.keys())
-    pairs = select_pairs(dates)
-    window = _WINDOW_DAYS_TARGET
-    while len(pairs) < _MIN_PAIRS_REQUIRED and window > 10:
-        window -= 10
-        pairs = select_pairs(dates, window_days=window)
+    pairs = select_pairs(dates, window_days=window_days, tolerance_days=tolerance_days)
+    fold_specs = select_folds(pairs, train_days=train_days, test_days=test_days)
 
-    state = dict(state)
-    state["round"] = state.get("round", 0) + 1
+    fold_results: list[dict[str, Any]] = []
+    for spec in fold_specs:
+        train_pairs = spec["train_pairs"]
+        test_pairs = spec["test_pairs"]
 
-    candidates = _candidate_configs(state.get("best_weights") or {})
-    results = []
-    for cfg in candidates:
-        ev = evaluate_weights(by_date, pairs, weights=cfg["weights"], band_pct=cfg["band_pct"])
-        results.append({**cfg, **ev})
+        # Grille fixe autour de l'équi-pondération — pas de warm-start sur le
+        # meilleur poids d'un fold précédent, pour ne rien faire fuiter d'un
+        # TEST déjà consommé vers le TRAIN d'un fold suivant.
+        candidates = _candidate_configs(_DEFAULT_WEIGHTS_NEUTRAL)
+        train_evals = [
+            {**cfg, **evaluate_weights(by_date, train_pairs, weights=cfg["weights"], band_pct=cfg["band_pct"])}
+            for cfg in candidates
+        ]
+        scored = [r for r in train_evals if r["ic_model"] is not None]
+        if not scored:
+            continue
+        best_on_train = max(scored, key=lambda r: r["ic_model"])
 
-    scored = [r for r in results if r["ic_model"] is not None]
-    if not scored:
-        best_this_round = {
-            "weights": state.get("best_weights") or {"w_multiple": 1 / 3, "w_peg": 1 / 3, "w_buffett": 1 / 3},
-            "band_pct": (state.get("best_weights") or {}).get("band_pct", 0.15),
-            "ic_model": None, "ic_baseline": None,
-            "n_pairs": len(pairs), "n_pairs_valid": 0, "avg_n_tickers": 0.0,
-        }
+        test_eval = evaluate_weights(
+            by_date, test_pairs, weights=best_on_train["weights"], band_pct=best_on_train["band_pct"]
+        )
+
+        fold_results.append({
+            "train_start": train_pairs[0][0], "train_end": train_pairs[-1][0],
+            "test_start": test_pairs[0][0], "test_end": test_pairs[-1][0],
+            "n_train_pairs": len(train_pairs), "n_test_pairs": len(test_pairs),
+            "weights_selected": best_on_train["weights"],
+            "ic_train": best_on_train["ic_model"],
+            "ic_test": test_eval["ic_model"],
+            "ic_baseline_test": test_eval["ic_baseline"],
+        })
+
+    n_folds = len(fold_results)
+    validated = n_folds >= min_folds_required
+
+    if fold_results:
+        avg_weights = {"w_multiple": 0.0, "w_peg": 0.0, "w_buffett": 0.0}
+        for f in fold_results:
+            for k in avg_weights:
+                avg_weights[k] += f["weights_selected"].get(k, 0.0)
+        for k in avg_weights:
+            avg_weights[k] = round(avg_weights[k] / n_folds, 4)
+        ic_tests = [f["ic_test"] for f in fold_results if f["ic_test"] is not None]
+        ic_baselines = [f["ic_baseline_test"] for f in fold_results if f["ic_baseline_test"] is not None]
+        avg_ic_test = round(sum(ic_tests) / len(ic_tests), 4) if ic_tests else None
+        avg_ic_baseline_test = round(sum(ic_baselines) / len(ic_baselines), 4) if ic_baselines else None
     else:
-        best_this_round = max(scored, key=lambda r: r["ic_model"])
+        avg_weights = dict(_DEFAULT_WEIGHTS_NEUTRAL)
+        avg_ic_test = None
+        avg_ic_baseline_test = None
 
-    prev_best_ic = state.get("best_ic_model")
-    improved = best_this_round["ic_model"] is not None and (
-        prev_best_ic is None or best_this_round["ic_model"] > prev_best_ic
-    )
+    # Gate OOS — voir docstring module. Tant que trop peu de folds
+    # indépendants existent, on ne fait pas confiance au grid-search.
+    best_weights = avg_weights if validated else dict(_DEFAULT_WEIGHTS_NEUTRAL)
 
-    round_log = {
-        "round": state["round"],
-        "weights_tested": best_this_round["weights"],
-        "band_pct_tested": best_this_round["band_pct"],
-        "ic_model": best_this_round["ic_model"],
-        "ic_baseline": best_this_round["ic_baseline"],
-        "n_pairs": best_this_round["n_pairs"],
-        "n_pairs_valid": best_this_round["n_pairs_valid"],
-        "avg_n_tickers": best_this_round["avg_n_tickers"],
-        "n_candidates_evaluated": len(candidates),
-        "window_days": window,
-        "improved": improved,
-    }
-    state.setdefault("ic_history", []).append(round_log)
-
-    if improved:
-        state["best_ic_model"] = best_this_round["ic_model"]
-        state["best_ic_baseline"] = best_this_round["ic_baseline"]
-        state["best_weights"] = {**best_this_round["weights"], "band_pct": best_this_round["band_pct"]}
-        state["rounds_since_improvement"] = 0
-    else:
-        state["rounds_since_improvement"] = state.get("rounds_since_improvement", 0) + 1
-
-    stop_reason = _check_stop_conditions(state)
-    if stop_reason:
-        state["stopped_reason"] = stop_reason
-        state["phase"] = "integrate"
-
-    return state
-
-
-def _load_state() -> dict[str, Any]:
-    if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text())
     return {
-        "phase": "calibrate", "round": 0,
-        "best_ic_model": None, "best_ic_baseline": None,
-        "best_weights": {"w_multiple": 0.34, "w_peg": 0.33, "w_buffett": 0.33, "band_pct": 0.15},
-        "rounds_since_improvement": 0, "ic_history": [], "stopped_reason": None,
+        "phase": "calibrate_wfo",
+        "last_run": _date.today().isoformat(),
+        "params": {
+            "train_days": train_days, "test_days": test_days,
+            "window_days": window_days, "tolerance_days": tolerance_days,
+        },
+        "n_folds": n_folds,
+        "min_folds_required": min_folds_required,
+        "validated_oos": validated,
+        "avg_ic_test": avg_ic_test,
+        "avg_ic_baseline_test": avg_ic_baseline_test,
+        "avg_weights": avg_weights,
+        "best_weights": {**best_weights, "band_pct": DEFAULT_BAND_PCT},
+        "fold_history": fold_results,
     }
 
 
@@ -337,16 +392,21 @@ def _save_state(state: dict[str, Any]) -> None:
 
 
 def _cli() -> int:
-    state = _load_state()
-    new_state = run_round(state)
-    _save_state(new_state)
-    last = new_state["ic_history"][-1]
+    state = run_walk_forward()
+    _save_state(state)
     print(
-        f"[PriceTargetCalibration] round={new_state['round']} "
-        f"ic_model={last['ic_model']} ic_baseline={last['ic_baseline']} "
-        f"n_pairs_valid={last['n_pairs_valid']}/{last['n_pairs']} "
-        f"stopped_reason={new_state.get('stopped_reason')}"
+        f"[PriceTargetCalibration] n_folds={state['n_folds']} "
+        f"(min requis={state['min_folds_required']}) "
+        f"validated_oos={state['validated_oos']} "
+        f"avg_ic_test={state['avg_ic_test']} avg_ic_baseline_test={state['avg_ic_baseline_test']} "
+        f"best_weights={state['best_weights']}"
     )
+    if not state["validated_oos"]:
+        print(
+            f"[PriceTargetCalibration] pas assez de folds OOS indépendants "
+            f"({state['n_folds']}/{state['min_folds_required']}) — "
+            f"équi-pondération neutre servie en attendant plus d'historique."
+        )
     return 0
 
 

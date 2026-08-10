@@ -1,11 +1,12 @@
-"""Tests price_target_calibration — boucle IC (docs/price_target_design.md §6/§7)."""
+"""Tests price_target_calibration — walk-forward IC train/test (audit 2026-08-10)."""
 from __future__ import annotations
 
 from modules.price_target_calibration import (
     _candidate_configs,
-    _check_stop_conditions,
     _normalize_weights,
     evaluate_weights,
+    run_walk_forward,
+    select_folds,
     select_pairs,
 )
 
