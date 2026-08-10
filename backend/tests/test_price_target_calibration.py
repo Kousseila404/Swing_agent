@@ -156,9 +156,8 @@ def test_run_walk_forward_no_folds_falls_back_to_neutral_weights():
     state = run_walk_forward(by_date, train_days=30, test_days=15)
     assert state["n_folds"] == 0
     assert state["validated_oos"] is False
-    assert state["best_weights"]["w_multiple"] == round(1 / 3, 4)
-    assert state["best_weights"]["w_peg"] == round(1 / 3, 4)
-    assert state["best_weights"]["w_buffett"] == round(1 / 3, 4)
+    for k in ("w_multiple", "w_peg", "w_buffett"):
+        assert abs(state["best_weights"][k] - 1 / 3) < 1e-6
 
 
 def test_run_walk_forward_validated_when_enough_folds():
@@ -166,20 +165,26 @@ def test_run_walk_forward_validated_when_enough_folds():
 
     by_date: dict = {}
     base = date(2026, 1, 1)
-    # 140 jours de snapshots synthétiques, signal mean-reversion connu comme
-    # dans _synthetic_by_date, pour produire ≥3 folds walk-forward.
+    # 140 jours de snapshots synthétiques. Chaque ticker i dérive à un taux
+    # journalier propre (mean-reversion connue : fwd_pe bas → dérive positive)
+    # de sorte que le rang de rendement réalisé sur N'IMPORTE QUELLE fenêtre
+    # de 60j reste corrélé au signal, à tout t0 — condition nécessaire pour
+    # obtenir un IC stable sur plusieurs folds walk-forward indépendants.
+    n_tickers = 20
+    daily_rate = [(0.30 - i * 0.02) * 100.0 / 60.0 for i in range(n_tickers)]
     for offset in range(140):
         d = (base + timedelta(days=offset)).isoformat()
         rows = {}
-        for i in range(20):
+        for i in range(n_tickers):
             fwd_pe = 10.0 + i * 2.0
+            price = 100.0 + offset * daily_rate[i]
             rows[f"T{i}"] = {
-                "current_price": 100.0 + offset * 0.01,
+                "current_price": price,
                 "sector": "Technology", "forward_pe": fwd_pe,
                 "ev_to_ebitda": None, "peg_ratio": None,
                 "quality_score": 60.0, "value_score": 55.0, "f_score": 6,
                 "titan_tilt_flags": [], "data_quality": 0.9,
-                "price_target_mean": (100.0 + offset * 0.01) * 1.05,
+                "price_target_mean": price * (1.05 + 0.01 * ((i * 7) % 5)),
             }
         by_date[d] = rows
 
