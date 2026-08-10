@@ -29,6 +29,7 @@ from typing import Any
 from modules import api_core, proposals, signal_qualification
 from modules.buy_signal import compute_buy_signal
 from modules.log import logger
+from modules.price_target_snapshot import load_latest as _load_price_targets
 from modules.support_score import compute_support_score
 
 
@@ -520,6 +521,13 @@ def _build_proposal_from_alloc(
         "suggested_sl_pct":   alloc.get("suggested_sl_pct"),
         "suggested_tp_pct":   alloc.get("suggested_tp_pct"),
         "support":            alloc.get("support") or {},
+        # Prix cible fondamental 12 mois (docs/price_target_design.md §5) —
+        # None si le snapshot n'a pas de méthode calculable pour ce ticker.
+        "price_target":              alloc.get("price_target"),
+        "price_target_low":          alloc.get("price_target_low"),
+        "price_target_high":         alloc.get("price_target_high"),
+        "upside_pct":                alloc.get("upside_pct"),
+        "price_target_confidence":   alloc.get("price_target_confidence"),
         "sector_exposure":    alloc.get("sector_exposure"),
         "already_held":       bool(alloc.get("already_held")),
         "current_shares":     int(alloc.get("current_shares") or 0),
@@ -718,6 +726,17 @@ def plan_proposals(
         value=len(scored),
     ))
 
+    # Prix cible fondamental 12 mois (docs/price_target_design.md §5) — persisté
+    # par le step `price_target_snapshot` de run_titan.sh, en amont de ce refresh.
+    # Lecture seule (aucun recalcul ici) ; {} si le snapshot n'a jamais tourné
+    # (routine calibration pas encore intégrée, ou run_titan.sh pas encore
+    # rejoué depuis) — fail-open, la proposition reste utilisable sans prix cible.
+    try:
+        price_targets_by_ticker = _load_price_targets()
+    except Exception as e:
+        logger.warning(f"[AutoProposer] price_target_snapshot.load_latest failed: {e}")
+        price_targets_by_ticker = {}
+
     try:
         from data_providers import YFinanceProvider, get_providers
         try:
@@ -910,6 +929,13 @@ def plan_proposals(
         # "TITAN > 80 + support"). Lecture OHLCV depuis DuckDB ; fallback yfinance
         # via try/except interne pour ne PAS bloquer la génération de proposition.
         support = _compute_support_for_ticker(ticker, alloc.get("price"))
+
+        # Prix cible fondamental 12 mois — persisté par le step
+        # `price_target_snapshot` (voir price_targets_by_ticker plus haut).
+        # {} si absent du snapshot (ticker sans données suffisantes, ou
+        # snapshot pas encore rejoué) — chaque champ reste None côté UI.
+        price_target_rec = price_targets_by_ticker.get(ticker) or {}
+
         current_shares = 0
         if already_held:
             try:
@@ -954,6 +980,11 @@ def plan_proposals(
             "buy_signal":       buy_signal_data,
             "already_held":     already_held,
             "current_shares":   current_shares,
+            "price_target":              price_target_rec.get("price_target"),
+            "price_target_low":          price_target_rec.get("price_target_low"),
+            "price_target_high":         price_target_rec.get("price_target_high"),
+            "upside_pct":                price_target_rec.get("upside_pct"),
+            "price_target_confidence":   price_target_rec.get("price_target_confidence"),
             "sector_exposure":  {
                 "current_usd":   round(sec_current, 2),
                 "current_pct":   round(sec_current_pct, 2),

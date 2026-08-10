@@ -36,6 +36,8 @@ from modules.earnings_surprise import compute_earnings_surprise_score
 from modules.factor_grades import compute_factor_grades, quant_rating_letter
 from modules.log import logger
 from modules.market_db import read_ohlcv
+from modules.price_target import compute_price_target, compute_sector_medians
+from modules.price_target_snapshot import load_calibrated_weights
 from modules.sector_metrics import get_scored_universe
 from modules.support_score import compute_support_score
 from modules.thesis_stop import compute_thesis_status
@@ -551,6 +553,20 @@ def ticker_analysis(ticker: str, _auth: None = Security(api_core.require_auth)) 
         logger.warning(f"[ticker_analysis] signal_qualification failed for {ticker}: {e}")
         qualification = None
 
+    # Prix cible fondamental 12 mois (docs/price_target_design.md §3/§5) —
+    # calcul live (pas le snapshot batch) pour rester à jour avec `scored`
+    # tel que servi par cette factsheet ; médianes sectorielles sur le même
+    # `universe` déjà chargé plus haut. Fail-open : jamais bloquant.
+    try:
+        pt_weights, pt_band_pct = load_calibrated_weights()
+        sector_medians = compute_sector_medians(universe)
+        fair_value = compute_price_target(
+            scored, sector_medians=sector_medians, weights=pt_weights, band_pct=pt_band_pct,
+        )
+    except Exception as e:
+        logger.warning(f"[ticker_analysis] price_target failed for {ticker}: {e}")
+        fair_value = {"price_target": None, "method": "unavailable"}
+
     return {
         "ticker": ticker,
         "identity": {
@@ -613,12 +629,29 @@ def ticker_analysis(ticker: str, _auth: None = Security(api_core.require_auth)) 
             "shares_outstanding_prev_year": scored.get("shares_outstanding_prev_year"),
         },
         "analysts": {
+            # Consensus analystes (yfinance targetMeanPrice) — humain, externe.
             "num_analysts": scored.get("num_analysts"),
             "recommendation_key": scored.get("recommendation_key"),
             "recommendation_mean": scored.get("recommendation_mean"),
             "price_target_mean": scored.get("price_target_mean"),
             "price_target_high": scored.get("price_target_high"),
             "price_target_low": scored.get("price_target_low"),
+        },
+        "fair_value": {
+            # Modèle fondamental TITAN (docs/price_target_design.md) — blend
+            # multiple sector-relative + PEG-reversion + ancrage Buffett-TP,
+            # poids calibrés par IC de rang (voir price_target_calibration.py).
+            # Distinct du consensus analystes ci-dessus (bloc "analysts").
+            "price_target": fair_value.get("price_target"),
+            "price_target_low": fair_value.get("price_target_low"),
+            "price_target_high": fair_value.get("price_target_high"),
+            "upside_pct": fair_value.get("upside_pct"),
+            "confidence": fair_value.get("price_target_confidence"),
+            "method": fair_value.get("method"),
+            "components": fair_value.get("components"),
+            "let_it_ride": fair_value.get("let_it_ride"),
+            "tilt_flags": fair_value.get("tilt_flags"),
+            "horizon_months": 12,
         },
         "risk": {
             "beta": scored.get("beta"),

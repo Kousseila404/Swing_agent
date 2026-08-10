@@ -27,6 +27,7 @@ import ApiErrorBanner from './common/ApiErrorBanner';
 import ConvictionBadge from './common/ConvictionBadge';
 import EmptyState from './common/EmptyState';
 import PresetBar from './common/PresetBar';
+import PriceTargetBadge from './common/PriceTargetBadge';
 import { PageSkeleton } from './common/Skeleton';
 import TickerAnalysisModal from './TickerAnalysisModal';
 import { CONVICTION_RANK } from '../utils/conviction';
@@ -723,6 +724,10 @@ function ProposalRow({
         <SupportBadge support={ctx.support} />
       </td>
 
+      <td style={{ textAlign: 'center' }}>
+        <PriceTargetBadge fairValue={ctx} />
+      </td>
+
       <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: '0.78rem',
                    color: 'var(--text-muted)' }}>
         {fmtPctRaw(ctx.weight_pct, 2)}
@@ -1363,6 +1368,7 @@ export default function ProposalsPage() {
                   <th>Ticker & secteur</th>
                   <th style={{ width: 58, textAlign: 'center' }}>TITAN</th>
                   <th style={{ width: 96, textAlign: 'center' }} title="Niveau de support technique détecté (prix). Hover pour breakdown qualité.">Support</th>
+                  <th style={{ width: 96, textAlign: 'center' }} title="Prix cible fondamental 12 mois (modèle TITAN calibré). Hover pour breakdown.">Prix Cible</th>
                   <th style={{ width: 70, textAlign: 'right' }}>Poids</th>
                   <th style={{ width: 110 }}>Entry</th>
                   <th style={{ width: 110 }}>SL</th>

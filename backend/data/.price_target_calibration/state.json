@@ -1,5 +1,5 @@
 {
-  "phase": "integrate",
+  "phase": "done",
   "round": 5,
   "best_ic_model": 0.1271,
   "best_ic_baseline": 0.0087,

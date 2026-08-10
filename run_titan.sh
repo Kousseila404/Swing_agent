@@ -204,6 +204,20 @@ if [[ $rc_metrics -ne 0 ]]; then
     echo "WARN: metrics_agent exit=$rc_metrics (non bloquant)"
 fi
 
+# ── 3d. Prix cible fondamental 12 mois (docs/price_target_design.md §5) ──
+#     Calcule price_target/price_target_low/price_target_high/upside_pct
+#     pour tout l'univers scoré (poids calibrés dans
+#     data/.price_target_calibration/state.json) et persiste
+#     data/.price_target_history/{price_targets_YYYYMMDD.json.gz,latest.json}.
+#     DOIT tourner avant Step 4 : auto_proposer lit latest.json pour peupler
+#     alloc.get("price_target") sur chaque proposition.
+echo "── Step 3d/4 : price_target_snapshot (fair value fondamentale 12 mois)"
+"$PYTHON" -m modules.price_target_snapshot
+rc_price_target=$?
+if [[ $rc_price_target -ne 0 ]]; then
+    echo "WARN: price_target_snapshot exit=$rc_price_target (non bloquant)"
+fi
+
 # ── 4. Refresh propositions (auto_proposer + Telegram) ───────────
 #     Évalue les gates (killswitch, CB, régime macro, slots libres, cash)
 #     et enqueue jusqu'à N propositions à valider manuellement dans l'UI.

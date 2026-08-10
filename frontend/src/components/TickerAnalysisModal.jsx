@@ -14,6 +14,7 @@ import { addPriceAlert, fetchTickerAnalysis } from '../api/client.js';
 import { fmtMarketCap, fmtNum, fmtPct } from '../utils/format.js';
 import PeerComparison from './PeerComparison.jsx';
 import ConvictionBadge from './common/ConvictionBadge.jsx';
+import PriceTargetBadge from './common/PriceTargetBadge.jsx';
 import TickerPriceChart from './common/TickerPriceChart.jsx';
 import TitanScoreChart from './common/TitanScoreChart.jsx';
 import TradingViewWidget from './common/TradingViewWidget.jsx';
@@ -952,6 +953,37 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
                 </Grid>
               </Section>
             )}
+
+            {/* Prix cible fondamental TITAN — distinct du consensus analystes
+                ci-dessus (docs/price_target_design.md). */}
+            <Section title="Prix cible fondamental TITAN (12 mois)">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
+                <PriceTargetBadge fairValue={data.fair_value} />
+                {data.fair_value?.method === 'fundamental_blend' && (
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                    Modèle fondamental (multiple + PEG + Buffett-TP), calibré par IC de rang —
+                    n'est pas un consensus humain.
+                  </span>
+                )}
+              </div>
+              {data.fair_value?.method === 'fundamental_blend' ? (
+                <Grid cols={4}>
+                  <KV label="Prix cible" value={data.fair_value.price_target ? `$${fmtNum(data.fair_value.price_target, 2)}` : '—'} />
+                  <KV label="Fourchette basse" value={data.fair_value.price_target_low ? `$${fmtNum(data.fair_value.price_target_low, 2)}` : '—'} />
+                  <KV label="Fourchette haute" value={data.fair_value.price_target_high ? `$${fmtNum(data.fair_value.price_target_high, 2)}` : '—'} />
+                  <KV label="Upside" value={fmtPct(data.fair_value.upside_pct / 100, 1)}
+                      tone={pctToneSigned(data.fair_value.upside_pct)} />
+                  <KV label="Confidence" value={fmtNum(data.fair_value.confidence, 0)} />
+                  <KV label="Composante multiple" value={data.fair_value.components?.multiple ? `$${fmtNum(data.fair_value.components.multiple, 2)}` : '—'} />
+                  <KV label="Composante PEG" value={data.fair_value.components?.peg ? `$${fmtNum(data.fair_value.components.peg, 2)}` : '—'} />
+                  <KV label="Composante Buffett-TP" value={data.fair_value.components?.buffett ? `$${fmtNum(data.fair_value.components.buffett, 2)}` : '—'} />
+                </Grid>
+              ) : (
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  Données fondamentales insuffisantes pour ce ticker (multiple/PEG/Buffett-TP tous indisponibles).
+                </div>
+              )}
+            </Section>
 
             {/* Lot 16 — Peer Comparison */}
             <Section title="Peer Comparison — comparaison sectorielle">
