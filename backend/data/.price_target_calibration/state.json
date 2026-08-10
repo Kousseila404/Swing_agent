@@ -10,17 +10,19 @@
   "n_folds": 1,
   "min_folds_required": 3,
   "validated_oos": false,
-  "avg_ic_test": 0.1348,
+  "avg_ic_test": 0.1382,
   "avg_ic_baseline_test": 0.056,
   "avg_weights": {
-    "w_multiple": 0.3704,
-    "w_peg": 0.2593,
-    "w_buffett": 0.3704
+    "w_multiple": 0.3182,
+    "w_peg": 0.2273,
+    "w_buffett": 0.2273,
+    "w_analyst": 0.2273
   },
   "best_weights": {
-    "w_multiple": 0.3333333333333333,
-    "w_peg": 0.3333333333333333,
-    "w_buffett": 0.3333333333333333,
+    "w_multiple": 0.25,
+    "w_peg": 0.25,
+    "w_buffett": 0.25,
+    "w_analyst": 0.25,
     "band_pct": 0.15
   },
   "fold_history": [
@@ -32,12 +34,13 @@
       "n_train_pairs": 29,
       "n_test_pairs": 15,
       "weights_selected": {
-        "w_multiple": 0.3704,
-        "w_peg": 0.2593,
-        "w_buffett": 0.3704
+        "w_multiple": 0.3182,
+        "w_peg": 0.2273,
+        "w_buffett": 0.2273,
+        "w_analyst": 0.2273
       },
-      "ic_train": 0.0443,
-      "ic_test": 0.1348,
+      "ic_train": 0.0353,
+      "ic_test": 0.1382,
       "ic_baseline_test": 0.056
     }
   ]
