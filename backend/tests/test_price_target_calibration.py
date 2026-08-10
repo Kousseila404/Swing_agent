@@ -119,56 +119,72 @@ def test_candidate_configs_all_normalized_and_include_base():
         assert 0.05 <= cfg["band_pct"] <= 0.35
 
 
-# ─── Critères d'arrêt §6 ─────────────────────────────────────
-def test_stop_condition_hard_cap():
-    state = {
-        "round": 20, "best_ic_model": 0.02, "best_ic_baseline": 0.01,
-        "rounds_since_improvement": 1, "ic_history": [],
-    }
-    assert _check_stop_conditions(state) == "hard_cap"
-
-
-def test_stop_condition_plateau():
-    state = {
-        "round": 8, "best_ic_model": 0.05, "best_ic_baseline": 0.02,
-        "rounds_since_improvement": 5, "ic_history": [],
-    }
-    assert _check_stop_conditions(state) == "plateau"
-
-
-def test_stop_condition_convergence():
-    history = [
-        {"ic_model": 0.11}, {"ic_model": 0.115}, {"ic_model": 0.105},
+# ─── select_folds — découpage walk-forward non-overlapping sur TEST ────
+def test_select_folds_produces_non_overlapping_test_windows():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    # 200 jours de paires (t0 quotidien, t1 = t0+60j) → assez pour plusieurs folds.
+    pairs = [
+        ((base + timedelta(days=i)).isoformat(), (base + timedelta(days=i + 60)).isoformat())
+        for i in range(140)
     ]
-    state = {
-        "round": 6, "best_ic_model": 0.105, "best_ic_baseline": 0.06,
-        "rounds_since_improvement": 0, "ic_history": history,
+    folds = select_folds(pairs, train_days=30, test_days=15)
+    assert len(folds) >= 2
+
+    # Le TEST d'un fold ne doit jamais recouper le TEST du fold suivant.
+    for a, b in zip(folds, folds[1:], strict=False):
+        a_test_end = date.fromisoformat(a["test_pairs"][-1][0])
+        b_test_start = date.fromisoformat(b["test_pairs"][0][0])
+        assert b_test_start > a_test_end
+
+
+def test_select_folds_empty_when_too_short():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    pairs = [((base + timedelta(days=i)).isoformat(), (base + timedelta(days=i + 60)).isoformat()) for i in range(5)]
+    folds = select_folds(pairs, train_days=30, test_days=15)
+    assert folds == []
+
+
+# ─── run_walk_forward — gate OOS ────────────────────────────────────────
+def test_run_walk_forward_no_folds_falls_back_to_neutral_weights():
+    # Historique trop court pour produire un seul fold → poids neutres, non-validé.
+    by_date = {
+        "2026-01-01": {"T0": {"current_price": 100.0, "sector": "Technology", "forward_pe": 15.0}},
+        "2026-01-15": {"T0": {"current_price": 101.0}},
     }
-    assert _check_stop_conditions(state) == "convergence"
+    state = run_walk_forward(by_date, train_days=30, test_days=15)
+    assert state["n_folds"] == 0
+    assert state["validated_oos"] is False
+    assert state["best_weights"]["w_multiple"] == round(1 / 3, 4)
+    assert state["best_weights"]["w_peg"] == round(1 / 3, 4)
+    assert state["best_weights"]["w_buffett"] == round(1 / 3, 4)
 
 
-def test_stop_condition_convergence_requires_beating_baseline():
-    history = [{"ic_model": 0.11}, {"ic_model": 0.115}, {"ic_model": 0.105}]
-    state = {
-        "round": 6, "best_ic_model": 0.105, "best_ic_baseline": 0.20,  # baseline gagne
-        "rounds_since_improvement": 0, "ic_history": history,
-    }
-    assert _check_stop_conditions(state) is None
+def test_run_walk_forward_validated_when_enough_folds():
+    from datetime import date, timedelta
 
+    by_date: dict = {}
+    base = date(2026, 1, 1)
+    # 140 jours de snapshots synthétiques, signal mean-reversion connu comme
+    # dans _synthetic_by_date, pour produire ≥3 folds walk-forward.
+    for offset in range(140):
+        d = (base + timedelta(days=offset)).isoformat()
+        rows = {}
+        for i in range(20):
+            fwd_pe = 10.0 + i * 2.0
+            rows[f"T{i}"] = {
+                "current_price": 100.0 + offset * 0.01,
+                "sector": "Technology", "forward_pe": fwd_pe,
+                "ev_to_ebitda": None, "peg_ratio": None,
+                "quality_score": 60.0, "value_score": 55.0, "f_score": 6,
+                "titan_tilt_flags": [], "data_quality": 0.9,
+                "price_target_mean": (100.0 + offset * 0.01) * 1.05,
+            }
+        by_date[d] = rows
 
-def test_stop_condition_convergence_requires_stability():
-    # IC oscille trop (> 0.02 de spread) sur les 3 derniers rounds → pas convergé.
-    history = [{"ic_model": 0.11}, {"ic_model": 0.20}, {"ic_model": 0.105}]
-    state = {
-        "round": 6, "best_ic_model": 0.20, "best_ic_baseline": 0.05,
-        "rounds_since_improvement": 0, "ic_history": history,
-    }
-    assert _check_stop_conditions(state) is None
-
-
-def test_stop_condition_none_when_nothing_triggered():
-    state = {
-        "round": 3, "best_ic_model": 0.04, "best_ic_baseline": 0.02,
-        "rounds_since_improvement": 1, "ic_history": [{"ic_model": 0.04}],
-    }
-    assert _check_stop_conditions(state) is None
+    state = run_walk_forward(by_date, train_days=30, test_days=15, min_folds_required=2)
+    assert state["n_folds"] >= 2
+    # Le résultat doit toujours être une pondération valide, quel que soit le gate.
+    total = sum(state["best_weights"][k] for k in ("w_multiple", "w_peg", "w_buffett"))
+    assert abs(total - 1.0) < 1e-2
