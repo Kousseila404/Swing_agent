@@ -2,7 +2,7 @@
 
 Couvre :
   - estimate_portfolio_equity : LONG/SHORT/mixed, trades corrompus ignorés,
-    trades OPEN sans Exit_Price (paper trading)
+    positions OPEN valorisées via get_current_price (pas Exit_Price)
   - get_starting_equity : reset nouveau jour, lecture du jour courant
   - is_trading_allowed : pas de fichier, blocked hier (auto-reset), blocked aujourd'hui
   - check_daily_drawdown : drawdown < seuil vs ≥ seuil
@@ -90,12 +90,42 @@ def test_estimate_equity_mixed_with_corrupted_row():
     assert equity == pytest.approx(100_080)
 
 
-def test_estimate_equity_open_paper_no_exit_price_ignored():
-    """En paper trading, OPEN trades ont Exit_Price vide → latent=0."""
+def test_estimate_equity_open_uses_live_price_not_exit_price(monkeypatch):
+    """Audit 2026-08-14 — régression : les positions OPEN ont Exit_Price vide
+    par construction (rempli seulement à la clôture). La fonction doit
+    utiliser `get_current_price`, pas `Exit_Price`, pour le PnL latent —
+    sinon le killswitch/circuit breaker ignore silencieusement tout PnL
+    latent dans le fallback CSV (exercé quand l'API broker est down)."""
+    monkeypatch.setattr(killswitch, "get_current_price", lambda _t: 110.0)
+    df = _df({"Ticker": "AAPL", "Direction": "LONG", "Entry": 100, "Size": 10,
+              "Exit_Price": "", "Status": "OPEN"})
+    equity = killswitch.estimate_portfolio_equity(df)
+    # +10$ × 10 = +100 → 100_100 (pas 100_000 comme avant le fix)
+    assert equity == pytest.approx(100_100)
+
+
+def test_estimate_equity_open_skips_when_live_price_unavailable(monkeypatch):
+    """Fail-open : si `get_current_price` échoue (None), la position est
+    ignorée plutôt que de crasher — cohérent avec `save_equity_snapshot`."""
+    monkeypatch.setattr(killswitch, "get_current_price", lambda _t: None)
     df = _df({"Ticker": "AAPL", "Direction": "LONG", "Entry": 100, "Size": 10,
               "Exit_Price": "", "Status": "OPEN"})
     equity = killswitch.estimate_portfolio_equity(df)
     assert equity == pytest.approx(100_000)
+
+
+def test_estimate_equity_open_dedupes_duplicate_ticker_rows(monkeypatch):
+    """Deux lignes OPEN pour le même ticker (ex. top-up) ne comptent le PnL
+    latent qu'une fois — cohérent avec `save_equity_snapshot`."""
+    monkeypatch.setattr(killswitch, "get_current_price", lambda _t: 110.0)
+    df = _df(
+        {"Ticker": "AAPL", "Direction": "LONG", "Entry": 100, "Size": 10,
+         "Exit_Price": "", "Status": "OPEN"},
+        {"Ticker": "AAPL", "Direction": "LONG", "Entry": 100, "Size": 10,
+         "Exit_Price": "", "Status": "OPEN"},
+    )
+    equity = killswitch.estimate_portfolio_equity(df)
+    assert equity == pytest.approx(100_100)
 
 
 # ─────────────────────────────────────────────────────────────────

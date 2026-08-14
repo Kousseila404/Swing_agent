@@ -221,17 +221,31 @@ def estimate_portfolio_equity(df: pd.DataFrame) -> float:
         except (ValueError, TypeError):
             continue
 
+    # Audit 2026-08-14 : cette boucle lisait `Exit_Price` comme "prix courant"
+    # des positions OPEN — or ce champ n'est rempli qu'à la clôture, donc le
+    # PnL latent réel était systématiquement ignoré (contribution $0) dès
+    # qu'une position OPEN existait avec un Exit_Price vide. Impact concret :
+    # en BROKER_MODE=alpaca, ce fallback CSV n'est exercé que si
+    # get_broker().get_account_equity() échoue (API down) — exactement le
+    # moment où le killswitch (-4% daily) et le circuit breaker progressif
+    # ont le plus besoin d'une équité juste. Fix : même source que
+    # `save_equity_snapshot` juste en dessous — `get_current_price(ticker)`,
+    # dédupliqué par ticker, skip fail-open si le prix live est indisponible.
     unrealized_pnl = 0.0
     open_trades = df[df["Status"] == "OPEN"]
+    seen_tickers: set[str] = set()
     for _, row in open_trades.iterrows():
         try:
-            entry       = float(row["Entry"])
-            size        = float(row.get("Size", 1) or 1)
-            direction   = str(row.get("Direction", "LONG")).strip().upper()
-            exit_px_raw = row.get("Exit_Price", "")
-            if exit_px_raw == "" or pd.isna(exit_px_raw):
+            ticker = str(row["Ticker"]).strip().upper()
+            if ticker in seen_tickers:
                 continue
-            current_px = float(exit_px_raw)
+            seen_tickers.add(ticker)
+            entry     = float(row["Entry"])
+            size      = float(row.get("Size", 1) or 1)
+            direction = str(row.get("Direction", "LONG")).strip().upper()
+            current_px = get_current_price(ticker)
+            if current_px is None:
+                continue
             if direction == "SHORT":
                 unrealized_pnl += (entry - current_px) * size
             else:
