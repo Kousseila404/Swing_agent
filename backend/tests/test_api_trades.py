@@ -72,6 +72,26 @@ def test_trade_add_long_happy_path(_bypass_auth_and_isolate_csv: Path):
     assert df.iloc[0]["Status"] == "OPEN"
 
 
+def test_trade_add_never_touches_real_duckdb_path(_bypass_auth_and_isolate_csv: Path, monkeypatch):
+    """Régression 2026-08-14 : garde-fou qui aurait détecté la fuite vers le
+    vrai `data/trade_journal.duckdb` de prod. Le stub `shadow_insert` doit
+    être appelé (preuve que le patch cible la bonne référence, celle
+    réellement utilisée par `routers.trades`) — s'il ne l'est jamais, c'est
+    le signe que le monkeypatch vise le mauvais module (source au lieu de
+    l'importeur) et que la VRAIE fonction (donc le vrai fichier DuckDB de
+    prod) est appelée à la place."""
+    calls: list[dict] = []
+    import routers.trades as trades_router
+    monkeypatch.setattr(trades_router, "shadow_insert", lambda row: calls.append(row))
+
+    client = TestClient(api.app)
+    resp = client.post("/api/trade/add", json=_valid_long_payload())
+
+    assert resp.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["Ticker"] == "AAPL"
+
+
 def test_trade_add_short_happy_path(_bypass_auth_and_isolate_csv: Path):
     client = TestClient(api.app)
     payload = {
