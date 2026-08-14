@@ -191,6 +191,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolio/backfill_entry_scores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Backfill Entry Scores
+         * @description Backfill rétroactif des *_Entry pour les positions OPEN sans entry scores.
+         *
+         *     Lookup `universe_history` autour de la date d'entrée et populate
+         *     Titan_Score_Entry / Quality_Entry / etc. depuis la snapshot la plus proche.
+         *
+         *     Par défaut `dry_run=True` (juste retourne le diff). Pass `?dry_run=false`
+         *     pour écrire dans le CSV (backup automatique en .archive/).
+         */
+        post: operations["post_backfill_entry_scores_api_portfolio_backfill_entry_scores_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/universe/rebuild": {
         parameters: {
             query?: never;
@@ -404,6 +430,37 @@ export interface paths {
          *     l'UI affiche les gates rouges dès l'ouverture de la page.
          */
         get: operations["list_proposals_api_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proposals/veto-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Veto History
+         * @description Historique des vétos humains — propositions rejetées par l'utilisateur.
+         *
+         *     Endpoint public (lecture seule, comme `GET /api/proposals`) qui facilite la
+         *     consultation de l'historique des décisions négatives :
+         *       • `summary` — agrégat sur la fenêtre `since_days` (default 90j) :
+         *         nombre total, top tickers récurrents, top motifs, dernier veto.
+         *       • `items`   — détail des `limit` derniers vétos, du plus récent au plus
+         *         ancien, filtrable par ticker.
+         *
+         *     Utile pour identifier les patterns (ex: "je veto-e tout le secteur Energy
+         *     depuis 30j" → repenser sa thèse macro) ou retrouver pourquoi un ticker a
+         *     été refusé il y a quelques semaines.
+         */
+        get: operations["get_veto_history_api_proposals_veto_history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -693,8 +750,17 @@ export interface paths {
          *       - severity_global : ok | warning | critical (calculé sur les composantes)
          *       - yf_breaker : tripped, age, cooldown, auto_reset_in
          *       - fundamentals_cache : n_cached, ages
-         *       - universe : fields_missing par champ, fetched_at distribution, sources
+         *       - universe : fields_missing par champ, fetched_at distribution, sources,
+         *         enrichment_errors (compteurs tickers insider_error/finnhub_error —
+         *         Étape 6 — + liste {ticker, error} par source — Étape 14)
          *       - fmp : quota_used / quota_max si dispo
+         *       - providers : cache stats finnhub/insider/SEC filings/news (Étape 0 —
+         *         dashboard toutes-sources, pas seulement fondamentaux) + liste
+         *         {ticker, error} par ticker en échec pour news/sec_filings (Étape 18,
+         *         même geste que enrichment_errors.*_tickers pour insider/finnhub)
+         *       - history : N derniers points de `data/metrics_history.jsonl` (Étape
+         *         0bis/17) — tendance dans le temps (stale_ratio, n_dq_sanitize, WFO,
+         *         trades), liste vide si le fichier n'existe pas encore (local/sandbox)
          *
          *     Endpoint **public** — pas d'info sensible, just observability.
          */
@@ -883,6 +949,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compare */
+        get: operations["compare_api_compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/watchlist": {
         parameters: {
             query?: never;
@@ -984,6 +1067,64 @@ export interface paths {
         post?: never;
         /** Delete Titan Alert */
         delete: operations["delete_titan_alert_api_titan_alerts__alert_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/price_alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Price Alerts */
+        get: operations["get_price_alerts_api_price_alerts_get"];
+        put?: never;
+        /** Post Price Alert */
+        post: operations["post_price_alert_api_price_alerts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/price_alerts/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Price Alerts Stats
+         * @description Stats agrégées : hit rate, median delay-to-fire, median discount capté.
+         *
+         *     Permet de juger l'efficacité du wait-pullback : si hit_rate < 30 % et
+         *     median_days_to_fire élevé, les targets sont peut-être trop ambitieuses.
+         */
+        get: operations["get_price_alerts_stats_api_price_alerts_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/price_alerts/{alert_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Price Alert */
+        delete: operations["delete_price_alert_api_price_alerts__alert_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1118,6 +1259,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/thesis_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Thesis Status All
+         * @description Vue cockpit : thesis_status pour toutes les positions OPEN.
+         *
+         *     Permet à la UI Portfolio de surfacer en un coup d'œil les positions BROKEN
+         *     sans avoir à ouvrir chaque modal. Retourne :
+         *
+         *         {
+         *           "items": [
+         *             {ticker, status, severity, drift, reasons_break[], reasons_warn[]},
+         *             ...
+         *           ],
+         *           "summary": {n_total, n_intact, n_warn, n_broken, n_no_data}
+         *         }
+         */
+        get: operations["thesis_status_all_api_thesis_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lt_decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lt Decision All
+         * @description Décisions LT (refonte 2026-04-29) pour toutes les positions OPEN.
+         *
+         *     Agrège thesis_stop + drawdown + survalorisation + signal Buffett d'ADD_ON
+         *     en une recommandation unique par position. Source de vérité pour le badge
+         *     cockpit Portfolio.
+         */
+        get: operations["lt_decision_all_api_lt_decision_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lt_decision/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lt Decision One
+         * @description Décision LT pour un ticker précis (pour TickerAnalysisModal).
+         */
+        get: operations["lt_decision_one_api_lt_decision__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sector_benchmark/portfolio": {
         parameters: {
             query?: never;
@@ -1225,6 +1441,11 @@ export interface components {
         ApproveBatchRequest: {
             /** Items */
             items?: components["schemas"]["ApproveBatchItem"][];
+            /**
+             * Decided By
+             * @default user
+             */
+            decided_by: string;
         };
         /** ApproveBatchResponse */
         ApproveBatchResponse: {
@@ -1581,6 +1802,24 @@ export interface components {
             account_equity: number;
         } & {
             [key: string]: unknown;
+        };
+        /** PriceAlertCreate */
+        PriceAlertCreate: {
+            /** Ticker */
+            ticker: string;
+            /** Target Price */
+            target_price: number;
+            /**
+             * Direction
+             * @default below
+             */
+            direction: string;
+            /** Weight Pct */
+            weight_pct?: number | null;
+            /** Note */
+            note?: string | null;
+            /** Ttl Days */
+            ttl_days?: number | null;
         };
         /**
          * QuickBacktestRequest
@@ -2031,6 +2270,39 @@ export interface operations {
             };
         };
     };
+    post_backfill_entry_scores_api_portfolio_backfill_entry_scores_post: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     rebuild_quantamental_universe_api_universe_rebuild_post: {
         parameters: {
             query?: never;
@@ -2290,6 +2562,42 @@ export interface operations {
             query?: {
                 /** @description pending|approved|rejected|expired|executed */
                 status?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_veto_history_api_proposals_veto_history_get: {
+        parameters: {
+            query?: {
+                /** @description filtre exact (case-insensitive) */
+                ticker?: string | null;
+                /** @description fenêtre rolling N jours (basée sur decided_at) */
+                since_days?: number | null;
+                /** @description max d'items dans `items` */
                 limit?: number;
             };
             header?: never;
@@ -2859,6 +3167,40 @@ export interface operations {
             };
         };
     };
+    compare_api_compare_get: {
+        parameters: {
+            query: {
+                /** @description Tickers séparés par des virgules, ex: AAPL,MSFT,GOOG */
+                tickers: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_watchlist_api_watchlist_get: {
         parameters: {
             query?: never;
@@ -3179,6 +3521,129 @@ export interface operations {
             };
         };
     };
+    get_price_alerts_api_price_alerts_get: {
+        parameters: {
+            query?: {
+                ticker?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_price_alert_api_price_alerts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceAlertCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_price_alerts_stats_api_price_alerts_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    delete_price_alert_api_price_alerts__alert_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alert_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_calendar_api_calendar_get: {
         parameters: {
             query?: {
@@ -3356,6 +3821,83 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    thesis_status_all_api_thesis_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    lt_decision_all_api_lt_decision_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    lt_decision_one_api_lt_decision__ticker__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

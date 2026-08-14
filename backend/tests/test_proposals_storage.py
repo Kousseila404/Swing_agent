@@ -595,3 +595,55 @@ def test_veto_history_summary_empty(isolated_proposals):
     assert summary["top_tickers"] == []
     assert summary["top_reasons"] == []
     assert summary["last_veto_at"] is None
+
+
+# ─────────────────────────────────────────────────────────────────
+# recurrence_streaks / recurring_undecided (audit 2026-08-14)
+# ─────────────────────────────────────────────────────────────────
+
+def _item(ticker, status, created_at, titan_score=70.0):
+    return {
+        "ticker": ticker, "status": status, "created_at": created_at,
+        "context": {"titan_score": titan_score},
+    }
+
+
+def test_recurrence_streak_counts_consecutive_undecided():
+    items = [
+        _item("INCY", "expired", "2026-06-29T00:00:00Z"),
+        _item("INCY", "expired", "2026-07-17T00:00:00Z"),
+        _item("INCY", "pending", "2026-08-10T00:00:00Z"),
+    ]
+    streaks = proposals.recurrence_streaks(items)
+    assert streaks["INCY"] == 3
+
+
+def test_recurrence_streak_resets_after_explicit_decision():
+    items = [
+        _item("MSFT", "expired", "2026-06-29T00:00:00Z"),
+        _item("MSFT", "approved", "2026-07-17T00:00:00Z"),
+        _item("MSFT", "pending", "2026-08-10T00:00:00Z"),
+    ]
+    streaks = proposals.recurrence_streaks(items)
+    # Un seul non-décidé après le approved → pas dans le dict (streak filtré >0 mais <3 exclu par recurring_undecided)
+    assert streaks["MSFT"] == 1
+
+
+def test_recurring_undecided_filters_by_min_streak():
+    items = [
+        _item("INCY", "expired", "2026-06-29T00:00:00Z", titan_score=72.0),
+        _item("INCY", "expired", "2026-07-17T00:00:00Z", titan_score=72.0),
+        _item("INCY", "pending", "2026-08-10T00:00:00Z", titan_score=73.0),
+        _item("AAPL", "pending", "2026-08-10T00:00:00Z", titan_score=80.0),
+    ]
+    result = proposals.recurring_undecided(items, min_streak=3)
+    assert len(result) == 1
+    assert result[0]["ticker"] == "INCY"
+    assert result[0]["streak"] == 3
+    assert result[0]["pending_id"] is None  # pas d'id dans les fixtures synthétiques
+    assert result[0]["titan_score"] == 73.0
+
+
+def test_recurring_undecided_empty_when_no_streak():
+    items = [_item("AAPL", "pending", "2026-08-10T00:00:00Z")]
+    assert proposals.recurring_undecided(items, min_streak=3) == []
