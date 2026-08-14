@@ -64,6 +64,10 @@ LT_DECISION_COOLDOWN_HOURS = {
     # 12h : un earnings se passe sur 1-3j, on veut être ré-alerté à J-3 puis
     # potentiellement à J-2/J-1 si la position évolue, mais sans spammer.
     "EARNINGS_TRIM":     12,
+    # Audit 2026-08-14 — MAX_HOLDING_DAYS différé si thèse INTACT/ADD_ON.
+    # 24h : days_held n'avance qu'une fois/jour, un rappel quotidien suffit
+    # tant que la position reste en hold prolongé.
+    "TIMEOUT_DEFERRED":  24,
 }
 
 

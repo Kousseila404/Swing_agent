@@ -265,6 +265,8 @@ def send_lt_decision_alert(
         "EXIT_CATASTROPHE":  ("🚨", "CATASTROPHE FLOOR"),
         # Audit 2026-05-12 — protection earnings J-3 sur gain > +10 %.
         "EARNINGS_TRIM":     ("📊", "EARNINGS PROCHE — TRIM 50 %"),
+        # Audit 2026-08-14 — MAX_HOLDING_DAYS différé, thèse INTACT/ADD_ON.
+        "TIMEOUT_DEFERRED":  ("⏳", "HOLD PROLONGÉ — THÈSE INTACTE"),
     }
     icon, label = icons.get(action, ("⚠️", action))
     bullets = "\n".join(f"  • {r}" for r in (reasons or [])[:5]) or "  • —"
@@ -277,6 +279,8 @@ def send_lt_decision_alert(
         cta = "🚨 Floor catastrophe — sortie immédiate recommandée."
     elif action == "EARNINGS_TRIM":
         cta = "📊 Earnings imminent + gain confortable — vendre 50 % pour cristalliser."
+    elif action == "TIMEOUT_DEFERRED":
+        cta = "⏳ MAX_HOLDING_DAYS atteint mais thèse intacte — Buffett : 'notre horizon de détention favori est éternel'. Position maintenue, pas de vente forcée."
     else:
         cta = "⚠️ Décision LT manuelle — le tracker ne ferme pas."
 
