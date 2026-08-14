@@ -175,7 +175,13 @@ def list_proposals(
     diagnostics + ran_at) sans forcer un nouveau refresh. Utile pour que
     l'UI affiche les gates rouges dès l'ouverture de la page.
     """
-    items = proposals.list_all(status=status)
+    all_items = proposals.list_all()
+    streaks = proposals.recurrence_streaks(all_items)
+    items = [p for p in all_items if status is None or p.get("status") == status]
+    for it in items:
+        streak = streaks.get(it.get("ticker", ""), 0)
+        if streak >= 2:
+            it["recurrence_streak"] = streak
     return {
         "proposals":    items[:limit],
         "n_total":      len(items),

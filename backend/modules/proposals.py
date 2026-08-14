@@ -422,6 +422,73 @@ def enqueue_batch(proposals: Iterable[Proposal]) -> list[dict[str, Any]]:
     return inserted
 
 
+_UNDECIDED_STATUSES = {"pending", "expired"}
+
+
+def recurrence_streaks(items: list[dict[str, Any]] | None = None) -> dict[str, int]:
+    """Pour chaque ticker, longueur de la série la plus récente de
+    propositions consécutives (triées par `created_at`) qui n'ont jamais
+    reçu de décision humaine explicite (approved/rejected/executed).
+
+    La série s'arrête (reset à 0) dès qu'une décision explicite est
+    rencontrée en remontant depuis la plus récente — un ticker approuvé
+    puis re-proposé plus tard repart de zéro.
+
+    Audit 2026-08-14 : sert à détecter les tickers qui « tournent » dans la
+    file sans jamais être arbitrés (ex. INCY/MNST/EIX, recyclés 5× en 6
+    semaines par la seule purge `stale_max_age`, sans approve ni reject).
+    """
+    if items is None:
+        items = list_all()
+    by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for p in items:
+        by_ticker.setdefault(p.get("ticker", ""), []).append(p)
+    streaks: dict[str, int] = {}
+    for ticker, group in by_ticker.items():
+        group.sort(key=lambda p: p.get("created_at") or "")
+        streak = 0
+        for p in reversed(group):
+            if p.get("status") in _UNDECIDED_STATUSES:
+                streak += 1
+            else:
+                break
+        if streak > 0:
+            streaks[ticker] = streak
+    return streaks
+
+
+def recurring_undecided(
+    items: list[dict[str, Any]] | None = None, min_streak: int = 3,
+) -> list[dict[str, Any]]:
+    """Tickers dont la série non-décidée (`recurrence_streaks`) atteint
+    `min_streak` — candidats à une escalade (digest Telegram / badge UI).
+
+    Chaque entrée référence la proposition `pending` courante si elle
+    existe (pour lien direct côté digest/UI).
+    """
+    if items is None:
+        items = list_all()
+    streaks = recurrence_streaks(items)
+    by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for p in items:
+        by_ticker.setdefault(p.get("ticker", ""), []).append(p)
+    out: list[dict[str, Any]] = []
+    for ticker, streak in streaks.items():
+        if streak < min_streak:
+            continue
+        group = by_ticker[ticker]
+        current = next((p for p in group if p.get("status") == "pending"), None)
+        reference = current or group[-1]
+        out.append({
+            "ticker":      ticker,
+            "streak":      streak,
+            "pending_id":  current.get("id") if current else None,
+            "titan_score": (reference.get("context") or {}).get("titan_score"),
+        })
+    out.sort(key=lambda r: -r["streak"])
+    return out
+
+
 def list_all(status: str | None = None) -> list[dict[str, Any]]:
     """Liste toutes les propositions, filtrées par statut si fourni.
 

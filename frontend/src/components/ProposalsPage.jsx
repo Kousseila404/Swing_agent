@@ -100,6 +100,21 @@ function StatusBadge({ status }) {
   );
 }
 
+function RecurrenceBadge({ streak }) {
+  if (!streak || streak < 3) return null;
+  return (
+    <span
+      title={`Recyclée ${streak}× sans décision (expire puis re-proposée) — pense à approuver ou rejeter explicitement`}
+      style={{
+        background: 'rgba(251,191,36,0.15)', color: '#fbbf24',
+        padding: '2px 8px', borderRadius: 6,
+        fontSize: '0.7rem', fontWeight: 700,
+      }}>
+      ⟳ {streak}×
+    </span>
+  );
+}
+
 function Pill({ ok, label, detail, onClick }) {
   return (
     <button
@@ -523,6 +538,7 @@ function TopPickCard({ p, selected, onToggle, onOpenAnalysis }) {
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
             {ctx.buy_signal && <BuySignalChip signal={ctx.buy_signal} />}
             {qualification && <ConvictionBadge qualification={qualification} />}
+            <RecurrenceBadge streak={p.recurrence_streak} />
           </div>
           {qualification?.narrative && (
             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)',
@@ -616,6 +632,7 @@ function ProposalRow({
             {p.ticker}
           </button>
           <StatusBadge status={p.status} />
+          <RecurrenceBadge streak={p.recurrence_streak} />
           {ctx.buy_signal && isPending && <BuySignalChip signal={ctx.buy_signal} />}
           {ctx.qualification && isPending && <ConvictionBadge qualification={ctx.qualification} />}
           {alreadyHeld && (

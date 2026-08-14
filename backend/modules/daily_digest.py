@@ -70,9 +70,11 @@ def _proposals_link() -> str:
 
 
 def build_digest_text() -> str:
-    pending = proposals.list_all(status="pending")
+    all_items = proposals.list_all()
+    pending = [p for p in all_items if p.get("status") == "pending"]
     fresh = _new_signals(pending)[:_TOP_N]
     oldest = min(pending, key=lambda p: p.get("created_at") or "", default=None)
+    recurring = proposals.recurring_undecided(all_items, min_streak=3)
 
     eq = _equity_snapshot()
     open_positions = eq.get("open_positions") or []
@@ -98,6 +100,17 @@ def build_digest_text() -> str:
         )
     else:
         lines.append("\U0001f4cb Aucune proposition en attente.")
+
+    if recurring:
+        lines.append("")
+        lines.append(
+            f"⚠️ <b>{len(recurring)} proposition(s) récurrente(s) "
+            f"jamais décidée(s)</b> :"
+        )
+        for r in recurring[:5]:
+            score = r.get("titan_score")
+            score_str = f" · TITAN {score:.0f}" if isinstance(score, (int, float)) else ""
+            lines.append(f"  • <b>{r['ticker']}</b> — recyclée {r['streak']}×{score_str}")
 
     link = _proposals_link()
     if link:

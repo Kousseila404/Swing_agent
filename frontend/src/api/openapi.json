@@ -132,7 +132,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/equity_curve": {
@@ -154,7 +159,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/performance_metrics": {
@@ -176,7 +186,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/portfolio/recommendations": {
@@ -187,6 +202,11 @@
         "summary": "Get Portfolio Recommendations",
         "description": "Plan d'achat recommandé — top `max_holdings` actions en tendance haussière\npondérées en risk parity (inverse-vol) sur le capital fourni.\n\nPipeline :\n  1. Charge les tickers scorés (cache mtime-keyed de sector_metrics).\n  2. Filtre bullish (momentum 6M > 0).\n  3. Top N par titan_composite_score.\n  4. Poids W_i = (1/σ_i) / Σ(1/σ_j) via volatilité 6M (Polygon/yf).\n  5. Montants $ + shares (entières sauf allow_fractional_shares=true).\n\nQuery params :\n  total_capital            : float, capital total à allouer (défaut 100k).\n  max_holdings             : int, concentration (défaut 20).\n  allow_fractional_shares  : bool, actions fractionnelles (défaut false).\n  sector                   : str, restreint l'univers à un secteur GICS.\n\nRéponse : {allocations: {TICKER: {weight_pct, amount_usd, shares,\n          titan_score, momentum_pct, volatility_pct, imputed_vol, ...}},\n          invested_usd, cash_remaining_usd, n_kept, ...}.\n\nCas des volatilités manquantes (< 60 bars d'historique) :\n  - ≥ 3 tickers avec σ valide → imputation médiane cross-portfolio,\n    flag imputed_vol=true sur les tickers concernés.\n  - < 3 valid → equal_weight_fallback=true (signal insuffisant pour RP).",
         "operationId": "get_portfolio_recommendations_api_portfolio_recommendations_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "total_capital",
@@ -241,6 +261,57 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolio/backfill_entry_scores": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Post Backfill Entry Scores",
+        "description": "Backfill rétroactif des *_Entry pour les positions OPEN sans entry scores.\n\nLookup `universe_history` autour de la date d'entrée et populate\nTitan_Score_Entry / Quality_Entry / etc. depuis la snapshot la plus proche.\n\nPar défaut `dry_run=True` (juste retourne le diff). Pass `?dry_run=false`\npour écrire dans le CSV (backup automatique en .archive/).",
+        "operationId": "post_backfill_entry_scores_api_portfolio_backfill_entry_scores_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Dry Run"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Post Backfill Entry Scores Api Portfolio Backfill Entry Scores Post"
+                }
               }
             }
           },
@@ -664,6 +735,89 @@
               "default": 200,
               "title": "Limit"
             }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/veto-history": {
+      "get": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Get Veto History",
+        "description": "Historique des vétos humains — propositions rejetées par l'utilisateur.\n\nEndpoint public (lecture seule, comme `GET /api/proposals`) qui facilite la\nconsultation de l'historique des décisions négatives :\n  • `summary` — agrégat sur la fenêtre `since_days` (default 90j) :\n    nombre total, top tickers récurrents, top motifs, dernier veto.\n  • `items`   — détail des `limit` derniers vétos, du plus récent au plus\n    ancien, filtrable par ticker.\n\nUtile pour identifier les patterns (ex: \"je veto-e tout le secteur Energy\ndepuis 30j\" → repenser sa thèse macro) ou retrouver pourquoi un ticker a\nété refusé il y a quelques semaines.",
+        "operationId": "get_veto_history_api_proposals_veto_history_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "filtre exact (case-insensitive)",
+              "title": "Ticker"
+            },
+            "description": "filtre exact (case-insensitive)"
+          },
+          {
+            "name": "since_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "fenêtre rolling N jours (basée sur decided_at)",
+              "title": "Since Days"
+            },
+            "description": "fenêtre rolling N jours (basée sur decided_at)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "max d'items dans `items`",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "max d'items dans `items`"
           }
         ],
         "responses": {
@@ -1189,7 +1343,7 @@
           "data_health"
         ],
         "summary": "Get Data Health",
-        "description": "État de santé des providers + cache fundamentals + universe.\n\nChamps principaux :\n  - severity_global : ok | warning | critical (calculé sur les composantes)\n  - yf_breaker : tripped, age, cooldown, auto_reset_in\n  - fundamentals_cache : n_cached, ages\n  - universe : fields_missing par champ, fetched_at distribution, sources\n  - fmp : quota_used / quota_max si dispo\n\nEndpoint **public** — pas d'info sensible, just observability.",
+        "description": "État de santé des providers + cache fundamentals + universe.\n\nChamps principaux :\n  - severity_global : ok | warning | critical (calculé sur les composantes)\n  - yf_breaker : tripped, age, cooldown, auto_reset_in\n  - fundamentals_cache : n_cached, ages\n  - universe : fields_missing par champ, fetched_at distribution, sources,\n    enrichment_errors (compteurs tickers insider_error/finnhub_error —\n    Étape 6 — + liste {ticker, error} par source — Étape 14)\n  - fmp : quota_used / quota_max si dispo\n  - providers : cache stats finnhub/insider/SEC filings/news (Étape 0 —\n    dashboard toutes-sources, pas seulement fondamentaux) + liste\n    {ticker, error} par ticker en échec pour news/sec_filings (Étape 18,\n    même geste que enrichment_errors.*_tickers pour insider/finnhub)\n  - history : N derniers points de `data/metrics_history.jsonl` (Étape\n    0bis/17) — tendance dans le temps (stale_ratio, n_dq_sanitize, WFO,\n    trades), liste vide si le fichier n'existe pas encore (local/sandbox)\n\nEndpoint **public** — pas d'info sensible, just observability.",
         "operationId": "get_data_health_api_data_health_get",
         "responses": {
           "200": {
@@ -1382,6 +1536,11 @@
         "summary": "Ticker Analysis",
         "description": "Factsheet structurée d'un ticker — 100 % données existantes, no IA.",
         "operationId": "ticker_analysis_api_ticker_analysis__ticker__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "ticker",
@@ -1458,6 +1617,52 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Peers Api Peers  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/compare": {
+      "get": {
+        "tags": [
+          "peers"
+        ],
+        "summary": "Compare",
+        "operationId": "compare_api_compare_get",
+        "parameters": [
+          {
+            "name": "tickers",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Tickers séparés par des virgules, ex: AAPL,MSFT,GOOG",
+              "title": "Tickers"
+            },
+            "description": "Tickers séparés par des virgules, ex: AAPL,MSFT,GOOG"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Compare Api Compare Get"
                 }
               }
             }
@@ -1918,6 +2123,176 @@
         }
       }
     },
+    "/api/price_alerts": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Get Price Alerts",
+        "operationId": "get_price_alerts_api_price_alerts_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Price Alerts Api Price Alerts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Post Price Alert",
+        "operationId": "post_price_alert_api_price_alerts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceAlertCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Post Price Alert Api Price Alerts Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/price_alerts/stats": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Get Price Alerts Stats",
+        "description": "Stats agrégées : hit rate, median delay-to-fire, median discount capté.\n\nPermet de juger l'efficacité du wait-pullback : si hit_rate < 30 % et\nmedian_days_to_fire élevé, les targets sont peut-être trop ambitieuses.",
+        "operationId": "get_price_alerts_stats_api_price_alerts_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Price Alerts Stats Api Price Alerts Stats Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/price_alerts/{alert_id}": {
+      "delete": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Delete Price Alert",
+        "operationId": "delete_price_alert_api_price_alerts__alert_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Alert Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Price Alert Api Price Alerts  Alert Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/calendar": {
       "get": {
         "tags": [
@@ -2159,7 +2534,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/monitor/run": {
@@ -2189,6 +2569,114 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/thesis_status": {
+      "get": {
+        "tags": [
+          "monitor"
+        ],
+        "summary": "Thesis Status All",
+        "description": "Vue cockpit : thesis_status pour toutes les positions OPEN.\n\nPermet à la UI Portfolio de surfacer en un coup d'œil les positions BROKEN\nsans avoir à ouvrir chaque modal. Retourne :\n\n    {\n      \"items\": [\n        {ticker, status, severity, drift, reasons_break[], reasons_warn[]},\n        ...\n      ],\n      \"summary\": {n_total, n_intact, n_warn, n_broken, n_no_data}\n    }",
+        "operationId": "thesis_status_all_api_thesis_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Thesis Status All Api Thesis Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/lt_decision": {
+      "get": {
+        "tags": [
+          "monitor"
+        ],
+        "summary": "Lt Decision All",
+        "description": "Décisions LT (refonte 2026-04-29) pour toutes les positions OPEN.\n\nAgrège thesis_stop + drawdown + survalorisation + signal Buffett d'ADD_ON\nen une recommandation unique par position. Source de vérité pour le badge\ncockpit Portfolio.",
+        "operationId": "lt_decision_all_api_lt_decision_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Lt Decision All Api Lt Decision Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/lt_decision/{ticker}": {
+      "get": {
+        "tags": [
+          "monitor"
+        ],
+        "summary": "Lt Decision One",
+        "description": "Décision LT pour un ticker précis (pour TickerAnalysisModal).",
+        "operationId": "lt_decision_one_api_lt_decision__ticker__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Lt Decision One Api Lt Decision  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/sector_benchmark/portfolio": {
@@ -2306,7 +2794,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     }
   },
@@ -2402,6 +2895,12 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "decided_by": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Decided By",
+            "default": "user"
           }
         },
         "type": "object",
@@ -3264,6 +3763,69 @@
           "account_equity"
         ],
         "title": "PortfolioStats"
+      },
+      "PriceAlertCreate": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "target_price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Target Price"
+          },
+          "direction": {
+            "type": "string",
+            "pattern": "^(below|above)$",
+            "title": "Direction",
+            "default": "below"
+          },
+          "weight_pct": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Pct"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "ttl_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 365.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "target_price"
+        ],
+        "title": "PriceAlertCreate"
       },
       "QuickBacktestRequest": {
         "properties": {
