@@ -72,24 +72,20 @@ def test_trade_add_long_happy_path(_bypass_auth_and_isolate_csv: Path):
     assert df.iloc[0]["Status"] == "OPEN"
 
 
-def test_trade_add_never_touches_real_duckdb_path(_bypass_auth_and_isolate_csv: Path, monkeypatch):
-    """Régression 2026-08-14 : garde-fou qui aurait détecté la fuite vers le
-    vrai `data/trade_journal.duckdb` de prod. Le stub `shadow_insert` doit
-    être appelé (preuve que le patch cible la bonne référence, celle
-    réellement utilisée par `routers.trades`) — s'il ne l'est jamais, c'est
-    le signe que le monkeypatch vise le mauvais module (source au lieu de
-    l'importeur) et que la VRAIE fonction (donc le vrai fichier DuckDB de
-    prod) est appelée à la place."""
-    calls: list[dict] = []
+def test_fixture_patches_the_reference_trades_router_actually_calls(_bypass_auth_and_isolate_csv: Path):
+    """Régression 2026-08-14 : `routers/trades.py` fait
+    `from modules.duckdb_journal import shadow_insert, shadow_update_status`,
+    ce qui lie SA PROPRE référence locale à l'import. Patcher
+    `duckdb_journal.shadow_insert` (le module source, comme le faisait
+    l'ancienne version du fixture) ne change PAS cette référence déjà liée —
+    le endpoint continuait d'appeler la VRAIE fonction, qui a écrit 4 lignes
+    TSLA fantômes dans le VRAI data/trade_journal.duckdb de prod à chaque run
+    de la suite ce jour-là. Ce test échoue si le fixture régresse vers le
+    mauvais module cible."""
     import routers.trades as trades_router
-    monkeypatch.setattr(trades_router, "shadow_insert", lambda row: calls.append(row))
-
-    client = TestClient(api.app)
-    resp = client.post("/api/trade/add", json=_valid_long_payload())
-
-    assert resp.status_code == 200
-    assert len(calls) == 1
-    assert calls[0]["Ticker"] == "AAPL"
+    from modules import duckdb_journal
+    assert trades_router.shadow_insert is not duckdb_journal.shadow_insert
+    assert trades_router.shadow_update_status is not duckdb_journal.shadow_update_status
 
 
 def test_trade_add_short_happy_path(_bypass_auth_and_isolate_csv: Path):
