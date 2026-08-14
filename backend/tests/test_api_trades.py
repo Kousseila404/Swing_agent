@@ -18,6 +18,8 @@ from fastapi.testclient import TestClient
 
 import api
 from modules import api_core
+from modules.duckdb_journal import shadow_insert as _pristine_shadow_insert
+from modules.duckdb_journal import shadow_update_status as _pristine_shadow_update_status
 
 
 @pytest.fixture(autouse=True)
@@ -80,12 +82,17 @@ def test_fixture_patches_the_reference_trades_router_actually_calls(_bypass_auth
     l'ancienne version du fixture) ne change PAS cette référence déjà liée —
     le endpoint continuait d'appeler la VRAIE fonction, qui a écrit 4 lignes
     TSLA fantômes dans le VRAI data/trade_journal.duckdb de prod à chaque run
-    de la suite ce jour-là. Ce test échoue si le fixture régresse vers le
-    mauvais module cible."""
+    de la suite ce jour-là.
+
+    `_pristine_shadow_insert`/`_pristine_shadow_update_status` sont capturées
+    à l'import de CE fichier de test — avant que quelque fixture que ce soit
+    ne monkeypatch quoi que ce soit. Si le fixture patche le mauvais module
+    (la source au lieu de l'importeur), `routers.trades.shadow_insert` reste
+    identique à cette référence pristine et ce test échoue — c'est
+    exactement le comportement qui aurait dû détecter la régression."""
     import routers.trades as trades_router
-    from modules import duckdb_journal
-    assert trades_router.shadow_insert is not duckdb_journal.shadow_insert
-    assert trades_router.shadow_update_status is not duckdb_journal.shadow_update_status
+    assert trades_router.shadow_insert is not _pristine_shadow_insert
+    assert trades_router.shadow_update_status is not _pristine_shadow_update_status
 
 
 def test_trade_add_short_happy_path(_bypass_auth_and_isolate_csv: Path):
