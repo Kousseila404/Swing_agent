@@ -102,6 +102,34 @@ def test_link_included_when_frontend_url_set(monkeypatch):
     assert 'href="https://titan.example.com/#/proposals"' in text
 
 
+def test_recurring_undecided_section_shown(monkeypatch):
+    items = [
+        {"ticker": "INCY", "status": "expired", "created_at": "2026-06-29T00:00:00Z",
+         "context": {"titan_score": 72.0}},
+        {"ticker": "INCY", "status": "expired", "created_at": "2026-07-17T00:00:00Z",
+         "context": {"titan_score": 72.0}},
+        _proposal("INCY", titan_score=73, conviction=None, created_at="2026-08-10T00:00:00Z"),
+    ]
+    monkeypatch.setattr(daily_digest.proposals, "list_all", lambda status=None: items)
+    monkeypatch.setattr(daily_digest, "_equity_snapshot", lambda: {})
+
+    text = daily_digest.build_digest_text()
+
+    assert "récurrente" in text
+    assert "INCY" in text
+    assert "recyclée 3×" in text
+
+
+def test_recurring_undecided_section_omitted_below_threshold(monkeypatch):
+    pending = [_proposal("AAPL", titan_score=90, conviction=None)]
+    monkeypatch.setattr(daily_digest.proposals, "list_all", lambda status=None: pending)
+    monkeypatch.setattr(daily_digest, "_equity_snapshot", lambda: {})
+
+    text = daily_digest.build_digest_text()
+
+    assert "récurrente" not in text
+
+
 def test_send_daily_digest_fail_open_when_telegram_raises(monkeypatch):
     monkeypatch.setattr(daily_digest.proposals, "list_all", lambda status=None: [])
     monkeypatch.setattr(daily_digest, "_equity_snapshot", lambda: {})

@@ -108,6 +108,32 @@ def test_list_filter_status(client, isolated_storage):
     assert body["proposals"][0]["ticker"] == "AAPL"
 
 
+def test_list_exposes_recurrence_streak(client, isolated_storage):
+    """Audit 2026-08-14 : un ticker recyclé ≥2× sans décision expose
+    `recurrence_streak` dans la réponse — sert au badge UI récurrence."""
+    import json
+    now = datetime.now(UTC)
+    history = [
+        {
+            "id": "PROP_OLD1", "ticker": "INCY", "status": "expired",
+            "created_at": (now - timedelta(days=20)).isoformat().replace("+00:00", "Z"),
+            "expires_at": "9999-12-31T23:59:59Z", "direction": "LONG",
+            "entry": 90.0, "stop_loss": 80.0, "take_profit": 120.0, "size": 5,
+            "sector": "Healthcare", "signal": "AUTO_PROPOSAL", "context": {"titan_score": 72.0},
+            "decided_at": (now - timedelta(days=13)).isoformat().replace("+00:00", "Z"),
+            "decided_by": "system", "rejection_reason": "stale_max_age", "order_id": None,
+        },
+    ]
+    (isolated_storage / "proposals.json").write_text(json.dumps(history), encoding="utf-8")
+    _enqueue_one("INCY")  # 2e occurrence, toujours pending → streak=2
+
+    resp = client.get("/api/proposals")
+    assert resp.status_code == 200
+    body = resp.json()
+    incy = next(p for p in body["proposals"] if p["ticker"] == "INCY")
+    assert incy["recurrence_streak"] == 2
+
+
 # ─────────────────────────────────────────────────────────────────
 # POST /api/proposals/refresh — auth + run
 # ─────────────────────────────────────────────────────────────────
