@@ -30,9 +30,19 @@ def _bypass_auth_and_isolate_csv(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(api_core, "CSV_PATH", csv_path)
     monkeypatch.setattr(api_core, "CSV_LOCK_PATH", lock_path)
     # Stub le shadow_insert/update DuckDB (on valide uniquement la CSV).
-    from modules import duckdb_journal
-    monkeypatch.setattr(duckdb_journal, "shadow_insert", lambda *a, **k: None)
-    monkeypatch.setattr(duckdb_journal, "shadow_update_status", lambda *a, **k: None)
+    #
+    # Audit 2026-08-14 — régression trouvée en prod : `routers/trades.py` fait
+    # `from modules.duckdb_journal import shadow_insert, shadow_update_status`,
+    # ce qui lie SA PROPRE référence locale au moment de l'import. Patcher
+    # `duckdb_journal.shadow_insert` (le module source) ne change PAS cette
+    # référence déjà liée dans `routers.trades` — le endpoint continuait
+    # d'appeler la VRAIE fonction, qui écrivait dans le VRAI
+    # data/trade_journal.duckdb de prod à chaque run de la suite de tests
+    # (4 lignes TSLA fantômes trouvées et nettoyées ce jour-là). Fix : patcher
+    # la référence dans le module qui l'appelle réellement, `routers.trades`.
+    import routers.trades as trades_router
+    monkeypatch.setattr(trades_router, "shadow_insert", lambda *a, **k: None)
+    monkeypatch.setattr(trades_router, "shadow_update_status", lambda *a, **k: None)
     return csv_path
 
 
