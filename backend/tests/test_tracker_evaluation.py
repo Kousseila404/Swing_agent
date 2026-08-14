@@ -158,6 +158,69 @@ def test_evaluate_time_exit_after_max_holding(monkeypatch, tmp_path: Path):
     assert out.iloc[0]["Status"] == "WIN"  # pct_gain = +2% > 0
 
 
+def test_evaluate_time_exit_deferred_when_thesis_intact(monkeypatch, tmp_path: Path):
+    """Audit 2026-08-14 — régression : TIMEOUT ne doit PLUS fermer une
+    position dont `lt_exit_policy` a récemment recommandé HOLD/ADD_ON
+    (thèse intacte). Avant le fix, le filet mécanique écrasait la couche
+    fondamentale sans la consulter (cas réel EQT : ADD_ON à J-2, TIMEOUT
+    à J60, -14.6%)."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
+    monkeypatch.setattr(evaluation, "send_lt_decision_alert", lambda *a, **k: None)
+    monkeypatch.chdir(tmp_path)
+    import config
+    monkeypatch.setattr(config, "MAX_HOLDING_DAYS", 10, raising=False)
+
+    old_date = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d %H:%M:%S")
+    today = datetime.now().strftime("%Y-%m-%d")
+    df = _df(_open_trade(
+        Entry=100, Stop_Loss=95, Take_Profit=110, Date=old_date,
+        Last_LT_Action="ADD_ON", Last_LT_Severity=1, Last_LT_Date=today,
+    ))
+    out, closed, _ = evaluation.evaluate_trades(df)
+    assert closed == 0
+    assert out.iloc[0]["Status"] == "OPEN"
+
+
+def test_evaluate_time_exit_not_deferred_when_lt_data_stale(monkeypatch, tmp_path: Path):
+    """Un HOLD vieux de >3j ne compte pas — fail-safe : clôture forcée comme
+    avant plutôt que de faire confiance à une donnée fondamentale périmée."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
+    monkeypatch.setattr(evaluation, "send_lt_decision_alert", lambda *a, **k: None)
+    monkeypatch.chdir(tmp_path)
+    import config
+    monkeypatch.setattr(config, "MAX_HOLDING_DAYS", 10, raising=False)
+
+    old_date = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d %H:%M:%S")
+    stale_lt_date = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+    df = _df(_open_trade(
+        Entry=100, Stop_Loss=95, Take_Profit=110, Date=old_date,
+        Last_LT_Action="HOLD", Last_LT_Severity=0, Last_LT_Date=stale_lt_date,
+    ))
+    out, closed, _ = evaluation.evaluate_trades(df)
+    assert closed == 1
+    assert out.iloc[0]["Status"] == "WIN"
+
+
+def test_evaluate_time_exit_not_deferred_when_severity_high(monkeypatch, tmp_path: Path):
+    """Un TRIM/EXIT (severity ≥ 2) ne diffère jamais le TIMEOUT — cohérent
+    avec l'esprit du garde-fou (thèse dégradée → pas de hold prolongé)."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 102.0)
+    monkeypatch.setattr(evaluation, "send_lt_decision_alert", lambda *a, **k: None)
+    monkeypatch.chdir(tmp_path)
+    import config
+    monkeypatch.setattr(config, "MAX_HOLDING_DAYS", 10, raising=False)
+
+    old_date = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d %H:%M:%S")
+    today = datetime.now().strftime("%Y-%m-%d")
+    df = _df(_open_trade(
+        Entry=100, Stop_Loss=95, Take_Profit=110, Date=old_date,
+        Last_LT_Action="TRIM", Last_LT_Severity=2, Last_LT_Date=today,
+    ))
+    out, closed, _ = evaluation.evaluate_trades(df)
+    assert closed == 1
+    assert out.iloc[0]["Status"] == "WIN"
+
+
 # ─────────────────────────────────────────────────────────────────
 # evaluate_trades — current_price=None → ignoré (reste OPEN)
 # ─────────────────────────────────────────────────────────────────

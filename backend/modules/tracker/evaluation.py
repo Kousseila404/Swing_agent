@@ -1,7 +1,10 @@
 """Lecture/écriture du journal CSV + évaluation des positions OPEN.
 
 Logique de clôture V4 (par ordre de priorité dans evaluate_trades) :
-  1. Time exit       — MAX_HOLDING_DAYS dépassé → clôture forcée (WIN/LOSS selon PnL).
+  1. Time exit       — MAX_HOLDING_DAYS dépassé → clôture forcée (WIN/LOSS selon PnL),
+                       SAUF si `lt_exit_policy` a récemment (≤3j) recommandé
+                       HOLD/ADD_ON (thèse intacte — audit 2026-08-14) : la
+                       clôture est alors différée plutôt que forcée.
   2. Trailing stop   — ATR-adaptatif si OHLCV dispo, sinon % fixe.
                        V4 (2026-04-23) : seuils relevés (activation 8 % / ATR 2.5×,
                        trail 35 % / ATR 2.0×) après audit montrant que la V3 clôturait
@@ -628,6 +631,65 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
             days_held = 0
 
         if days_held >= max_holding_days:
+            # Audit 2026-08-14 — avant : TIMEOUT fermait inconditionnellement,
+            # même quand `lt_exit_policy` venait de recommander ADD_ON (thèse
+            # INTACT) — observé en live sur EQT (ADD_ON à J-2, TIMEOUT à J60,
+            # -14.6%). Contradiction directe avec la philosophie Buffett du
+            # module ("our favorite holding period is forever" tant que la
+            # thèse tient) : le filet mécanique écrasait la couche fondamentale
+            # sans jamais la consulter.
+            # Fix : si `Last_LT_Action` (persisté à l'étape 0 plus haut, throttlé
+            # ~1×/h) dit HOLD/ADD_ON (severity ≤ 1) ET a été recalculé récemment
+            # (≤ 3j — sinon la donnée est trop vieille pour qu'on lui fasse
+            # confiance), on diffère la clôture plutôt que de vendre au marché.
+            # Fail-safe : action manquante/périmée/TRIM+ → comportement
+            # inchangé (clôture forcée), pour ne jamais tenir une position
+            # indéfiniment sur un signal fondamental absent ou dégradé.
+            last_lt_action = str(row.get("Last_LT_Action") or "").strip()
+            try:
+                _sev_raw = row.get("Last_LT_Severity")
+                last_lt_severity = (
+                    int(float(_sev_raw)) if _sev_raw not in (None, "", "nan") else None
+                )
+            except (TypeError, ValueError):
+                last_lt_severity = None
+            last_lt_date_str = str(row.get("Last_LT_Date") or "")
+            lt_is_fresh = False
+            if last_lt_date_str:
+                try:
+                    lt_dt = datetime.strptime(last_lt_date_str[:10], "%Y-%m-%d")
+                    lt_is_fresh = (datetime.now() - lt_dt).days <= 3
+                except Exception:
+                    lt_is_fresh = False
+            thesis_intact = (
+                lt_is_fresh
+                and last_lt_severity is not None
+                and last_lt_severity <= 1
+                and last_lt_action in ("HOLD", "ADD_ON")
+            )
+            if thesis_intact:
+                logger.info(
+                    f"⏳ [{ticker}] TIMEOUT atteint ({days_held}j ≥ {max_holding_days}j) "
+                    f"mais thèse fondamentale intacte (Last_LT_Action={last_lt_action}, "
+                    f"{last_lt_date_str}) — hold prolongé, PAS de clôture forcée."
+                )
+                if can_send_lt_decision_alert(ticker, "TIMEOUT_DEFERRED"):
+                    try:
+                        send_lt_decision_alert(
+                            ticker=ticker, action="TIMEOUT_DEFERRED",
+                            direction=direction, entry_price=entry,
+                            current_price=current_price, pct_gain=pct_gain,
+                            reasons=[
+                                f"{days_held}j de détention (seuil {max_holding_days}j) "
+                                f"— dernier verdict fondamental : {last_lt_action} "
+                                f"({last_lt_date_str})",
+                            ],
+                        )
+                        mark_lt_decision_alert_sent(ticker, "TIMEOUT_DEFERRED")
+                    except Exception as exc:
+                        logger.warning(f"[{ticker}] Erreur alerte timeout différé : {exc}")
+                continue
+
             status = "WIN" if pct_gain > 0 else "LOSS"
             confirmed = False
             try:
