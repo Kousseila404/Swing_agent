@@ -11,12 +11,13 @@ from modules import daily_digest
 
 
 def _proposal(ticker, *, titan_score=50, conviction=None, verdict="BUY",
-              narrative=None, created_at="2026-07-01T00:00:00Z"):
+              narrative=None, created_at="2026-07-01T00:00:00Z", status="pending"):
     qualification = None
     if conviction is not None:
         qualification = {"conviction": conviction, "narrative": narrative or ticker}
     return {
         "ticker": ticker,
+        "status": status,
         "created_at": created_at,
         "context": {
             "titan_score": titan_score,
