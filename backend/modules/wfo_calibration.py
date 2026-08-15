@@ -400,6 +400,13 @@ def run_walk_forward(
     pair_dates = [d for d, _ in pair_rows]
     start_idx = 0
     while True:
+        # start_idx peut atteindre exactement len(pair_dates) quand le
+        # dernier fold TEST consomme tous les pairs restants (avance en fin
+        # de boucle ligne "start_idx = test_idx + len(test_pairs)") — sans
+        # cette garde, IndexError non catché (crash silencieux observé en
+        # prod les 2026-07-01 et 2026-08-01, wfo_history.jsonl gelé depuis).
+        if start_idx >= len(pair_dates):
+            break
         # TRAIN couvre [start_idx, start_idx+train_days)
         train_end_date = pair_dates[start_idx]
         # On accumule jusqu'à atteindre train_days écoulés
