@@ -126,13 +126,26 @@ fi
 #     côté API pour que la prochaine requête frontale soit instantanée.
 echo "── Step 2/3 : warm /api/portfolio/recommendations ($API_URL)"
 rc_warm=0
-if curl --silent --show-error --fail --max-time 180 \
-        "$API_URL/api/portfolio/recommendations?total_capital=100000&max_holdings=20" \
-        -o /dev/null -w "http=%{http_code} time=%{time_total}s\n"; then
-    echo "OK — cache API chaud."
+# L'endpoint est protégé (Security(api_core.require_auth)) — sans le header
+# Authorization ce curl échouait systématiquement en 401 (warm KO quotidien
+# silencieux, découvert lors de l'audit data du 2026-08-15). On relit le
+# token depuis backend/.env comme au step 4 ci-dessous.
+WARM_TOKEN="${API_TOKEN:-}"
+if [[ -z "$WARM_TOKEN" && -f "$BACKEND/.env" ]]; then
+    WARM_TOKEN=$(grep -E '^API_TOKEN=' "$BACKEND/.env" | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+fi
+if [[ -z "$WARM_TOKEN" ]]; then
+    echo "SKIP: API_TOKEN absent (set dans crontab ou backend/.env) — warm non authentifié impossible."
 else
-    rc_warm=$?
-    echo "WARN: warm HTTP failed (rc=$rc_warm) — l'API tourne-t-elle sur $API_URL ?"
+    if curl --silent --show-error --fail --max-time 180 \
+            -H "Authorization: Bearer ${WARM_TOKEN}" \
+            "$API_URL/api/portfolio/recommendations?total_capital=100000&max_holdings=20" \
+            -o /dev/null -w "http=%{http_code} time=%{time_total}s\n"; then
+        echo "OK — cache API chaud."
+    else
+        rc_warm=$?
+        echo "WARN: warm HTTP failed (rc=$rc_warm) — l'API tourne-t-elle sur $API_URL ?"
+    fi
 fi
 
 # ── 3. Snapshot historique fundamentaux + scores TITAN ───────────
