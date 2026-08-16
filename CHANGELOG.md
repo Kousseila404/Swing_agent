@@ -100,3 +100,84 @@ backend/docs/titan/monitoring_plan.md              (new)
 backend/docs/titan/scoring_payload_reference.md    (new)
 CHANGELOG.md                                       (new)
 ```
+
+---
+
+### Audit data + TITAN, fix propositions orphelines (2026-08-16)
+
+Session d'audit du système de data (mise à jour, fraîcheur, sécurité), suivie
+d'un backtest cross-sectionnel 5 ans pour évaluer si le score TITAN justifie
+plus d'automatisation côté achat. Documentation:
+[`backend/docs/titan/audit_titan_2026-08-16.md`](./backend/docs/titan/audit_titan_2026-08-16.md).
+
+#### Fixed — Bug propositions orphelines
+
+- **`proposals.py::update_status`** — nouvelle transition `approved → pending`
+  (auparavant seule `approved → executed` existait). Sans elle, un rejet
+  broker retryable (ex: NYSE fermée à 09:00, avant l'ouverture 09:30)
+  laissait la proposition bloquée en `approved` pour toujours — jamais
+  exécutée, jamais revue.
+- **`routers/proposals.py::approve_proposals_batch`** — sur rejet broker,
+  la proposition revient maintenant en `pending` (avec `rejection_reason`)
+  au lieu de rester orpheline en `approved`. Corrige un bug réel observé en
+  prod : CF/TPR/HAS recréés en doublon chaque jour depuis le 18/07 (11
+  propositions orphelines trouvées et nettoyées manuellement, aucune
+  n'avait `order_id` — aucun impact capital).
+
+#### Added — Filtre TITAN<60 (audit_titan_2026-08-16.md)
+
+- **`auto_proposer.py`** — nouvelle constante `TITAN_AUTO_REJECT_FLOOR=60.0`.
+  Un candidat avec `titan_score < 60` n'est plus jamais proposé (filtre à la
+  génération, pas un rejet a posteriori). Backtest cross-sectionnel 5 ans
+  (361 snapshots) : bucket `<60` a un alpha démeané négatif à tous horizons
+  et un taux de stop-loss touché 3× plus élevé que le bucket `≥80` (11.2%
+  vs 3.8%), sur N=143978 réparti sur ~490 tickers — signal robuste, non
+  concentré.
+- **Décision explicite de NE PAS élargir `auto_approve.py`** — le bucket
+  `≥80` a un alpha moyen positif mais **111% porté par 2 tickers sur 5 ans**
+  (SNDK+MU, supercycle mémoire/IA), sur seulement 9 tickers ayant jamais
+  atteint ce score. Pas un pattern généralisable ni automatisable côté achat.
+  Règle `auto_approve.py` (TITAN≥80, cap 2/run 5/semaine) inchangée.
+
+#### Ops — sécurité scripts (hors scope moteur scoring, notée ici faute de mieux)
+
+- **`scripts/setup_github_deploy.sh`** — token GitHub ne peut plus être
+  passé en argument CLI (exposition via `ps aux`/historique shell). Lu
+  exclusivement depuis `backend/.env`.
+- **`scripts/git_auto_sync.sh`** — garde-fou anti-secret ajouté avant tout
+  auto-commit (tokens GitHub/AWS, clés privées PEM, fichiers `.env`
+  trackés). Le script committe/push chaque minute sans revue humaine du
+  contenu ; ce filtre couvre le scénario "secret ajouté par erreur poussé
+  en <1min".
+- **`/home/swing/data/`** (ancien système, mort depuis avril) archivé en
+  `/home/swing/data.ARCHIVED_dead_since_2026-04/` — aucune référence
+  trouvée nulle part, aucun impact.
+
+#### Tests
+
+- 1124/1124 passent (baseline 1103 + 21 nouveaux : garde-fou proposals,
+  filtre TITAN floor, revert-to-pending sur rejet broker).
+- ruff + mypy strict clean sur tous les fichiers touchés.
+
+#### Reported — non implémenté (délibérément)
+
+1. Compteur monitoring `n_unique_tickers_qualifying_80` (alerte
+   anti-sur-confiance sur la concentration) — recommandé par l'audit,
+   pas encore câblé.
+2. Sizing Kelly fractionné calibré sur la distribution réelle — l'audit
+   dit explicitement de ne pas le faire avant un split out-of-sample
+   (2021-2024 train / 2025-2026 test), sinon overfitting déguisé.
+
+#### Files
+
+```
+backend/modules/auto_proposer.py                    +14 -0
+backend/modules/proposals.py                         +6 -3
+backend/routers/proposals.py                        +16 -3
+backend/tests/test_auto_proposer_gates.py            +46 -0
+backend/tests/test_proposals_router.py               +34 -0
+backend/docs/titan/audit_titan_2026-08-16.md               (new)
+scripts/setup_github_deploy.sh                        +8 -4
+scripts/git_auto_sync.sh                             +32 -1
+CHANGELOG.md                                          +64 -0
+```
