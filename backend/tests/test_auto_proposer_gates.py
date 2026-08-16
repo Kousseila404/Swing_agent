@@ -475,6 +475,59 @@ def test_top_n_mode_max_holdings_exceeds_free_slots(
     assert len(r_max.proposals) == 20
 
 
+def test_titan_below_floor_is_skipped(
+    monkeypatch, isolated_proposals, trading_allowed, cb_clean, bull_macro,
+    fresh_universe_json,
+):
+    """Audit TITAN 2026-08-16 : un candidat avec titan_score < 60 n'est
+    jamais proposé, même avec un slot libre — filtre robuste (alpha
+    démeané négatif, SL-hit 3x plus fréquent que le bucket ≥80, cf.
+    backend/docs/titan/audit_titan_2026-08-16.md). Distinct de la règle
+    d'auto-approve à l'achat (auto_approve.py, inchangée par cet audit)."""
+    from modules import sector_metrics
+    monkeypatch.setattr(sector_metrics, "get_scored_universe", lambda: {
+        "GOOD": {"sector": "Technology"},
+        "BAD": {"sector": "Technology"},
+        "EDGE": {"sector": "Technology"},
+    })
+
+    class Result:
+        def __init__(self):
+            self.allocations = {
+                "GOOD": {"sector": "Technology", "price": 100.0, "shares": 10,
+                         "amount_usd": 1000.0, "titan_score": 75.0,
+                         "volatility_pct": 0.25, "momentum_pct": 0.1, "weight_pct": 5.0},
+                "BAD": {"sector": "Technology", "price": 100.0, "shares": 10,
+                        "amount_usd": 1000.0, "titan_score": 45.0,
+                        "volatility_pct": 0.25, "momentum_pct": 0.1, "weight_pct": 5.0},
+                "EDGE": {"sector": "Technology", "price": 100.0, "shares": 10,
+                         "amount_usd": 1000.0, "titan_score": 60.0,
+                         "volatility_pct": 0.25, "momentum_pct": 0.1, "weight_pct": 5.0},
+            }
+            self.invested_usd = 3000.0
+            self.n_candidates = 3
+            self.n_bullish = 3
+            self.n_kept = 3
+            self.equal_weight_fallback = False
+            self.diagnostics = {"weight_method": "inv_vol"}
+
+    from modules.portfolio_engine import PortfolioManager
+    monkeypatch.setattr(
+        PortfolioManager, "calculate_allocations", lambda *a, **kw: Result(),
+    )
+
+    result = auto_proposer.plan_proposals(max_holdings=20, min_proposal_usd=100)
+    tickers = [p["ticker"] for p in result.proposals]
+    assert "GOOD" in tickers
+    assert "EDGE" in tickers  # exactement 60 = pas < 60, donc conservé
+    assert "BAD" not in tickers
+
+    skipped_reasons = {
+        s["ticker"]: s["reason"] for s in result.diagnostics["selection"]["skipped"]
+    }
+    assert skipped_reasons["BAD"] == "titan_below_floor"
+
+
 # ─────────────────────────────────────────────────────────────────
 # Gate fundamentals_staleness — distinction latest_stale / y1_only
 # (régression 2026-06-05 : 98 % report_stale bloquait 100 % des props)
