@@ -56,10 +56,34 @@ fi
 # pushés tels quels → API cassée en prod (SyntaxError au reload). On
 # vérifie maintenant, AVANT tout commit, qu'aucun fichier modifié ne
 # contient de marqueur de conflit ni de .py invalide.
+#
+# Garde-fou secrets (2026-08-16) : ce script commit et push tout seul,
+# chaque minute, sans revue humaine du contenu. Le check syntaxe/conflit
+# ci-dessus ne dit rien sur un token ou une clé privée qui traînerait dans
+# un fichier oublié hors .gitignore — sans ce filtre, un secret ajouté par
+# erreur atteint GitHub en moins d'une minute. On bloque le commit si un
+# fichier modifié est un .env réel ou contient un pattern de secret connu.
+SECRET_PATTERN='ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghu_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}'
+
 if [ -n "$(git status --porcelain)" ]; then
   bad=0
   while IFS= read -r f; do
     [ -f "$f" ] || continue
+    case "$f" in
+      .env|*/.env|.env.*|*/.env.*)
+        case "$f" in
+          *.env.example|*/.env.example) ;;
+          *)
+            log "ERR fichier .env détecté dans les changements ($f) — commit annulé, ne doit jamais être tracké"
+            bad=1
+            ;;
+        esac
+        ;;
+    esac
+    if grep -qEI "$SECRET_PATTERN" "$f" 2>/dev/null; then
+      log "ERR pattern de secret détecté dans $f — commit annulé, résolution manuelle requise"
+      bad=1
+    fi
     if grep -qE '^(<{7}|={7}|>{7})( |$)' "$f" 2>/dev/null; then
       log "ERR marqueur de conflit détecté dans $f — commit annulé, résolution manuelle requise"
       bad=1

@@ -37,7 +37,4 @@ ssh -o StrictHostKeyChecking=no -T git@github.com 2>&1 || true
 echo "→ Test git pull..."
 git pull --ff-only
 
-echo "→ Mise à jour du token dans .env..."
-sed -i "s|GITHUB_TOKEN=.*|GITHUB_TOKEN=$TOKEN|" backend/.env
-
 echo "✓ Setup complet. Le cron auto-pull va reprendre dans 1 minute."
