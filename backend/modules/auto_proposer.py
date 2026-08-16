@@ -90,6 +90,15 @@ DEFAULT_MAX_HOLDINGS = 20
 DEFAULT_MIN_FREE_SLOTS = 1
 DEFAULT_MIN_PROPOSAL_USD = 250.0  # plancher : ne propose pas en-dessous
 DEFAULT_TOTAL_CAPITAL = 100_000.0
+# Audit TITAN 2026-08-16 (backend/docs/titan/audit_titan_2026-08-16.md) —
+# backtest cross-sectionnel 5 ans (361 snapshots) : le bucket TITAN<60 a un
+# alpha démeané négatif à tous horizons et un taux de stop-loss touché 3×
+# plus élevé que le bucket ≥80 (11.2% vs 3.8%), sur N=143978 réparti sur
+# ~490 tickers — signal robuste et NON concentré (contrairement au bucket
+# ≥80, porté à 111% par 2 seuls tickers sur 5 ans, cf. audit). On ne propose
+# donc jamais un ticker sous ce plancher : filtre défendable, pas un edge
+# d'achat à automatiser (celui-là reste refusé, cf. conclusion de l'audit).
+TITAN_AUTO_REJECT_FLOOR = 60.0
 UNIVERSE_SEVERE_HOURS = 48.0
 # macro_state.json (régime + VIX) est rafraîchi par run_titan.sh step 0 chaque
 # matin. _gate_regime lit le régime/VIX mais ne vérifiait PAS leur fraîcheur :
@@ -897,7 +906,18 @@ def plan_proposals(
             skipped.append({"ticker": ticker, "reason": "already_held"})
             continue
 
-        # Filtre 1bis (Audit 2026-05-12) : corrélation pairwise.
+        # Filtre 1bis (Audit TITAN 2026-08-16) : score sous le plancher
+        # robuste — jamais proposé, cf. TITAN_AUTO_REJECT_FLOOR ci-dessus.
+        titan_score = alloc.get("titan_score")
+        if titan_score is not None and titan_score < TITAN_AUTO_REJECT_FLOOR:
+            skipped.append({
+                "ticker": ticker,
+                "reason": "titan_below_floor",
+                "titan_score": titan_score,
+            })
+            continue
+
+        # Filtre 1ter (Audit 2026-05-12) : corrélation pairwise.
         # On exclut les candidats over_correlated avec le panier (positions
         # ouvertes + top candidats). Hard skip — pas de surcharge UI possible
         # car le pendant utilisateur (approve_batch) ne sait pas overrider ça.
