@@ -883,9 +883,26 @@ def approve_proposals_batch(
             continue
 
         if not br.success:
-            # Rejet broker — on note la raison dans rejection_reason et on laisse
-            # la proposition en `approved` orpheline (retry manuel possible via
-            # reject puis re-génération plus tard).
+            # Rejet broker — remet la proposition en pending avec
+            # rejection_reason=dernier message broker, comme documenté au
+            # point 7 ci-dessus. Sans ce retour en pending, la proposition
+            # reste bloquée en `approved` orpheline (jamais pending, jamais
+            # exécutée) : le générateur quotidien ne la voit plus dans le
+            # pool "pending déjà en file" et recrée un doublon le lendemain,
+            # qui échoue à son tour pour la même raison (ex: NYSE fermée à
+            # 9h, avant l'ouverture 9h30) — boucle infinie de la même
+            # proposition jour après jour.
+            try:
+                proposals.update_status(
+                    entry_req.id, "pending",
+                    decided_by=req.decided_by,
+                    rejection_reason=f"broker rejet : {br.message}",
+                )
+            except ValueError as e:
+                logger.error(
+                    f"[approve_batch] revert-to-pending failed for "
+                    f"{entry_req.id}: {e}"
+                )
             results.append(ApproveBatchResult(
                 id=entry_req.id, ticker=ticker, ok=False,
                 message=f"Broker rejet : {br.message}",

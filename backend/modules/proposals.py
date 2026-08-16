@@ -527,7 +527,7 @@ def update_status(
 
     Retourne la proposition mise à jour.
     """
-    if new_status not in {"approved", "rejected", "expired", "executed"}:
+    if new_status not in {"approved", "rejected", "expired", "executed", "pending"}:
         raise ValueError(f"Statut cible invalide: {new_status!r}")
 
     with FileLock(str(PROPOSALS_LOCK_PATH), timeout=10):
@@ -542,10 +542,13 @@ def update_status(
         current = item.get("status", "pending")
 
         # Transitions valides : pending → {approved, rejected, expired},
-        # approved → executed (post-écriture journal).
+        # approved → executed (post-écriture journal), approved → pending
+        # (rejet broker retryable — cf. approve_batch, ex: NYSE fermée — sans
+        # ce retour, la proposition reste "approved" orpheline pour toujours
+        # et un doublon est recréé le lendemain matin).
         valid = {
             "pending":  {"approved", "rejected", "expired"},
-            "approved": {"executed"},
+            "approved": {"executed", "pending"},
         }
         if current in _TERMINAL_STATUSES:
             raise ValueError(
