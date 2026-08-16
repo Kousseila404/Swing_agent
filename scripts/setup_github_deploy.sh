@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
-# Lance ce script avec un token GitHub valide pour finaliser le setup SSH
-# Usage: bash scripts/setup_github_deploy.sh ghp_XXXX...
+# Finalise le setup SSH avec le token GitHub présent dans backend/.env.
+# Usage: bash scripts/setup_github_deploy.sh
+#
+# Le token ne doit JAMAIS être passé en argument de ligne de commande :
+# argv est visible via `ps aux` par tout autre utilisateur de la machine et
+# finit souvent en clair dans l'historique du shell. Mets GITHUB_TOKEN=...
+# dans backend/.env (chmod 600) avant de lancer ce script.
 
 set -e
-TOKEN="${1:-$(grep GITHUB_TOKEN backend/.env | cut -d= -f2)}"
+TOKEN="$(grep GITHUB_TOKEN backend/.env | cut -d= -f2)"
+if [ -z "$TOKEN" ]; then
+  echo "✗ GITHUB_TOKEN absent ou vide dans backend/.env" >&2
+  exit 1
+fi
 PUB_KEY=$(cat ~/.ssh/github_deploy.pub)
 
 echo "→ Ajout de la deploy key sur GitHub..."
