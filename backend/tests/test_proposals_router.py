@@ -326,6 +326,48 @@ def test_approve_batch_executes_all(client, isolated_storage, auth_token, mock_l
         assert p["status"] == "executed"
 
 
+def test_approve_batch_broker_rejection_reverts_to_pending(
+    client, isolated_storage, auth_token, mock_live_price, monkeypatch,
+):
+    """Audit 2026-08-16 : un rejet broker retryable (ex: NYSE fermée avant
+    l'ouverture) ne doit pas laisser la proposition orpheline en `approved`
+    pour toujours. Sinon le générateur quotidien ne la voit plus dans le
+    pool pending, recrée un doublon le lendemain, qui échoue à son tour
+    pour la même raison — boucle infinie du même ticker proposé chaque
+    jour (cas réel observé sur CF, 2026-08-10 → 2026-08-15)."""
+    from modules import broker_gateway
+
+    class _FakeBroker:
+        name = "fake"
+
+        def submit_order(self, scan):
+            return broker_gateway.OrderResult(
+                success=False, ticker=scan.ticker, order_id="",
+                message="NYSE fermée — prochaine ouverture : 09:30:00-04:00",
+            )
+
+    monkeypatch.setattr(broker_gateway, "get_broker", lambda: _FakeBroker())
+
+    item = _enqueue_one("AAPL")
+    resp = client.post(
+        "/api/proposals/approve_batch",
+        json={"items": [{"id": item["id"]}]},
+        headers={"Authorization": f"Bearer {auth_token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["n_executed"] == 0
+    assert body["n_failed"] == 1
+    assert body["results"][0]["ok"] is False
+    assert "NYSE fermée" in body["results"][0]["message"]
+
+    # La proposition doit être redevenue pending (pas orpheline en
+    # `approved`) pour qu'un prochain cycle auto_approve/manuel la revoie.
+    updated = proposals.get(item["id"])
+    assert updated["status"] == "pending"
+    assert "NYSE fermée" in updated["rejection_reason"]
+
+
 def test_approve_batch_applies_overrides(client, isolated_storage, auth_token, mock_live_price):
     """Entry/SL/TP/size fournis via overrides → écrit dans journal."""
     p = _enqueue_one("AAPL")  # entry=150, sl=142.5, tp=180, size=10
