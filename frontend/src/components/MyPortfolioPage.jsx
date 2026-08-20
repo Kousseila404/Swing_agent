@@ -1,10 +1,16 @@
 // MyPortfolioPage — book personnel long terme, 10 positions manuelles.
 //
 // Entièrement indépendant du moteur TITAN : pas de scoring, pas de
-// proposals, pas de veto auto. Endpoint /api/my_portfolio calcule juste
-// le poids réel (prix live × actions détenues) vs le poids cible fixé
-// par l'utilisateur, et signale une dérive à rééquilibrer au-delà du
-// seuil (drift_threshold_pct, 25% par défaut).
+// proposals, pas de veto auto. Endpoint /api/my_portfolio calcule le
+// poids réel (prix live × actions détenues) vs le poids cible fixé par
+// l'utilisateur.
+//
+// Deux états mutuellement exclusifs par position (is_deploying) :
+//   - sous le seuil de déploiement (deployment_threshold_pct, 70% par
+//     défaut) : barre de progression "X$ / Y$ déployé" — DCA en cours,
+//     pas de dérive calculée (LNVGY à 0 part en est le cas extrême).
+//   - au-dessus : alerte de rééquilibrage classique si la dérive dépasse
+//     ±drift_threshold_pct (25% par défaut).
 //
 // Identité visuelle volontairement distincte de PortfolioPage/ProposalsPage
 // (accent cuivre/or, classes `mp-*` dans index.css) pour ne jamais laisser
@@ -41,7 +47,7 @@ export default function MyPortfolioPage() {
   const totalValue = data.total_value ?? 0;
   const driftThreshold = data.drift_threshold_pct ?? 25;
   const alertCount = positions.filter(p => p.rebalance_alert).length;
-  const pendingCount = positions.filter(p => p.is_pending).length;
+  const deployingCount = positions.filter(p => p.is_deploying).length;
 
   return (
     <div className="mp-page animate-fade-in">
@@ -73,8 +79,8 @@ export default function MyPortfolioPage() {
           <span className="mp-tile-value">{alertCount}</span>
         </div>
         <div className="mp-tile">
-          <span className="mp-tile-label">En attente d'achat</span>
-          <span className="mp-tile-value">{pendingCount}</span>
+          <span className="mp-tile-label">En cours de déploiement</span>
+          <span className="mp-tile-value">{deployingCount}</span>
         </div>
       </div>
 
@@ -105,7 +111,19 @@ export default function MyPortfolioPage() {
                   <td className="mp-value-cell">{p.target_weight_pct}%</td>
                   <td>
                     <span className="mp-weight-real">{p.real_weight_pct}%</span>
-                    {p.rebalance_alert && (
+                    {p.is_deploying ? (
+                      <div className="mp-deploy">
+                        <div className="mp-deploy-bar">
+                          <div
+                            className="mp-deploy-fill"
+                            style={{ width: `${Math.min(Math.max(p.deployment_pct, 0), 100)}%` }}
+                          />
+                        </div>
+                        <span className="mp-deploy-label">
+                          {fmtUsd(p.current_value)} / {fmtUsd(p.target_amount)} déployé — {p.deployment_pct}%
+                        </span>
+                      </div>
+                    ) : p.rebalance_alert && (
                       <span
                         className="mp-drift-alert"
                         title={`Rééquilibrage suggéré — dérive ${p.drift_pct > 0 ? '+' : ''}${p.drift_pct}% vs poids cible (seuil ±${driftThreshold}%)`}
