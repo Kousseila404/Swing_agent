@@ -23,6 +23,7 @@ from modules.my_portfolio_data import (
     DEPLOYMENT_THRESHOLD_PCT,
     POSITIONS,
     REBALANCE_DRIFT_THRESHOLD_PCT,
+    TOTAL_ENVELOPE_AMOUNT,
     WATCHLIST,
 )
 from modules.tracker.market import get_current_price
@@ -68,10 +69,18 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "is_pending":    shares <= 0,
         })
 
-    total_value = sum(r["current_value"] for r in rows) + CASH_RESERVE_AMOUNT
+    # Valeur actuelle réelle du book — purement informative (tuile "Valeur
+    # totale"). NE DOIT JAMAIS servir de dénominateur au poids réel : cette
+    # somme varie avec le déploiement des positions (PSX/LNVGY pas encore
+    # pleinement investies), ce qui gonflerait artificiellement le poids
+    # réel de toutes les autres lignes.
+    total_current_value = sum(r["current_value"] for r in rows) + CASH_RESERVE_AMOUNT
 
     for r in rows:
-        real_weight = (r["current_value"] / total_value * 100) if total_value else 0.0
+        # Dénominateur FIXE — enveloppe totale $2000, jamais la somme
+        # variable des valeurs actuellement investies (voir commentaire
+        # TOTAL_ENVELOPE_AMOUNT dans my_portfolio_data.py).
+        real_weight = r["current_value"] / TOTAL_ENVELOPE_AMOUNT * 100
         target = r["target_weight_pct"]
         target_amount = r["target_amount"]
 
@@ -95,7 +104,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         r["drift_pct"]        = round(drift_pct, 1) if drift_pct is not None else None
         r["rebalance_alert"]  = drift_pct is not None and abs(drift_pct) > REBALANCE_DRIFT_THRESHOLD_PCT
 
-    cash_weight = (CASH_RESERVE_AMOUNT / total_value * 100) if total_value else 0.0
+    cash_weight = CASH_RESERVE_AMOUNT / TOTAL_ENVELOPE_AMOUNT * 100
 
     return {
         "positions": rows,
@@ -105,7 +114,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "real_weight_pct":   round(cash_weight, 2),
         },
         "watchlist":              WATCHLIST,
-        "total_value":            round(total_value, 2),
+        "total_value":            round(total_current_value, 2),
         "drift_threshold_pct":    REBALANCE_DRIFT_THRESHOLD_PCT,
         "deployment_threshold_pct": DEPLOYMENT_THRESHOLD_PCT,
     }

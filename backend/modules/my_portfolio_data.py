@@ -78,6 +78,17 @@ POSITIONS: list[dict] = [
 CASH_RESERVE_PCT    = 10.0
 CASH_RESERVE_AMOUNT = 200.0
 
+# Enveloppe totale FIXE du book ($2000 = somme des target_amount + réserve
+# cash). C'est le SEUL dénominateur valide pour le poids réel d'une ligne.
+#
+# Bug corrigé le 2026-08-20 : le poids réel divisait par la somme des
+# valeurs *actuellement investies* (variable, ~$1646 quand des positions
+# comme PSX/LNVGY ne sont pas encore pleinement déployées). Ça gonflait
+# artificiellement le poids réel de TOUTES les autres lignes (MU affichait
+# +25.7% de dérive au lieu de +3.5% réel). Calculé, pas codé en dur, pour
+# rester cohérent si POSITIONS change.
+TOTAL_ENVELOPE_AMOUNT = sum(p["target_amount"] for p in POSITIONS) + CASH_RESERVE_AMOUNT
+
 # Watchlist pure — thèse cassée, aucune position, 0% cible.
 WATCHLIST: list[dict] = [
     {"ticker": "SEZL", "target_weight_pct": 0.0, "note": "Thèse cassée, pas détenu"},
