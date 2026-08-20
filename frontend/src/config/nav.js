@@ -18,6 +18,12 @@ export const NAV_SECTIONS = [
     ],
   },
   {
+    label: 'Mon Portefeuille',
+    items: [
+      { id: 'my_portfolio', label: 'Mon Portefeuille', icon: '💼' },
+    ],
+  },
+  {
     label: 'Découverte',
     items: [
       { id: 'watchlist',   label: 'Watchlist',     icon: '👁' },
@@ -59,6 +65,7 @@ export const PAGE_META = {
   universe:    { title: 'Univers Quantamental',          subtitle: 'Smart Beta · Rotation Sectorielle · Fondamentaux yfinance' },
   sectors:     { title: 'Rotation Sectorielle',          subtitle: '11 secteurs GICS · Momentum 6M · Rotation Score composite' },
   portfolio:   { title: 'Portfolio & Journal',           subtitle: 'Données réelles — trade_journal.csv' },
+  my_portfolio: { title: 'Mon Portefeuille',             subtitle: 'Book personnel long terme — allocation manuelle, indépendant du moteur TITAN' },
   proposals:   { title: 'Propositions auto · Veto humain', subtitle: 'Trades suggérés par TITAN — approuver ou rejeter' },
   performance: { title: 'Performance & Métriques',       subtitle: 'Sharpe · Sortino · Calmar · DD · Expectancy · Distribution PnL' },
   attribution: { title: 'Performance Attribution',       subtitle: "Win rate par bucket de score TITAN à l'entrée — calibration du moteur" },
@@ -80,6 +87,7 @@ export const PAGE_PALETTE_HINTS = {
   universe:    "Page · Univers Quantamental",
   sectors:     "Page · Rotation sectorielle",
   portfolio:   "Page · Positions et journal",
+  my_portfolio: "Page · Book perso LT — 10 positions manuelles",
   proposals:   "Page · Veto humain TITAN",
   performance: "Page · Sharpe, Sortino, DD",
   attribution: "Page · Win rate par bucket TITAN entry",

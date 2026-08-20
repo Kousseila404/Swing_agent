@@ -31,6 +31,7 @@ const SettingsPage        = lazy(() => import('./components/SettingsPage'));
 const UniverseManagerPage = lazy(() => import('./components/UniverseManagerPage'));
 const SectorsPage         = lazy(() => import('./components/SectorsPage'));
 const PortfolioPage       = lazy(() => import('./components/PortfolioPage'));
+const MyPortfolioPage     = lazy(() => import('./components/MyPortfolioPage'));
 const ProposalsPage       = lazy(() => import('./components/ProposalsPage'));
 const PerformancePage     = lazy(() => import('./components/PerformancePage'));
 const TickerDetailPage    = lazy(() => import('./components/TickerDetailPage'));
@@ -48,6 +49,7 @@ const PAGES = {
   universe:    UniverseManagerPage,
   sectors:     SectorsPage,
   portfolio:   PortfolioPage,
+  my_portfolio: MyPortfolioPage,
   proposals:   ProposalsPage,
   performance: PerformancePage,
   ticker:      TickerDetailPage,
