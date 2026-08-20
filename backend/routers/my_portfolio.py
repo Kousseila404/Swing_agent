@@ -61,12 +61,25 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             # ne pas fausser le total (mieux qu'une position à 0$).
             current_value, price_stale = p["target_amount"], True
 
+        # P&L — axe de tracking séparé du poids/dérive : "combien j'ai
+        # gagné/perdu vs mon prix d'entrée réel", indépendant de l'allocation
+        # cible. Nécessite un prix d'entrée connu (None pour LNVGY, pas
+        # encore ouverte) et un prix live valide (pas de fallback stale).
+        entry_price = p["entry_price"]
+        if entry_price and shares > 0 and price is not None:
+            pnl_usd = (price - entry_price) * shares
+            pnl_pct = (price / entry_price - 1) * 100
+        else:
+            pnl_usd, pnl_pct = None, None
+
         rows.append({
             **p,
             "current_price": price,
             "current_value": round(current_value, 2),
             "price_stale":   price_stale,
             "is_pending":    shares <= 0,
+            "pnl_usd":       round(pnl_usd, 2) if pnl_usd is not None else None,
+            "pnl_pct":       round(pnl_pct, 1) if pnl_pct is not None else None,
         })
 
     # Valeur actuelle réelle du book — purement informative (tuile "Valeur
@@ -75,6 +88,10 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
     # pleinement investies), ce qui gonflerait artificiellement le poids
     # réel de toutes les autres lignes.
     total_current_value = sum(r["current_value"] for r in rows) + CASH_RESERVE_AMOUNT
+
+    # P&L global — somme des P&L $ des lignes ouvertes avec un prix d'entrée
+    # connu (LNVGY exclue : pas de position, pas de P&L calculable).
+    total_pnl_usd = sum(r["pnl_usd"] for r in rows if r["pnl_usd"] is not None)
 
     for r in rows:
         # Dénominateur FIXE — enveloppe totale $2000, jamais la somme
@@ -115,6 +132,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         },
         "watchlist":              WATCHLIST,
         "total_value":            round(total_current_value, 2),
+        "total_pnl_usd":          round(total_pnl_usd, 2),
         "drift_threshold_pct":    REBALANCE_DRIFT_THRESHOLD_PCT,
         "deployment_threshold_pct": DEPLOYMENT_THRESHOLD_PCT,
     }

@@ -154,6 +154,64 @@ def test_my_portfolio_real_weight_uses_fixed_2000_envelope_not_invested_sum(monk
         assert row["drift_pct"] == 0.0, ticker
 
 
+def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
+    """P&L est un axe séparé du poids/dérive : (prix actuel - prix
+    d'entrée réel) × actions, indépendant du montant/poids cible."""
+    def _price(ticker):
+        return {"BNP.PA": 120.64, "PSX": 200.0}.get(ticker, 100.0)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    by_ticker = {p["ticker"]: p for p in body["positions"]}
+
+    # BNP.PA : entrée 110.64 -> prix 120.64 (+10$/action) -> gain
+    bnp = by_ticker["BNP.PA"]
+    assert bnp["pnl_usd"] == round((120.64 - 110.64) * 2.338323, 2)
+    assert bnp["pnl_usd"] > 0
+    assert bnp["pnl_pct"] > 0
+
+    # PSX : entrée 246.64 -> prix 200.0 (perte) -> pnl négatif
+    psx = by_ticker["PSX"]
+    assert psx["pnl_usd"] == round((200.0 - 246.64) * 0.32436, 2)
+    assert psx["pnl_usd"] < 0
+    assert psx["pnl_pct"] < 0
+
+
+def test_my_portfolio_lnvgy_has_no_pnl_no_entry_price(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: 100.0)
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
+    assert lnvgy["entry_price"] is None
+    assert lnvgy["pnl_usd"] is None
+    assert lnvgy["pnl_pct"] is None
+
+
+def test_my_portfolio_pnl_none_when_price_fetch_fails(monkeypatch):
+    # Prix live indisponible -> current_value fallback sur target_amount,
+    # mais le P&L ne doit JAMAIS utiliser ce fallback (pas un vrai prix).
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: None)
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["price_stale"] is True
+    assert bnp["pnl_usd"] is None
+    assert bnp["pnl_pct"] is None
+
+
+def test_my_portfolio_total_pnl_usd_sums_open_positions_only(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: 100.0)
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    expected = round(
+        sum(p["pnl_usd"] for p in body["positions"] if p["pnl_usd"] is not None), 2
+    )
+    assert body["total_pnl_usd"] == expected
+    # LNVGY (pas de prix d'entrée) ne doit pas contribuer.
+    lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
+    assert lnvgy["pnl_usd"] is None
+
+
 def test_my_portfolio_requires_auth_when_configured(monkeypatch):
     monkeypatch.setattr(api_core, "API_TOKEN", "secret-token")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
