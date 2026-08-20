@@ -84,5 +84,13 @@ WATCHLIST: list[dict] = [
 ]
 
 # Dérive relative (|réel - cible| / cible) au-delà de laquelle on affiche
-# l'alerte de rééquilibrage visuel.
+# l'alerte de rééquilibrage visuel. Ne s'applique qu'aux positions pleinement
+# déployées (voir DEPLOYMENT_THRESHOLD_PCT) — sous ce seuil, une dérive est
+# juste le signe d'un DCA pas terminé, pas d'un besoin de rééquilibrage.
 REBALANCE_DRIFT_THRESHOLD_PCT = 25.0
+
+# En dessous de ce % de déploiement (valeur actuelle / montant cible), une
+# position est considérée "en cours de déploiement" plutôt que "dérivée" —
+# on affiche une barre de progression au lieu de l'alerte de rééquilibrage.
+# LNVGY (0 part) est le cas extrême de cette logique (0% déployé).
+DEPLOYMENT_THRESHOLD_PCT = 70.0

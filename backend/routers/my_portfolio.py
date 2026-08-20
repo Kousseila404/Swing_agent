@@ -20,6 +20,7 @@ from modules.log import logger
 from modules.my_portfolio_data import (
     CASH_RESERVE_AMOUNT,
     CASH_RESERVE_PCT,
+    DEPLOYMENT_THRESHOLD_PCT,
     POSITIONS,
     REBALANCE_DRIFT_THRESHOLD_PCT,
     WATCHLIST,
@@ -72,15 +73,27 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
     for r in rows:
         real_weight = (r["current_value"] / total_value * 100) if total_value else 0.0
         target = r["target_weight_pct"]
-        # Pas de dérive calculée pour une position pas encore ouverte —
-        # le badge "en attente" couvre déjà ce cas.
-        if target and not r["is_pending"]:
+        target_amount = r["target_amount"]
+
+        # % du montant cible effectivement déployé (prix live × shares vs
+        # target_amount). LNVGY à 0 part (0%) est le cas extrême de cette
+        # même logique — pas un cas à part.
+        deployment_pct = (r["current_value"] / target_amount * 100) if target_amount else 100.0
+        is_deploying = deployment_pct < DEPLOYMENT_THRESHOLD_PCT
+
+        # Une dérive n'a de sens que sur une position pleinement déployée :
+        # sous le seuil de déploiement, un écart au poids cible reflète un
+        # DCA pas terminé, pas un besoin de rééquilibrage.
+        if target and not is_deploying:
             drift_pct = (real_weight - target) / target * 100
         else:
             drift_pct = None
-        r["real_weight_pct"]   = round(real_weight, 2)
-        r["drift_pct"]         = round(drift_pct, 1) if drift_pct is not None else None
-        r["rebalance_alert"]   = drift_pct is not None and abs(drift_pct) > REBALANCE_DRIFT_THRESHOLD_PCT
+
+        r["real_weight_pct"]  = round(real_weight, 2)
+        r["deployment_pct"]   = round(deployment_pct, 1)
+        r["is_deploying"]     = is_deploying
+        r["drift_pct"]        = round(drift_pct, 1) if drift_pct is not None else None
+        r["rebalance_alert"]  = drift_pct is not None and abs(drift_pct) > REBALANCE_DRIFT_THRESHOLD_PCT
 
     cash_weight = (CASH_RESERVE_AMOUNT / total_value * 100) if total_value else 0.0
 
@@ -91,7 +104,8 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "amount":            CASH_RESERVE_AMOUNT,
             "real_weight_pct":   round(cash_weight, 2),
         },
-        "watchlist":           WATCHLIST,
-        "total_value":         round(total_value, 2),
-        "drift_threshold_pct": REBALANCE_DRIFT_THRESHOLD_PCT,
+        "watchlist":              WATCHLIST,
+        "total_value":            round(total_value, 2),
+        "drift_threshold_pct":    REBALANCE_DRIFT_THRESHOLD_PCT,
+        "deployment_threshold_pct": DEPLOYMENT_THRESHOLD_PCT,
     }
