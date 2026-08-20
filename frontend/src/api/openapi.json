@@ -2801,6 +2801,34 @@
           }
         ]
       }
+    },
+    "/api/my_portfolio": {
+      "get": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Get My Portfolio",
+        "operationId": "get_my_portfolio_api_my_portfolio_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get My Portfolio Api My Portfolio Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
