@@ -1197,6 +1197,23 @@
 .mp-stale { color: var(--warning); margin-left: 0.3rem; cursor: help; }
 .mp-price-sub { display: block; font-size: 0.68rem; color: var(--text-muted); font-family: monospace; margin-top: 0.1rem; }
 
+/* Statut "en cours de déploiement" — DCA pas terminé, distinct de
+   l'alerte de dérive (pas rouge, pas alarmant : c'est un état normal). */
+.mp-deploy { margin-top: 0.35rem; min-width: 130px; }
+.mp-deploy-bar {
+  width: 100%; height: 5px; border-radius: 999px;
+  background: rgba(255,255,255,0.07); overflow: hidden;
+}
+.mp-deploy-fill {
+  height: 100%; border-radius: 999px;
+  background: var(--mp-accent);
+  transition: width var(--motion-base, 200ms) var(--ease-out, ease);
+}
+.mp-deploy-label {
+  display: block; font-size: 0.68rem; color: var(--text-muted);
+  font-family: monospace; margin-top: 0.25rem; white-space: nowrap;
+}
+
 .mp-reason, .mp-sell { font-size: 0.78rem; color: var(--text-muted); max-width: 22ch; line-height: 1.4; }
 
 .mp-cash-row td {
