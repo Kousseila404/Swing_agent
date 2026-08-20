@@ -12,6 +12,10 @@
 //   - au-dessus : alerte de rééquilibrage classique si la dérive dépasse
 //     ±drift_threshold_pct (25% par défaut).
 //
+// P&L (pnl_usd/pnl_pct) est un axe de tracking SÉPARÉ, calculé depuis le
+// prix d'entrée réel (entry_price) — "combien j'ai gagné/perdu", pas
+// "suis-je sur ma cible d'allocation". N'affecte jamais poids/dérive.
+//
 // Identité visuelle volontairement distincte de PortfolioPage/ProposalsPage
 // (accent cuivre/or, classes `mp-*` dans index.css) pour ne jamais laisser
 // croire que ces positions sont notées ou décidées par TITAN.
@@ -19,9 +23,21 @@
 import ApiErrorBanner from './common/ApiErrorBanner';
 import { PageSkeleton } from './common/Skeleton';
 import { useMyPortfolio } from '../hooks/useApi';
+import { fmtSignedPct } from '../utils/format';
 
 function fmtUsd(n) {
   return Number.isFinite(n) ? `$${n.toFixed(2)}` : '—';
+}
+
+function fmtSignedUsd(n) {
+  if (!Number.isFinite(n)) return '—';
+  const sign = n > 0 ? '+' : n < 0 ? '−' : '';
+  return `${sign}$${Math.abs(n).toFixed(2)}`;
+}
+
+function pnlClass(n) {
+  if (!Number.isFinite(n) || n === 0) return '';
+  return n > 0 ? 'mp-pnl-pos' : 'mp-pnl-neg';
 }
 
 export default function MyPortfolioPage() {
@@ -45,6 +61,7 @@ export default function MyPortfolioPage() {
   const cash = data.cash_reserve || {};
   const watchlist = data.watchlist || [];
   const totalValue = data.total_value ?? 0;
+  const totalPnlUsd = data.total_pnl_usd ?? 0;
   const driftThreshold = data.drift_threshold_pct ?? 25;
   const alertCount = positions.filter(p => p.rebalance_alert).length;
   const deployingCount = positions.filter(p => p.is_deploying).length;
@@ -82,6 +99,12 @@ export default function MyPortfolioPage() {
           <span className="mp-tile-label">En cours de déploiement</span>
           <span className="mp-tile-value">{deployingCount}</span>
         </div>
+        <div className="mp-tile">
+          <span className="mp-tile-label">P&amp;L global</span>
+          <span className={`mp-tile-value ${pnlClass(totalPnlUsd)}`}>
+            {fmtSignedUsd(totalPnlUsd)}
+          </span>
+        </div>
       </div>
 
       <div className="mp-card">
@@ -94,6 +117,7 @@ export default function MyPortfolioPage() {
                 <th>Poids réel</th>
                 <th>Montant cible</th>
                 <th>Valeur actuelle</th>
+                <th>P&amp;L</th>
                 <th>Beta</th>
                 <th>Raison d'achat</th>
                 <th>Signal de vente</th>
@@ -142,6 +166,16 @@ export default function MyPortfolioPage() {
                       <span className="mp-price-sub">{p.current_price.toFixed(2)} / action</span>
                     )}
                   </td>
+                  <td className="mp-value-cell">
+                    {p.pnl_usd == null ? (
+                      <span style={{ color: 'var(--text-muted)' }}>—</span>
+                    ) : (
+                      <>
+                        <span className={pnlClass(p.pnl_usd)}>{fmtSignedUsd(p.pnl_usd)}</span>
+                        <span className="mp-price-sub">{fmtSignedPct(p.pnl_pct)}</span>
+                      </>
+                    )}
+                  </td>
                   <td className="mp-value-cell">{Number.isFinite(p.beta) ? p.beta.toFixed(2) : '—'}</td>
                   <td className="mp-reason">{p.reason}</td>
                   <td className="mp-sell">{p.sell_signal}</td>
@@ -155,6 +189,7 @@ export default function MyPortfolioPage() {
                 <td>{cash.real_weight_pct}%</td>
                 <td className="mp-value-cell">{fmtUsd(cash.amount)}</td>
                 <td className="mp-value-cell">{fmtUsd(cash.amount)}</td>
+                <td>—</td>
                 <td>—</td>
                 <td colSpan={2}>Non investie — tampon de sécurité / opportunités futures</td>
               </tr>
