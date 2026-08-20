@@ -39,10 +39,45 @@ def test_my_portfolio_lnvgy_is_pending_with_badge_and_no_drift(monkeypatch):
     body = r.json()
     lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
     assert lnvgy["is_pending"] is True
+    assert lnvgy["is_deploying"] is True
+    assert lnvgy["deployment_pct"] == 0.0
     assert lnvgy["current_value"] == 0.0
     assert lnvgy["drift_pct"] is None
     assert lnvgy["rebalance_alert"] is False
     assert lnvgy["badge"] == "⏳ En attente earnings 21/08"
+
+
+def test_my_portfolio_partial_deployment_shows_progress_not_drift_alert(monkeypatch):
+    # PSX cible $230. On force un prix tel que la valeur actuelle (shares ×
+    # prix) ne représente qu'une fraction du montant cible (< seuil 70%) —
+    # ça doit basculer en statut "en cours de déploiement", pas en alerte
+    # de dérive, même si l'écart au poids cible dépasse largement ±25%.
+    def _price(ticker):
+        return 240.47 if ticker == "PSX" else 100.0  # ~$78 / $230 déployé (34%)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    psx = next(p for p in body["positions"] if p["ticker"] == "PSX")
+    assert psx["is_deploying"] is True
+    assert psx["rebalance_alert"] is False
+    assert psx["drift_pct"] is None
+    assert 30.0 < psx["deployment_pct"] < 40.0
+
+
+def test_my_portfolio_fully_deployed_position_keeps_drift_alert(monkeypatch):
+    # PSX pleinement déployé (valeur actuelle > 70% du montant cible) mais
+    # avec un poids réel qui a dérivé au-delà de ±25% -> l'alerte de
+    # rééquilibrage classique doit s'appliquer, pas la barre de déploiement.
+    def _price(ticker):
+        return 1000.0 if ticker == "PSX" else 100.0  # $324.4 / $230 = 141% déployé
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    psx = next(p for p in body["positions"] if p["ticker"] == "PSX")
+    assert psx["deployment_pct"] >= 70.0
+    assert psx["is_deploying"] is False
+    assert psx["rebalance_alert"] is True
+    assert psx["drift_pct"] is not None
 
 
 def test_my_portfolio_price_fetch_failure_falls_back_to_target_amount(monkeypatch):
