@@ -17,6 +17,7 @@ export const POLL = {
   PROPOSALS:     30_000,
   DATA_HEALTH:   60_000,
   JOB:            2_000,    // poll un job en cours
+  MY_PORTFOLIO:   60_000,   // book perso statique, seul le prix live bouge
 };
 
 export const STALE = {
@@ -38,4 +39,5 @@ export const STALE = {
   AUDIT_FULL:    30 * 60_000,        // backend 24h, UI 30min
   WFO:           60 * 60_000,        // 1h (cron mensuel)
   DELISTED:      5 * 60_000,
+  MY_PORTFOLIO:  60_000,
 };

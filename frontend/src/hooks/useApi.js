@@ -25,6 +25,7 @@ import {
   fetchJob,
   fetchMacro,
   fetchMacroCalendar,
+  fetchMyPortfolio,
   fetchNotes,
   fetchPerformanceMetrics,
   fetchPortfolio,
@@ -63,6 +64,15 @@ export const useMarketStatus = (opts = {}) =>
 
 export const usePortfolio = (opts = {}) =>
   useQuery({ queryKey: ['portfolio'], queryFn: fetchPortfolio, ...opts })
+
+export const useMyPortfolio = (opts = {}) =>
+  useQuery({
+    queryKey: ['my_portfolio'],
+    queryFn: fetchMyPortfolio,
+    refetchInterval: POLL.MY_PORTFOLIO,
+    staleTime: STALE.MY_PORTFOLIO,
+    ...opts,
+  })
 
 export const useEquityCurve = (opts = {}) =>
   useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, ...opts })

@@ -219,6 +219,11 @@ export const fetchSectorBenchmarkPortfolio = () => get('/sector_benchmark/portfo
 export const fetchAttribution = () => get('/attribution');
 
 // ─────────────────────────────────────────────────────────────────
+// MON PORTEFEUILLE — book personnel LT, statique, hors univers TITAN.
+// ─────────────────────────────────────────────────────────────────
+export const fetchMyPortfolio = () => get('/my_portfolio');
+
+// ─────────────────────────────────────────────────────────────────
 // WATCHLIST + NOTES
 // ─────────────────────────────────────────────────────────────────
 export const fetchWatchlist = () => get('/watchlist');
