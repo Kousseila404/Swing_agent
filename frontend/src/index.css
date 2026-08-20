@@ -1115,6 +1115,109 @@
 }
 .toast-stack .api-toast { pointer-events: auto; }
 
+/* ═══════════════════════════════════════════════════════════════
+   MON PORTEFEUILLE — book personnel LT, hors moteur TITAN.
+   Identité visuelle volontairement distincte (accent cuivre/or, pas
+   de bleu/violet TITAN) pour ne jamais laisser croire qu'il s'agit
+   du même système de scoring / decision.
+   ═══════════════════════════════════════════════════════════════ */
+.mp-page {
+  --mp-accent: #d97706;
+  --mp-accent-soft: rgba(217, 119, 6, 0.14);
+  --mp-accent-border: rgba(217, 119, 6, 0.35);
+  display: flex; flex-direction: column; gap: 1.25rem;
+}
+
+.mp-banner {
+  display: flex; align-items: flex-start; gap: 1rem;
+  background: linear-gradient(120deg, var(--mp-accent-soft), transparent 70%);
+  border: 1px solid var(--mp-accent-border);
+  border-radius: 16px; padding: 1.1rem 1.4rem;
+}
+.mp-banner-icon {
+  font-size: 1.6rem; line-height: 1; flex-shrink: 0;
+  width: 44px; height: 44px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--mp-accent-soft); border: 1px solid var(--mp-accent-border);
+}
+.mp-banner-title { font-size: 1.05rem; font-weight: 700; margin: 0 0 0.3rem; color: var(--text-main); }
+.mp-banner-sub { font-size: 0.82rem; color: var(--text-muted); margin: 0; line-height: 1.5; max-width: 62ch; }
+.mp-banner-sub strong { color: var(--mp-accent); }
+
+.mp-tiles {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.85rem;
+}
+.mp-tile {
+  background: var(--panel-bg); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--panel-border); border-top: 2px solid var(--mp-accent-border);
+  border-radius: 12px; padding: 0.9rem 1rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.mp-tile-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.mp-tile-value { font-size: 1.25rem; font-weight: 700; font-family: monospace; color: var(--text-main); }
+.mp-tile-value small { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; }
+.mp-tile-alert { border-top-color: var(--danger); }
+.mp-tile-alert .mp-tile-value { color: var(--danger); }
+
+.mp-card {
+  background: var(--panel-bg); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--panel-border); border-radius: 16px;
+  overflow: hidden; box-shadow: var(--glass-shadow);
+}
+
+.mp-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.mp-table th {
+  text-align: left; padding: 0.8rem 1rem; font-size: 0.7rem;
+  text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);
+  background: rgba(217, 119, 6, 0.06); border-bottom: 1px solid var(--mp-accent-border);
+}
+.mp-table td { padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: top; }
+.mp-table tr:last-child td { border-bottom: none; }
+.mp-table tr.mp-row-alert { background: rgba(239, 68, 68, 0.05); }
+
+.mp-ticker-cell { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.mp-ticker { font-weight: 700; font-family: monospace; color: var(--mp-accent); }
+
+.mp-badge-pending {
+  font-size: 0.68rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: rgba(217, 119, 6, 0.16); border: 1px solid var(--mp-accent-border);
+  color: var(--mp-accent); white-space: nowrap;
+}
+
+.mp-weight-real { font-family: monospace; font-weight: 600; }
+.mp-drift-alert {
+  display: inline-block; margin-left: 0.4rem; font-size: 0.68rem; font-weight: 700;
+  color: var(--danger); background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 6px; padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
+.mp-value-cell { font-family: monospace; }
+.mp-stale { color: var(--warning); margin-left: 0.3rem; cursor: help; }
+.mp-price-sub { display: block; font-size: 0.68rem; color: var(--text-muted); font-family: monospace; margin-top: 0.1rem; }
+
+.mp-reason, .mp-sell { font-size: 0.78rem; color: var(--text-muted); max-width: 22ch; line-height: 1.4; }
+
+.mp-cash-row td {
+  background: rgba(255,255,255,0.02); font-style: italic; color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.mp-cash-row .mp-value-cell { font-style: normal; }
+
+.mp-watchlist-card { padding: 1rem 1.4rem; border-style: dashed; border-color: var(--panel-border); }
+.mp-watchlist-title { font-size: 0.85rem; margin: 0 0 0.6rem; color: var(--text-muted); font-weight: 600; }
+.mp-watchlist-item {
+  display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0;
+  font-size: 0.82rem;
+}
+.mp-watchlist-ticker { font-family: monospace; font-weight: 700; color: var(--text-muted); }
+.mp-watchlist-note { color: var(--text-muted); font-size: 0.78rem; }
+
+@media (max-width: 720px) {
+  .mp-table { font-size: 0.78rem; }
+  .mp-reason, .mp-sell { max-width: none; }
+}
 
 /* shell.css est importé séparément depuis main.jsx (pour préserver
    l'ordre cascade : tokens → legacy → shell). Vite n'inline pas les
