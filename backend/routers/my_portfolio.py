@@ -57,7 +57,12 @@ def _safe_price(p: dict) -> tuple[float | None, str | None]:
     shares_per_adr = p.get("shares_per_adr", 1)
 
     try:
-        raw_price, as_of, _fetched_at = get_current_price_detailed(price_ticker)
+        # use_alpaca=False : ce book n'est pas exécuté via Alpaca (positions
+        # tenues sur un broker tiers) — le carnet IEX gratuit d'Alpaca dérive
+        # de plusieurs % vs le NBBO consolidé sur les tickers peu liquides
+        # (FMX/HRTG audités à ±7 %). yfinance (consolidé, retard ~15 min)
+        # colle mieux au prix réellement affiché par le broker de l'utilisateur.
+        raw_price, as_of, _fetched_at = get_current_price_detailed(price_ticker, use_alpaca=False)
     except Exception as exc:
         logger.warning(f"[my_portfolio] Prix indisponible pour {ticker} ({price_ticker}): {exc}")
         return None, None

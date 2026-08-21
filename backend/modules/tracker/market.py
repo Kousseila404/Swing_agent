@@ -100,7 +100,9 @@ def get_current_price(ticker: str) -> float | None:
     return price
 
 
-def get_current_price_detailed(ticker: str) -> tuple[float | None, str | None, str]:
+def get_current_price_detailed(
+    ticker: str, use_alpaca: bool = True
+) -> tuple[float | None, str | None, str]:
     """Retourne (prix, as_of, fetched_at).
 
     `fetched_at` : horodatage de cet appel (le chemin de fetch n'a AUCUNE
@@ -112,11 +114,21 @@ def get_current_price_detailed(ticker: str) -> tuple[float | None, str | None, s
     les deux et de repérer les tickers qui ne se rafraîchissent pas
     correctement côté fournisseur, plutôt que de le découvrir en comparant
     manuellement avec un broker externe.
+
+    `use_alpaca` : mettre à False pour forcer yfinance même si
+    BROKER_MODE=alpaca. Audit 2026-08-21 : le plan Alpaca gratuit ne sert
+    que le carnet IEX (une seule place), ce qui dérive de plusieurs % vs le
+    NBBO consolidé sur les tickers peu liquides (FMX/HRTG constatés à
+    ±7 %, PSX plus liquide à ±3 %) — confirmé en comparant les réponses
+    Alpaca brutes à un broker externe. Sans intérêt pour des positions qui
+    ne sont de toute façon pas exécutées via Alpaca (book personnel
+    my_portfolio) : yfinance (consolidé, juste retardé ~15 min) colle mieux
+    au prix affiché par un broker tiers que l'IEX temps réel.
     """
     fetched_at = datetime.now(timezone.utc).isoformat()
 
     # BROKER_MODE=alpaca → Alpaca Data API (temps réel, pas de délai)
-    if getattr(config, "BROKER_MODE", "paper").lower() == "alpaca":
+    if use_alpaca and getattr(config, "BROKER_MODE", "paper").lower() == "alpaca":
         try:
             from modules.alpaca_data import get_latest_price
             price = get_latest_price(ticker)

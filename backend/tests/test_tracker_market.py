@@ -138,6 +138,26 @@ def test_get_current_price_detailed_returns_bar_timestamp_as_of(monkeypatch):
     assert fetched_at is not None
 
 
+def test_get_current_price_detailed_use_alpaca_false_skips_alpaca(monkeypatch):
+    """Audit 2026-08-21 : Alpaca gratuit = IEX seul, dérive vs NBBO sur les
+    tickers peu liquides. use_alpaca=False doit forcer yfinance même en
+    BROKER_MODE=alpaca (cas my_portfolio, book non exécuté via Alpaca)."""
+    import config
+    monkeypatch.setattr(config, "BROKER_MODE", "alpaca", raising=False)
+    import modules.alpaca_data as ad
+    called = {"alpaca": False}
+    def _alpaca_price(_t):
+        called["alpaca"] = True
+        return 999.0
+    monkeypatch.setattr(ad, "get_latest_price", _alpaca_price)
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(close_price=150.0))
+
+    price, _as_of, _fetched_at = market.get_current_price_detailed("FMX", use_alpaca=False)
+
+    assert called["alpaca"] is False
+    assert price == 150.0
+
+
 def test_get_current_price_detailed_none_when_empty(monkeypatch):
     import config
     monkeypatch.setattr(config, "BROKER_MODE", "paper", raising=False)

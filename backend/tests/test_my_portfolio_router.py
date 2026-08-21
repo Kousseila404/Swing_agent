@@ -286,7 +286,7 @@ def test_safe_price_bnp_pa_converts_eur_to_usd(monkeypatch):
     # donnant $250.81 au lieu des ~$292.76 réels. Vérifie la conversion.
     monkeypatch.setattr(
         my_portfolio_router, "get_current_price_detailed",
-        lambda ticker: (107.22, "2026-08-21T15:00:00+00:00", "2026-08-21T15:00:05+00:00")
+        lambda ticker, use_alpaca=True: (107.22, "2026-08-21T15:00:00+00:00", "2026-08-21T15:00:05+00:00")
     )
     monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 1.1677 if pair == "EURUSD=X" else None)
     bnp = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "BNP.PA")
@@ -298,7 +298,7 @@ def test_safe_price_bnp_pa_converts_eur_to_usd(monkeypatch):
 def test_safe_price_bnp_pa_returns_none_when_fx_unavailable(monkeypatch):
     monkeypatch.setattr(
         my_portfolio_router, "get_current_price_detailed",
-        lambda ticker: (107.22, "2026-08-21T15:00:00+00:00", "2026-08-21T15:00:05+00:00")
+        lambda ticker, use_alpaca=True: (107.22, "2026-08-21T15:00:00+00:00", "2026-08-21T15:00:05+00:00")
     )
     monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: None)
     bnp = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "BNP.PA")
@@ -312,7 +312,7 @@ def test_safe_price_lnvgy_queries_hk_alias_and_applies_adr_ratio(monkeypatch):
     # ordinaires / ADR) converti en USD.
     seen_tickers = []
 
-    def _fake_price(ticker):
+    def _fake_price(ticker, use_alpaca=True):
         seen_tickers.append(ticker)
         return (100.0, "2026-08-21T08:00:00+00:00", "2026-08-21T08:00:05+00:00")  # 0992.HK en HKD
 
@@ -325,3 +325,20 @@ def test_safe_price_lnvgy_queries_hk_alias_and_applies_adr_ratio(monkeypatch):
     assert seen_tickers == ["0992.HK"]  # jamais "LNVGY" directement
     assert price_usd == 100.0 * 20 * (1.0 / 7.8)
     assert as_of == "2026-08-21T08:00:00+00:00"
+
+
+def test_safe_price_bypasses_alpaca_iex_feed(monkeypatch):
+    # Audit 2026-08-21 : Alpaca (plan gratuit, carnet IEX seul) dérive de
+    # plusieurs % vs le NBBO consolidé sur les tickers peu liquides du book
+    # (FMX/HRTG constatés à ±7 %). Ce book n'étant pas exécuté via Alpaca,
+    # my_portfolio doit toujours forcer use_alpaca=False.
+    captured = {}
+
+    def _fake_price(ticker, use_alpaca=True):
+        captured["use_alpaca"] = use_alpaca
+        return (100.0, "2026-08-21T15:00:00+00:00", "2026-08-21T15:00:05+00:00")
+
+    monkeypatch.setattr(my_portfolio_router, "get_current_price_detailed", _fake_price)
+    fmx = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "FMX")
+    my_portfolio_router._safe_price(fmx)
+    assert captured["use_alpaca"] is False
