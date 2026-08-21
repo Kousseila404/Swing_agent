@@ -51,18 +51,18 @@ def test_my_portfolio_happy_path_prices_available(monkeypatch):
     assert bnp["price_stale"] is False
 
 
-def test_my_portfolio_lnvgy_is_pending_with_badge_and_no_drift(monkeypatch):
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(50.0))
+def test_my_portfolio_lnvgy_position_opened_no_longer_pending(monkeypatch):
+    """Régression 2026-08-21 : LNVGY était en attente (shares=0, badge
+    earnings) jusqu'à l'ouverture réelle le 21/08 (37.094844 actions
+    ordinaires 0992.HK, relevé eToro) — is_pending doit repasser à False et
+    le badge "en attente" ne doit plus s'afficher (position ouverte)."""
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(140.0 / 37.094844))
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
-    assert lnvgy["is_pending"] is True
-    assert lnvgy["is_deploying"] is True
-    assert lnvgy["deployment_pct"] == 0.0
-    assert lnvgy["current_value"] == 0.0
-    assert lnvgy["drift_pct"] is None
-    assert lnvgy["rebalance_alert"] is False
-    assert lnvgy["badge"] == "⏳ En attente earnings 21/08"
+    assert lnvgy["is_pending"] is False
+    assert lnvgy["current_value"] == round(37.094844 * (140.0 / 37.094844), 2)
+    assert lnvgy.get("badge") is None
 
 
 def test_my_portfolio_partial_deployment_shows_progress_not_drift_alert(monkeypatch):
@@ -306,10 +306,12 @@ def test_safe_price_bnp_pa_returns_none_when_fx_unavailable(monkeypatch):
     assert price_usd is None
 
 
-def test_safe_price_lnvgy_queries_hk_alias_and_applies_adr_ratio(monkeypatch):
+def test_safe_price_lnvgy_queries_hk_alias_no_adr_multiplier(monkeypatch):
     # LNVGY (ADR US illiquide, prix bloqué à $0) -> doit interroger 0992.HK
-    # (cotation primaire HKEX) et reconstruire l'équivalent ADR (20 actions
-    # ordinaires / ADR) converti en USD.
+    # (cotation primaire HKEX), qui est aussi l'instrument réellement détenu
+    # (37.094844 actions ORDINAIRES 0992.HK, pas des unités ADR — voir
+    # my_portfolio_data.py) -> pas de multiplicateur ADR, juste la conversion
+    # de devise HKD -> USD.
     seen_tickers = []
 
     def _fake_price(ticker, use_alpaca=True):
@@ -323,8 +325,26 @@ def test_safe_price_lnvgy_queries_hk_alias_and_applies_adr_ratio(monkeypatch):
     price_usd, as_of = my_portfolio_router._safe_price(lnvgy)
 
     assert seen_tickers == ["0992.HK"]  # jamais "LNVGY" directement
-    assert price_usd == 100.0 * 20 * (1.0 / 7.8)
+    assert price_usd == 100.0 * (1.0 / 7.8)
     assert as_of == "2026-08-21T08:00:00+00:00"
+
+
+def test_safe_price_applies_shares_per_adr_when_configured(monkeypatch):
+    # Le mécanisme shares_per_adr reste valide pour une future ligne qui
+    # détiendrait réellement des unités ADR plutôt que l'action ordinaire —
+    # testé isolément ici puisque LNVGY (POSITIONS) ne l'utilise plus.
+    monkeypatch.setattr(
+        my_portfolio_router, "get_current_price_detailed",
+        lambda ticker, use_alpaca=True: (100.0, "2026-08-21T08:00:00+00:00", "2026-08-21T08:00:05+00:00")
+    )
+    monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 7.8 if pair == "USDHKD=X" else None)
+
+    synthetic_adr_position = {
+        "ticker": "FAKE_ADR", "price_ticker": "FAKE.HK",
+        "currency": "HKD", "shares_per_adr": 20,
+    }
+    price_usd, _as_of = my_portfolio_router._safe_price(synthetic_adr_position)
+    assert price_usd == 100.0 * 20 * (1.0 / 7.8)
 
 
 def test_safe_price_bypasses_alpaca_iex_feed(monkeypatch):
