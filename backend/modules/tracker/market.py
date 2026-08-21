@@ -8,7 +8,7 @@ Stratégie adaptative :
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import yfinance as yf
 
@@ -125,7 +125,7 @@ def get_current_price_detailed(
     my_portfolio) : yfinance (consolidé, juste retardé ~15 min) colle mieux
     au prix affiché par un broker tiers que l'IEX temps réel.
     """
-    fetched_at = datetime.now(timezone.utc).isoformat()
+    fetched_at = datetime.now(UTC).isoformat()
 
     # BROKER_MODE=alpaca → Alpaca Data API (temps réel, pas de délai)
     if use_alpaca and getattr(config, "BROKER_MODE", "paper").lower() == "alpaca":
