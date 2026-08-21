@@ -80,6 +80,14 @@ Exemples :
             "en attente (top 3), positions ouvertes, P&L. Appeler via cron le matin."
         ),
     )
+    mode_group.add_argument(
+        "--refresh-my-portfolio-earnings", action="store_true",
+        help=(
+            "Rafraîchit le calendrier earnings (next_earnings_date) du book "
+            "my_portfolio + watchlist, cache 24h. Appeler via cron quotidien, "
+            "avant le digest Telegram 07h30 (ex. `0 7 * * *`)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -106,6 +114,12 @@ Exemples :
         elif getattr(args, "daily_digest", False):
             from modules.daily_digest import send_daily_digest
             send_daily_digest()
+        elif getattr(args, "refresh_my_portfolio_earnings", False):
+            from modules.my_portfolio_data import POSITIONS, WATCHLIST
+            from modules.my_portfolio_earnings import refresh_earnings
+            symbols = sorted({p.get("price_ticker", p["ticker"]).upper() for p in POSITIONS + WATCHLIST})
+            diag = refresh_earnings(symbols)
+            logger.info(f"[my_portfolio_earnings] refreshed {len(diag)} symbols")
 
     except KeyboardInterrupt:
         logger.info("⚠️  Arrêt demandé par l'utilisateur (Ctrl+C)")

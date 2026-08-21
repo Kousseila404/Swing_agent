@@ -13,11 +13,15 @@ elle-même (`_usd_multiplier`/`get_fx_rate`) est testée séparément plus bas.
 """
 from __future__ import annotations
 
+import time
+from datetime import date, timedelta
+
 from fastapi.testclient import TestClient
 
 import api
 import routers.my_portfolio as my_portfolio_router
 from modules import api_core
+from modules import my_portfolio_earnings as earnings_mod
 
 
 def _client(monkeypatch) -> TestClient:
@@ -372,3 +376,158 @@ def test_safe_price_bypasses_alpaca_iex_feed(monkeypatch):
     fmx = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "FMX")
     my_portfolio_router._safe_price(fmx)
     assert captured["use_alpaca"] is False
+
+
+# ─────────────────────────────────────────────────────────────────
+# Earnings dynamiques (Upgrade 2) — badge/next_earnings_date calculés côté
+# router à partir du cache modules/my_portfolio_earnings, plus de champ
+# `badge` statique dans POSITIONS.
+# ─────────────────────────────────────────────────────────────────
+
+def test_my_portfolio_earnings_fields_null_when_no_cache(monkeypatch):
+    # Cache vide (défaut _client) : jamais de vrai appel réseau, tous les
+    # champs earnings à None/False, pas de badge.
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["next_earnings_date"] is None
+    assert bnp["earnings_days_until"] is None
+    assert bnp["earnings_source"] is None
+    assert bnp["earnings_data_stale"] is False
+    assert bnp["badge"] is None
+
+
+def test_my_portfolio_earnings_upcoming_shows_badge(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    upcoming = (date.today() + timedelta(days=10)).isoformat()
+
+    def _fake_snapshot(symbols):
+        return {s: {"next_earnings_date": upcoming, "source": "finnhub", "stale": False} for s in symbols}
+    monkeypatch.setattr(my_portfolio_router, "get_earnings_snapshot", _fake_snapshot)
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["next_earnings_date"] == upcoming
+    assert bnp["earnings_days_until"] == 10
+    assert bnp["earnings_source"] == "finnhub"
+    assert bnp["badge"] == "📅 Earnings dans 10 j"
+
+
+def test_my_portfolio_earnings_just_reported_transient_badge(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    reported = (date.today() - timedelta(days=2)).isoformat()
+
+    def _fake_snapshot(symbols):
+        return {s: {"next_earnings_date": reported, "source": "yfinance", "stale": False} for s in symbols}
+    monkeypatch.setattr(my_portfolio_router, "get_earnings_snapshot", _fake_snapshot)
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["earnings_days_until"] == -2
+    assert bnp["badge"] == f"✅ Résultats publiés le {reported}"
+
+
+def test_my_portfolio_earnings_outside_window_no_badge(monkeypatch):
+    # Régression du bug initial (Upgrade 2) : un earnings lointain (76j) ne
+    # doit jamais afficher de badge "en attente" figé indéfiniment.
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    far = (date.today() + timedelta(days=76)).isoformat()
+
+    def _fake_snapshot(symbols):
+        return {s: {"next_earnings_date": far, "source": "finnhub", "stale": False} for s in symbols}
+    monkeypatch.setattr(my_portfolio_router, "get_earnings_snapshot", _fake_snapshot)
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["earnings_days_until"] == 76
+    assert bnp["badge"] is None
+
+    # Aussi 6 jours après (hors fenêtre "résultats publiés" de 5j) -> plus de badge.
+    just_past = (date.today() - timedelta(days=6)).isoformat()
+
+    def _fake_snapshot_past(symbols):
+        return {s: {"next_earnings_date": just_past, "source": "finnhub", "stale": False} for s in symbols}
+    monkeypatch.setattr(my_portfolio_router, "get_earnings_snapshot", _fake_snapshot_past)
+    r2 = _client(monkeypatch).get("/api/my_portfolio")
+    bnp2 = next(p for p in r2.json()["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp2["badge"] is None
+
+
+def test_my_portfolio_earnings_data_stale_flag_surfaced(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    def _fake_snapshot(symbols):
+        return {s: {"next_earnings_date": None, "source": None, "stale": True} for s in symbols}
+    monkeypatch.setattr(my_portfolio_router, "get_earnings_snapshot", _fake_snapshot)
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["earnings_data_stale"] is True
+    assert bnp["badge"] is None  # pas de date connue malgré le staleness
+
+
+def test_my_portfolio_lnvgy_earnings_resolved_via_price_ticker(monkeypatch):
+    """LNVGY (ADR non couvert) doit interroger le cache sous 0992.HK (la
+    cotation primaire réellement détenue), jamais sous 'LNVGY' directement —
+    même convention que `_safe_price`/`price_ticker`."""
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    captured = {}
+
+    def _fake_snapshot(symbols):
+        captured["symbols"] = symbols
+        return {"0992.HK": {"next_earnings_date": "2026-09-01", "source": "yfinance", "stale": False}}
+    monkeypatch.setattr(my_portfolio_router, "get_earnings_snapshot", _fake_snapshot)
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    assert "0992.HK" in captured["symbols"]
+    assert "LNVGY" not in captured["symbols"]
+    assert "SEZL" in captured["symbols"]  # watchlist inclus dans le fetch
+
+    lnvgy = next(p for p in r.json()["positions"] if p["ticker"] == "LNVGY")
+    assert lnvgy["next_earnings_date"] == "2026-09-01"
+    assert lnvgy["earnings_source"] == "yfinance"
+
+
+def test_my_portfolio_watchlist_gets_earnings_fields(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    upcoming = (date.today() + timedelta(days=3)).isoformat()
+
+    def _fake_snapshot(symbols):
+        return {s: {"next_earnings_date": upcoming, "source": "finnhub", "stale": False} for s in symbols}
+    monkeypatch.setattr(my_portfolio_router, "get_earnings_snapshot", _fake_snapshot)
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    assert len(body["watchlist"]) == 1
+    sezl = body["watchlist"][0]
+    assert sezl["ticker"] == "SEZL"
+    assert sezl["next_earnings_date"] == upcoming
+    assert sezl["badge"] == "📅 Earnings dans 3 j"
+
+
+def test_my_portfolio_earnings_live_roundtrip_via_disk_cache(monkeypatch, tmp_path):
+    """Vérification live (Upgrade 2, définition du projet — voir
+    docs/UPGRADE_PROGRESS.md) : TestClient(api.app) bout-en-bout SANS mock
+    de `get_earnings_snapshot` — le cache disque est réellement écrit puis
+    relu par le router, prouvant que le pipeline complet fonctionne (pas
+    seulement la logique unitaire isolée)."""
+    monkeypatch.setattr(earnings_mod, "_CACHE_PATH", tmp_path / ".my_portfolio_earnings_cache.json")
+    upcoming = (date.today() + timedelta(days=5)).isoformat()
+    earnings_mod._save_cache({
+        "BNP.PA": {"next_earnings_date": upcoming, "source": "finnhub", "fetched_at": time.time()},
+    })
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    assert r.status_code == 200
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["next_earnings_date"] == upcoming
+    assert bnp["earnings_days_until"] == 5
+    assert bnp["earnings_source"] == "finnhub"
+    assert bnp["badge"] == "📅 Earnings dans 5 j"

@@ -135,6 +135,14 @@ export default function MyPortfolioPage() {
                     <div className="mp-ticker-cell">
                       <span className="mp-ticker">{p.ticker}</span>
                       {p.badge && <span className="mp-badge-pending">{p.badge}</span>}
+                      {p.earnings_data_stale && (
+                        <span
+                          className="mp-earnings-stale"
+                          title="Calendrier earnings indisponible depuis plus de 48h"
+                        >
+                          ?
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="mp-value-cell">{p.target_weight_pct}%</td>

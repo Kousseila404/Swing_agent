@@ -1185,6 +1185,13 @@
   color: var(--mp-accent); white-space: nowrap;
 }
 
+.mp-earnings-stale {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.1rem; height: 1.1rem; border-radius: 50%; font-size: 0.62rem; font-weight: 700;
+  color: var(--text-muted); background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.3); cursor: help;
+}
+
 .mp-weight-real { font-family: monospace; font-weight: 600; }
 .mp-drift-alert {
   display: inline-block; margin-left: 0.4rem; font-size: 0.68rem; font-weight: 700;

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Security
@@ -26,9 +27,27 @@ from modules.my_portfolio_data import (
     TOTAL_ENVELOPE_AMOUNT,
     WATCHLIST,
 )
+from modules.my_portfolio_earnings import get_earnings_snapshot
 from modules.tracker.market import get_current_price_detailed, get_fx_rate
 
 router = APIRouter(prefix="/api", tags=["my_portfolio"])
+
+# Fenêtre d'affichage du badge earnings — voir docs/UPGRADES_MY_PORTFOLIO.md
+# Upgrade 2 : "à venir" jusqu'à 14j avant, "résultats publiés" pendant les 5j
+# qui suivent (état transitoire, évite la disparition instantanée du badge
+# comme dans le bug initial LNVGY sans le laisser traîner indéfiniment).
+_EARNINGS_UPCOMING_MAX_DAYS = 14
+_EARNINGS_JUST_REPORTED_MIN_DAYS = -5
+
+
+def _earnings_badge(days_until: int | None, next_date: str | None) -> str | None:
+    if days_until is None:
+        return None
+    if 0 <= days_until <= _EARNINGS_UPCOMING_MAX_DAYS:
+        return f"📅 Earnings dans {days_until} j"
+    if _EARNINGS_JUST_REPORTED_MIN_DAYS <= days_until < 0:
+        return f"✅ Résultats publiés le {next_date}"
+    return None
 
 # Paire yfinance à interroger par devise native, et comment l'appliquer pour
 # obtenir un multiplicateur "× taux → USD" (EURUSD=X cote déjà en USD par
@@ -78,6 +97,25 @@ def _safe_price(p: dict) -> tuple[float | None, str | None]:
     return raw_price * shares_per_adr * fx, as_of
 
 
+def _earnings_fields(p: dict, today: date, snapshot: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    symbol = p.get("price_ticker", p["ticker"]).upper()
+    snap = snapshot.get(symbol, {"next_earnings_date": None, "source": None, "stale": False})
+    next_date_str = snap["next_earnings_date"]
+    days_until: int | None = None
+    if next_date_str:
+        try:
+            days_until = (date.fromisoformat(next_date_str) - today).days
+        except ValueError:
+            days_until = None
+    return {
+        "next_earnings_date": next_date_str,
+        "earnings_days_until": days_until,
+        "earnings_source": snap["source"],
+        "earnings_data_stale": snap["stale"],
+        "badge": _earnings_badge(days_until, next_date_str),
+    }
+
+
 @router.get("/my_portfolio")
 def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=max(1, len(POSITIONS))) as ex:
@@ -86,6 +124,12 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         ))
     prices = {t: r[0] for t, r in results.items()}
     prices_as_of = {t: r[1] for t, r in results.items()}
+
+    today = date.today()
+    earnings_symbols = sorted({
+        p.get("price_ticker", p["ticker"]).upper() for p in POSITIONS + WATCHLIST
+    })
+    earnings_snapshot = get_earnings_snapshot(earnings_symbols)
 
     rows: list[dict[str, Any]] = []
     for p in POSITIONS:
@@ -130,6 +174,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "is_pending":    shares <= 0,
             "pnl_usd":       round(pnl_usd, 2) if pnl_usd is not None else None,
             "pnl_pct":       round(pnl_pct, 1) if pnl_pct is not None else None,
+            **_earnings_fields(p, today, earnings_snapshot),
         })
 
     # Valeur actuelle réelle du book — purement informative (tuile "Valeur
@@ -173,6 +218,10 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
 
     cash_weight = CASH_RESERVE_AMOUNT / TOTAL_ENVELOPE_AMOUNT * 100
 
+    watchlist_rows = [
+        {**w, **_earnings_fields(w, today, earnings_snapshot)} for w in WATCHLIST
+    ]
+
     return {
         "positions": rows,
         "cash_reserve": {
@@ -180,7 +229,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "amount":            CASH_RESERVE_AMOUNT,
             "real_weight_pct":   round(cash_weight, 2),
         },
-        "watchlist":              WATCHLIST,
+        "watchlist":              watchlist_rows,
         "total_value":            round(total_current_value, 2),
         "total_pnl_usd":          round(total_pnl_usd, 2),
         "drift_threshold_pct":    REBALANCE_DRIFT_THRESHOLD_PCT,

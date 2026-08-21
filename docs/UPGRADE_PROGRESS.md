@@ -47,35 +47,69 @@ live (TestClient) est passée pour ses endpoints/champs.
 
 ### Upgrade 2 — Calendrier d'earnings automatique
 
-**Statut : NOT_STARTED**
+**Statut : DONE_VERIFIED**
 
 Checklist (voir détail dans `docs/UPGRADES_MY_PORTFOLIO.md`, section Upgrade 2) :
 
-- [ ] `backend/modules/my_portfolio_earnings.py` créé (fetch+cache Finnhub →
-      fallback yfinance, fail-open, cache 24h via `_disk_cache`)
-- [ ] Flag `--refresh-my-portfolio-earnings` ajouté à `backend/main.py`
-- [ ] `badge` statique retiré de tout `POSITIONS` dans `my_portfolio_data.py`
-      (déjà fait pour LNVGY le 2026-08-21 — vérifier qu'aucune autre ligne
-      n'en a un)
-- [ ] `routers/my_portfolio.py` calcule `next_earnings_date` /
+- [x] `backend/modules/my_portfolio_earnings.py` créé (fetch+cache Finnhub →
+      fallback yfinance, fail-open, cache 24h — fichier unique
+      `data/.my_portfolio_earnings_cache.json`, pas via `_disk_cache` générique
+      car TTL évalué par entrée/ticker et pas globalement au fichier, cf.
+      besoin de staleness par ticker distinct de `_disk_cache.read_json_cache`)
+- [x] Flag `--refresh-my-portfolio-earnings` ajouté à `backend/main.py`
+- [x] `badge` statique retiré de tout `POSITIONS` dans `my_portfolio_data.py`
+      (déjà fait pour LNVGY le 2026-08-21 ; vérifié : aucune autre ligne n'en
+      a un — `POSITIONS`/`WATCHLIST` ne contiennent plus jamais de `badge`)
+- [x] `routers/my_portfolio.py` calcule `next_earnings_date` /
       `earnings_days_until` / `earnings_source` / `earnings_data_stale` par
-      row et le badge dynamique correspondant
-- [ ] Tests unitaires (mock Finnhub + yfinance, jamais de vrai appel réseau
-      dans les tests — pattern `_MockTicker` déjà utilisé dans
-      `test_tracker_market.py`)
-- [ ] Vérification live via `TestClient(api.app).get("/api/my_portfolio")` :
-      les champs earnings apparaissent dans la réponse JSON
-- [ ] Frontend `MyPortfolioPage.jsx` : badge piloté par les champs calculés
-- [ ] `npm run build` + `npx vitest run` verts
-- [ ] Suite pytest complète verte (`cd backend && ./venv/bin/python -m
-      pytest -q` — ou équivalent si pas de venv pré-existant dans le
-      sandbox, voir note d'environnement en bas de fichier)
-- [ ] Ligne crontab documentée dans le commit/PR (le déploiement effectif de
-      la ligne crontab reste manuel côté utilisateur — la routine ne peut
-      pas éditer le crontab du VPS de prod depuis le sandbox cloud, elle
-      documente juste la commande à ajouter)
+      row et le badge dynamique correspondant (positions ET watchlist,
+      résolu via `price_ticker` — LNVGY interroge `0992.HK`, pas `LNVGY`)
+- [x] Tests unitaires (mock Finnhub + yfinance, jamais de vrai appel réseau
+      dans les tests — `backend/tests/test_my_portfolio_earnings.py`, 22
+      tests : cache disque, fail-open par source, fail-open global avec
+      conservation de la dernière valeur connue, TTL, staleness 48h)
+- [x] Vérification live via `TestClient(api.app).get("/api/my_portfolio")` :
+      `test_my_portfolio_earnings_live_roundtrip_via_disk_cache` dans
+      `test_my_portfolio_router.py` — cache disque réellement écrit puis relu
+      par le router en bout en bout, plus 7 autres tests d'intégration
+      (badge upcoming/just-reported/hors-fenêtre, stale flag, résolution
+      LNVGY→0992.HK, watchlist)
+- [x] Frontend `MyPortfolioPage.jsx` : badge piloté par les champs calculés
+      côté API (aucun changement requis, `p.badge` déjà consommé tel quel) +
+      indicateur discret `mp-earnings-stale` ("?" gris, tooltip) quand
+      `earnings_data_stale=true`
+- [x] `npm run build` + `npx vitest run` verts (45/45, aucune régression) +
+      `npm run lint` vert
+- [x] Suite pytest complète verte (1183 tests, +30 vs baseline 1153 — 3
+      échecs pré-existants sans rapport avec cet upgrade, voir note de run)
+- [x] Ligne crontab documentée dans le commit (voir note de run — déploiement
+      manuel par l'utilisateur, hors de portée du sandbox cloud)
 
-**Note de run** : (vide — à remplir par le premier run qui touche cet upgrade)
+**Note de run (2026-08-21)** : Implémenté et vérifié intégralement en un
+run. `FinnhubProvider.get_revisions_and_earnings` (déjà existant, logique
+`min(dated, key=date)` réutilisée telle quelle) → fallback
+`_scrape_revisions_and_earnings` (yfinance_provider.py, déjà existant,
+réutilisé tel quel pour l'extraction `next_earnings_date`) si Finnhub
+absent/pas de clé/pas de date. Cache par ticker (pas par fichier global)
+pour permettre un staleness différencié : `CACHE_TTL_SECONDS`=24h déclenche
+le refetch, `STALE_MAX_AGE_SECONDS`=48h marque `earnings_data_stale=true`
+sans faire disparaître la dernière date connue (fail-open, jamais de valeur
+codée en dur). Ligne crontab à ajouter manuellement par l'utilisateur sur le
+VPS de prod : `0 7 * * * cd /path/to/backend && ./venv/bin/python main.py
+--refresh-my-portfolio-earnings` (avant le digest Telegram 07h30 existant).
+Env sandbox : venv recréé avec `python3.12` explicitement — le `python3`
+système par défaut du sandbox est 3.11, qui casse sur une f-string existante
+(`modules/alerter.py:386`, backslash dans l'expression, syntaxe Python
+3.12+) ; rien à voir avec cet upgrade, juste une note pour les runs futurs.
+3 échecs pytest pré-existants et non liés (`test_duckdb_journal.py::
+TestShadowInsert::test_fail_open_on_bad_path`, `test_risk.py::
+TestSectorConcentration::test_blocks_when_sector_full`/
+`test_custom_max_per_sector`) — confirmés reproductibles en isolation sans
+aucun changement de code (environnement sandbox : process root, écriture
+réussit dans un chemin "non-writable" ; données sector de test absentes/
+différentes du sandbox). Aucune régression : ces 3 tests échouaient déjà
+avant cet upgrade, le compte total progresse de 1153→1183 (+30 nouveaux
+tests, tous verts).
 
 ---
 
