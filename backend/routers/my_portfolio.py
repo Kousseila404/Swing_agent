@@ -93,7 +93,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         price  = prices.get(p["ticker"])
 
         if shares <= 0:
-            # Pas encore acheté (ex: LNVGY en attente earnings) → 0 réel,
+            # Pas encore acheté (position en attente d'ouverture) → 0 réel,
             # pas de fallback sur le montant cible.
             current_value, price_stale = 0.0, False
         elif price is not None:
@@ -105,7 +105,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
 
         # P&L — axe de tracking séparé du poids/dérive : "combien j'ai
         # gagné/perdu vs mon prix d'entrée réel", indépendant de l'allocation
-        # cible. Nécessite un prix d'entrée connu (None pour LNVGY, pas
+        # cible. Nécessite un prix d'entrée connu (None pour une position pas
         # encore ouverte) et un prix live valide (pas de fallback stale).
         # entry_price est natif à `currency` (même devise que le prix brut
         # avant conversion) → reconverti au taux live actuel pour rester
@@ -134,13 +134,13 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
 
     # Valeur actuelle réelle du book — purement informative (tuile "Valeur
     # totale"). NE DOIT JAMAIS servir de dénominateur au poids réel : cette
-    # somme varie avec le déploiement des positions (PSX/LNVGY pas encore
-    # pleinement investies), ce qui gonflerait artificiellement le poids
+    # somme varie avec le déploiement des positions (ex: PSX pas encore
+    # pleinement investie), ce qui gonflerait artificiellement le poids
     # réel de toutes les autres lignes.
     total_current_value = sum(r["current_value"] for r in rows) + CASH_RESERVE_AMOUNT
 
     # P&L global — somme des P&L $ des lignes ouvertes avec un prix d'entrée
-    # connu (LNVGY exclue : pas de position, pas de P&L calculable).
+    # connu (une position sans entry_price, pas encore ouverte, est exclue).
     total_pnl_usd = sum(r["pnl_usd"] for r in rows if r["pnl_usd"] is not None)
 
     for r in rows:
@@ -152,8 +152,8 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         target_amount = r["target_amount"]
 
         # % du montant cible effectivement déployé (prix live × shares vs
-        # target_amount). LNVGY à 0 part (0%) est le cas extrême de cette
-        # même logique — pas un cas à part.
+        # target_amount). Une position à 0 part (0%) est le cas extrême de
+        # cette même logique — pas un cas à part.
         deployment_pct = (r["current_value"] / target_amount * 100) if target_amount else 100.0
         is_deploying = deployment_pct < DEPLOYMENT_THRESHOLD_PCT
 

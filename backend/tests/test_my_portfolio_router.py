@@ -201,14 +201,24 @@ def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
     assert psx["pnl_pct"] < 0
 
 
-def test_my_portfolio_lnvgy_has_no_pnl_no_entry_price(monkeypatch):
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
-    r = _client(monkeypatch).get("/api/my_portfolio")
+def test_my_portfolio_lnvgy_pnl_uses_hkd_entry_price_converted_to_usd(monkeypatch):
+    """Régression 2026-08-21 : entry_price LNVGY = 29.58 HKD (exécution
+    21/08/2026, relevé eToro) — doit être reconverti en USD au même taux
+    live que current_price avant le calcul du P&L (sinon on compare un
+    prix USD à un prix HKD, résultat non sensique)."""
+    client = _client(monkeypatch)
+    # _client() neutralise _usd_multiplier par défaut (voir sa docstring) —
+    # on l'écrase après coup pour ce test-ci, qui veut justement vérifier la
+    # conversion HKD -> USD sur entry_price.
+    monkeypatch.setattr(my_portfolio_router, "_usd_multiplier", lambda c: 1.0 / 7.8)  # HKD -> USD
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(4.0))  # prix courant $4.00
+    r = client.get("/api/my_portfolio")
     body = r.json()
     lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
-    assert lnvgy["entry_price"] is None
-    assert lnvgy["pnl_usd"] is None
-    assert lnvgy["pnl_pct"] is None
+    entry_price_usd = 29.58 / 7.8
+    assert lnvgy["entry_price"] == 29.58  # champ brut HKD non modifié dans POSITIONS
+    assert lnvgy["pnl_usd"] == round((4.0 - entry_price_usd) * 37.094844, 2)
+    assert lnvgy["pnl_pct"] == round((4.0 / entry_price_usd - 1) * 100, 1)
 
 
 def test_my_portfolio_pnl_none_when_price_fetch_fails(monkeypatch):
@@ -223,7 +233,7 @@ def test_my_portfolio_pnl_none_when_price_fetch_fails(monkeypatch):
     assert bnp["pnl_pct"] is None
 
 
-def test_my_portfolio_total_pnl_usd_sums_open_positions_only(monkeypatch):
+def test_my_portfolio_total_pnl_usd_sums_positions_with_known_entry_price(monkeypatch):
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -231,9 +241,9 @@ def test_my_portfolio_total_pnl_usd_sums_open_positions_only(monkeypatch):
         sum(p["pnl_usd"] for p in body["positions"] if p["pnl_usd"] is not None), 2
     )
     assert body["total_pnl_usd"] == expected
-    # LNVGY (pas de prix d'entrée) ne doit pas contribuer.
-    lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
-    assert lnvgy["pnl_usd"] is None
+    # Toutes les lignes ont désormais un entry_price connu (LNVGY inclus
+    # depuis le 21/08/2026) -> aucune ne doit avoir un pnl_usd None ici.
+    assert all(p["pnl_usd"] is not None for p in body["positions"])
 
 
 def test_my_portfolio_requires_auth_when_configured(monkeypatch):
