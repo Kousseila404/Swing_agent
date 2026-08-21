@@ -37,8 +37,15 @@ def _client(monkeypatch) -> TestClient:
 
 
 def _flat_price(value, as_of=None):
-    """Fabrique un _safe_price qui retourne le même prix pour toutes les lignes."""
-    return lambda p: (value, as_of)
+    """Fabrique un _safe_price qui retourne le même prix pour toutes les lignes.
+
+    `_safe_price` retourne un 4-tuple (price_usd, as_of, raw_native_price, fx)
+    depuis Upgrade 3 (rebalance_order) — ici raw_native_price=value et fx=1.0
+    par défaut (les lignes non-USD dont la conversion FX importe sont testées
+    séparément plus bas, via `_safe_price` non mocké)."""
+    if value is None:
+        return lambda p: (None, None, None, None)
+    return lambda p: (value, as_of, value, 1.0)
 
 
 def test_my_portfolio_happy_path_prices_available(monkeypatch):
@@ -75,7 +82,8 @@ def test_my_portfolio_partial_deployment_shows_progress_not_drift_alert(monkeypa
     # ça doit basculer en statut "en cours de déploiement", pas en alerte
     # de dérive, même si l'écart au poids cible dépasse largement ±25%.
     def _price(p):
-        return (240.47 if p["ticker"] == "PSX" else 100.0, None)  # ~$78 / $230 déployé (34%)
+        v = 240.47 if p["ticker"] == "PSX" else 100.0
+        return (v, None, v, 1.0)  # ~$78 / $230 déployé (34%)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -91,7 +99,8 @@ def test_my_portfolio_fully_deployed_position_keeps_drift_alert(monkeypatch):
     # avec un poids réel qui a dérivé au-delà de ±25% -> l'alerte de
     # rééquilibrage classique doit s'appliquer, pas la barre de déploiement.
     def _price(p):
-        return (1000.0 if p["ticker"] == "PSX" else 100.0, None)  # $324.4 / $230 = 141% déployé
+        v = 1000.0 if p["ticker"] == "PSX" else 100.0
+        return (v, None, v, 1.0)  # $324.4 / $230 = 141% déployé
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -115,13 +124,31 @@ def test_my_portfolio_rebalance_alert_fires_beyond_threshold(monkeypatch):
     # BNP.PA cible 15% ($300 sur ~$2000). On force son prix très haut pour
     # que son poids réel s'envole et dépasse la dérive tolérée de ±25%.
     def _price(p):
-        return (100_000.0 if p["ticker"] == "BNP.PA" else 1.0, None)
+        v = 100_000.0 if p["ticker"] == "BNP.PA" else 1.0
+        return (v, None, v, 1.0)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
     assert bnp["rebalance_alert"] is True
     assert bnp["drift_pct"] > 25.0
+
+    # Upgrade 3 — vérification live (TestClient) : une dérive >25% simulée
+    # produit un rebalance_order cohérent (SELL, puisque la ligne est très
+    # au-dessus de sa cible $300).
+    order = bnp["rebalance_order"]
+    assert order is not None
+    assert order["direction"] == "SELL"
+    assert order["currency"] == "EUR"
+    delta_usd = 300.0 - bnp["current_value"]
+    assert order["amount_usd"] == round(delta_usd, 2)
+    assert order["amount_native"] == round(delta_usd, 2)  # fx mocké à 1.0 ici
+    assert order["shares_native"] > 0
+
+    # Aucune ligne cash_reserve/watchlist n'a de rebalance_order (pas
+    # d'instrument tradable cible pour le cash, watchlist = 0% cible).
+    assert "rebalance_order" not in body["cash_reserve"]
+    assert all("rebalance_order" not in w for w in body["watchlist"])
 
 
 def test_my_portfolio_real_weight_uses_fixed_2000_envelope_not_invested_sum(monkeypatch):
@@ -154,8 +181,9 @@ def test_my_portfolio_real_weight_uses_fixed_2000_envelope_not_invested_sum(monk
     def _price(p):
         ticker = p["ticker"]
         if ticker == "PSX":
-            return (1.0, None)  # quasi rien investi : $0.32 sur $230 cible
-        return (price_at_target.get(ticker, 100.0), None)
+            return (1.0, None, 1.0, 1.0)  # quasi rien investi : $0.32 sur $230 cible
+        v = price_at_target.get(ticker, 100.0)
+        return (v, None, v, 1.0)
 
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
@@ -186,7 +214,8 @@ def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
     de change — voir la section FX plus bas pour la conversion bout en bout.
     """
     def _price(p):
-        return ({"BNP.PA": 120.64, "PSX": 200.0}.get(p["ticker"], 100.0), None)
+        v = {"BNP.PA": 120.64, "PSX": 200.0}.get(p["ticker"], 100.0)
+        return (v, None, v, 1.0)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -261,12 +290,62 @@ def test_my_portfolio_requires_auth_when_configured(monkeypatch):
 
 def test_my_portfolio_price_as_of_surfaced_per_row(monkeypatch):
     def _price(p):
-        return (100.0, "2026-08-21T14:30:00+00:00")
+        return (100.0, "2026-08-21T14:30:00+00:00", 100.0, 1.0)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
     assert bnp["price_as_of"] == "2026-08-21T14:30:00+00:00"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Générateur d'ordres de rééquilibrage (Upgrade 3) — _rebalance_order
+# ─────────────────────────────────────────────────────────────────
+
+def _row(**overrides):
+    row = {
+        "rebalance_alert": True, "price_stale": False,
+        "target_amount": 300.0, "current_value": 100.0, "currency": "USD",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_rebalance_order_null_when_no_alert():
+    assert my_portfolio_router._rebalance_order(_row(rebalance_alert=False), 50.0, 1.0) is None
+
+
+def test_rebalance_order_null_when_price_stale():
+    assert my_portfolio_router._rebalance_order(_row(price_stale=True), 50.0, 1.0) is None
+
+
+def test_rebalance_order_null_when_raw_native_price_unavailable():
+    assert my_portfolio_router._rebalance_order(_row(), None, 1.0) is None
+
+
+def test_rebalance_order_null_when_fx_unavailable():
+    assert my_portfolio_router._rebalance_order(_row(), 50.0, None) is None
+
+
+def test_rebalance_order_buy_direction_usd():
+    # target 300, valeur actuelle 100 -> delta +200 -> BUY.
+    order = my_portfolio_router._rebalance_order(_row(), raw_native_price=50.0, fx=1.0)
+    assert order == {
+        "direction": "BUY", "shares_native": 4.0, "amount_native": 200.0,
+        "currency": "USD", "amount_usd": 200.0,
+    }
+
+
+def test_rebalance_order_sell_direction_native_currency():
+    # target 100, valeur actuelle 300 -> delta -200 -> SELL, exprimé en EUR.
+    row = _row(target_amount=100.0, current_value=300.0, currency="EUR")
+    order = my_portfolio_router._rebalance_order(row, raw_native_price=90.0, fx=1.1)
+    assert order["direction"] == "SELL"
+    assert order["currency"] == "EUR"
+    assert order["amount_usd"] == -200.0
+    assert order["amount_native"] == round(-200.0 / 1.1, 2)
+    assert order["shares_native"] == round(abs((-200.0 / 1.1) / 90.0), 6)
+    assert order["shares_native"] > 0  # toujours une magnitude positive
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -304,9 +383,11 @@ def test_safe_price_bnp_pa_converts_eur_to_usd(monkeypatch):
     )
     monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 1.1677 if pair == "EURUSD=X" else None)
     bnp = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "BNP.PA")
-    price_usd, as_of = my_portfolio_router._safe_price(bnp)
+    price_usd, as_of, raw_price, fx = my_portfolio_router._safe_price(bnp)
     assert price_usd == 107.22 * 1.1677
     assert as_of == "2026-08-21T15:00:00+00:00"
+    assert raw_price == 107.22
+    assert fx == 1.1677
 
 
 def test_safe_price_bnp_pa_returns_none_when_fx_unavailable(monkeypatch):
@@ -316,8 +397,10 @@ def test_safe_price_bnp_pa_returns_none_when_fx_unavailable(monkeypatch):
     )
     monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: None)
     bnp = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "BNP.PA")
-    price_usd, as_of = my_portfolio_router._safe_price(bnp)
+    price_usd, as_of, raw_price, fx = my_portfolio_router._safe_price(bnp)
     assert price_usd is None
+    assert raw_price is None
+    assert fx is None
 
 
 def test_safe_price_lnvgy_queries_hk_alias_no_adr_multiplier(monkeypatch):
@@ -336,11 +419,13 @@ def test_safe_price_lnvgy_queries_hk_alias_no_adr_multiplier(monkeypatch):
     monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 7.8 if pair == "USDHKD=X" else None)
 
     lnvgy = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "LNVGY")
-    price_usd, as_of = my_portfolio_router._safe_price(lnvgy)
+    price_usd, as_of, raw_price, fx = my_portfolio_router._safe_price(lnvgy)
 
     assert seen_tickers == ["0992.HK"]  # jamais "LNVGY" directement
     assert price_usd == 100.0 * (1.0 / 7.8)
     assert as_of == "2026-08-21T08:00:00+00:00"
+    assert raw_price == 100.0
+    assert fx == 1.0 / 7.8
 
 
 def test_safe_price_applies_shares_per_adr_when_configured(monkeypatch):
@@ -357,8 +442,10 @@ def test_safe_price_applies_shares_per_adr_when_configured(monkeypatch):
         "ticker": "FAKE_ADR", "price_ticker": "FAKE.HK",
         "currency": "HKD", "shares_per_adr": 20,
     }
-    price_usd, _as_of = my_portfolio_router._safe_price(synthetic_adr_position)
+    price_usd, _as_of, raw_price, fx = my_portfolio_router._safe_price(synthetic_adr_position)
     assert price_usd == 100.0 * 20 * (1.0 / 7.8)
+    assert raw_price == 100.0
+    assert fx == 1.0 / 7.8
 
 
 def test_safe_price_bypasses_alpaca_iex_feed(monkeypatch):

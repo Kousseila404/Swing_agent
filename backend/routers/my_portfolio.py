@@ -68,8 +68,15 @@ def _usd_multiplier(currency: str) -> float | None:
     return rate if currency == "EUR" else 1.0 / rate
 
 
-def _safe_price(p: dict) -> tuple[float | None, str | None]:
-    """Prix live d'une position, converti en USD, + timestamp source (as_of)."""
+def _safe_price(p: dict) -> tuple[float | None, str | None, float | None, float | None]:
+    """Prix live d'une position, converti en USD, + timestamp source (as_of).
+
+    Expose aussi le prix natif brut (`raw_price`, pré-ADR/pré-FX) et le
+    multiplicateur FX utilisé (`fx`) — réutilisés par `_rebalance_order`
+    pour exprimer un ordre dans la devise native sans double conversion
+    silencieuse ni nouveau fetch réseau (voir Upgrade 3,
+    docs/UPGRADES_MY_PORTFOLIO.md).
+    """
     ticker       = p["ticker"]
     price_ticker = p.get("price_ticker", ticker)
     currency     = p.get("currency", "USD")
@@ -84,17 +91,17 @@ def _safe_price(p: dict) -> tuple[float | None, str | None]:
         raw_price, as_of, _fetched_at = get_current_price_detailed(price_ticker, use_alpaca=False)
     except Exception as exc:
         logger.warning(f"[my_portfolio] Prix indisponible pour {ticker} ({price_ticker}): {exc}")
-        return None, None
+        return None, None, None, None
 
     if raw_price is None:
-        return None, None
+        return None, None, None, None
 
     fx = _usd_multiplier(currency)
     if fx is None:
         logger.warning(f"[my_portfolio] Taux de change {currency} indisponible pour {ticker} — prix ignoré")
-        return None, None
+        return None, None, None, None
 
-    return raw_price * shares_per_adr * fx, as_of
+    return raw_price * shares_per_adr * fx, as_of, raw_price, fx
 
 
 def _earnings_fields(p: dict, today: date, snapshot: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -116,6 +123,32 @@ def _earnings_fields(p: dict, today: date, snapshot: dict[str, dict[str, Any]]) 
     }
 
 
+def _rebalance_order(r: dict[str, Any], raw_native_price: float | None, fx: float | None) -> dict[str, Any] | None:
+    """Ordre BUY/SELL pour ramener une ligne dérivée à son poids cible.
+
+    `None` si pas d'alerte de dérive, prix stale, ou FX indisponible — un
+    ordre approximatif serait pire qu'aucun ordre (voir Upgrade 3,
+    docs/UPGRADES_MY_PORTFOLIO.md, "Cas limites").
+    """
+    if not r["rebalance_alert"] or r["price_stale"] or raw_native_price is None or fx is None:
+        return None
+
+    # target_amount est déjà la valeur-cible en $ pour cette ligne (voir
+    # commentaire TOTAL_ENVELOPE_AMOUNT) : delta_usd > 0 => acheter.
+    delta_usd = r["target_amount"] - r["current_value"]
+    direction = "BUY" if delta_usd > 0 else "SELL"
+    amount_native = delta_usd / fx
+    shares_native = abs(amount_native / raw_native_price)
+
+    return {
+        "direction": direction,
+        "shares_native": round(shares_native, 6),
+        "amount_native": round(amount_native, 2),
+        "currency": r.get("currency", "USD"),
+        "amount_usd": round(delta_usd, 2),
+    }
+
+
 @router.get("/my_portfolio")
 def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=max(1, len(POSITIONS))) as ex:
@@ -124,6 +157,8 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         ))
     prices = {t: r[0] for t, r in results.items()}
     prices_as_of = {t: r[1] for t, r in results.items()}
+    raw_native_prices = {t: r[2] for t, r in results.items()}
+    fx_multipliers = {t: r[3] for t, r in results.items()}
 
     today = date.today()
     earnings_symbols = sorted({
@@ -215,6 +250,9 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         r["is_deploying"]     = is_deploying
         r["drift_pct"]        = round(drift_pct, 1) if drift_pct is not None else None
         r["rebalance_alert"]  = drift_pct is not None and abs(drift_pct) > REBALANCE_DRIFT_THRESHOLD_PCT
+        r["rebalance_order"]  = _rebalance_order(
+            r, raw_native_prices.get(r["ticker"]), fx_multipliers.get(r["ticker"])
+        )
 
     cash_weight = CASH_RESERVE_AMOUNT / TOTAL_ENVELOPE_AMOUNT * 100
 

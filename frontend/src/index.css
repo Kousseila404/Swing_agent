@@ -1200,6 +1200,13 @@
   white-space: nowrap;
 }
 
+/* Ordre de rééquilibrage suggéré (Upgrade 3) — sous le badge de dérive,
+   couleur héritée de .mp-pnl-pos/.mp-pnl-neg selon BUY/SELL. */
+.mp-rebalance-order {
+  display: block; font-size: 0.68rem; font-family: monospace;
+  margin-top: 0.25rem; white-space: nowrap;
+}
+
 .mp-value-cell { font-family: monospace; }
 .mp-stale { color: var(--warning); margin-left: 0.3rem; cursor: help; }
 .mp-price-sub { display: block; font-size: 0.68rem; color: var(--text-muted); font-family: monospace; margin-top: 0.1rem; }

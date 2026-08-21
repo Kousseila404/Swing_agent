@@ -45,6 +45,17 @@ function pnlClass(n) {
   return n > 0 ? 'mp-pnl-pos' : 'mp-pnl-neg';
 }
 
+// Le montant USD est toujours affiché entre parenthèses pour rester
+// comparable entre les lignes du book (voir docs/UPGRADES_MY_PORTFOLIO.md,
+// Upgrade 3), en plus du montant natif quand la devise n'est pas USD.
+function fmtOrderAmount(order) {
+  const usd = fmtSignedUsd(order.amount_usd);
+  if (order.currency === 'USD') return usd;
+  const sign = order.amount_native > 0 ? '+' : order.amount_native < 0 ? '−' : '';
+  const native = `${sign}${Math.abs(order.amount_native).toFixed(2)} ${order.currency}`;
+  return `${native} / ${usd}`;
+}
+
 export default function MyPortfolioPage() {
   const q = useMyPortfolio();
 
@@ -161,12 +172,20 @@ export default function MyPortfolioPage() {
                         </span>
                       </div>
                     ) : p.rebalance_alert && (
-                      <span
-                        className="mp-drift-alert"
-                        title={`Rééquilibrage suggéré — dérive ${p.drift_pct > 0 ? '+' : ''}${p.drift_pct}% vs poids cible (seuil ±${driftThreshold}%)`}
-                      >
-                        ⚠ {p.drift_pct > 0 ? '+' : ''}{p.drift_pct}%
-                      </span>
+                      <>
+                        <span
+                          className="mp-drift-alert"
+                          title={`Rééquilibrage suggéré — dérive ${p.drift_pct > 0 ? '+' : ''}${p.drift_pct}% vs poids cible (seuil ±${driftThreshold}%)`}
+                        >
+                          ⚠ {p.drift_pct > 0 ? '+' : ''}{p.drift_pct}%
+                        </span>
+                        {p.rebalance_order && (
+                          <span className={`mp-rebalance-order ${p.rebalance_order.direction === 'BUY' ? 'mp-pnl-pos' : 'mp-pnl-neg'}`}>
+                            → {p.rebalance_order.direction === 'BUY' ? 'Acheter' : 'Vendre'} ~{p.rebalance_order.shares_native} actions
+                            {' '}({fmtOrderAmount(p.rebalance_order)})
+                          </span>
+                        )}
+                      </>
                     )}
                   </td>
                   <td className="mp-value-cell">{fmtUsd(p.target_amount)}</td>

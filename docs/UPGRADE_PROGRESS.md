@@ -115,23 +115,62 @@ tests, tous verts).
 
 ### Upgrade 3 — Générateur d'ordres de rééquilibrage
 
-**Statut : NOT_STARTED**
+**Statut : DONE_VERIFIED**
 
 Checklist :
 
-- [ ] `_safe_price` (ou équivalent) expose le prix natif brut + multiplicateur
+- [x] `_safe_price` (ou équivalent) expose le prix natif brut + multiplicateur
       FX utilisé, sans nouveau fetch réseau
-- [ ] `routers/my_portfolio.py` calcule `rebalance_order` par row (BUY/SELL,
+- [x] `routers/my_portfolio.py` calcule `rebalance_order` par row (BUY/SELL,
       shares natifs, montant natif + USD), `null` si pas d'alerte ou prix
       stale ou FX indisponible
-- [ ] Tests unitaires (tous les cas limites de la spec : prix stale, FX
+- [x] Tests unitaires (tous les cas limites de la spec : prix stale, FX
       indisponible, cash_reserve/watchlist exclus)
-- [ ] Vérification live via `TestClient` : un scénario avec dérive >25%
+- [x] Vérification live via `TestClient` : un scénario avec dérive >25%
       simulée produit bien un `rebalance_order` cohérent dans la réponse JSON
-- [ ] Frontend : ligne d'ordre sous le badge de dérive existant
-- [ ] `npm run build` + `npx vitest run` + suite pytest complète verts
+- [x] Frontend : ligne d'ordre sous le badge de dérive existant
+- [x] `npm run build` + `npx vitest run` + suite pytest complète verts
 
-**Note de run** : (vide)
+**Note de run (2026-08-21)** : Implémenté et vérifié intégralement en un
+run. `_safe_price` retourne désormais un 4-tuple `(price_usd, as_of,
+raw_native_price, fx)` — `raw_native_price` est simplement le prix déjà
+fetché par `get_current_price_detailed` avant application de
+`shares_per_adr`/FX (aucun nouveau fetch, juste exposé au lieu d'être jeté),
+et `fx` le multiplicateur déjà calculé par `_usd_multiplier`. Nouveau
+`_rebalance_order(row, raw_native_price, fx)` dans `routers/my_portfolio.py` :
+`delta_usd = target_amount - current_value` (réutilise l'invariant
+`target_amount` existant, pas de nouvelle formule de valeur cible),
+`direction` BUY/SELL selon le signe, `amount_native = delta_usd / fx`,
+`shares_native = abs(amount_native / raw_native_price)` (magnitude toujours
+positive, le signe vit dans `direction`/`amount_native`/`amount_usd`).
+`None` si `rebalance_alert=false`, `price_stale=true`, ou prix natif/FX
+indisponible — jamais d'ordre approximatif. `cash_reserve` et `watchlist`
+n'ont jamais ce champ (construits hors de la boucle qui le calcule).
+Frontend : nouvelle ligne `.mp-rebalance-order` sous le badge `.mp-drift-alert`
+existant (`MyPortfolioPage.jsx`), couleur héritée de `.mp-pnl-pos`/
+`.mp-pnl-neg` selon BUY/SELL ; montant USD toujours affiché entre
+parenthèses (ligne native `+ USD` pour les devises non-USD, ex.
+`−31.20 EUR / −$34.10` — le texte de la spec donnait deux exemples
+d'affichage légèrement contradictoires entre eux sur ce point précis,
+tranché en faveur de la contrainte explicite "toujours afficher le montant
+USD entre parenthèses" plutôt que de l'exemple isolé qui ne montrait que le
+montant natif).
+Tests : 6 nouveaux tests unitaires directs sur `_rebalance_order` (null par
+non-alerte/prix stale/prix natif absent/FX absent, direction BUY USD,
+direction SELL devise native EUR) + extension du test
+`test_my_portfolio_rebalance_alert_fires_beyond_threshold` existant en
+vérification live `TestClient` (dérive >25% simulée sur BNP.PA → `SELL`
+cohérent dans le JSON, `cash_reserve`/`watchlist` sans `rebalance_order`) +
+mise à jour des mocks `_safe_price` existants (2-tuple → 4-tuple) dans tout
+`test_my_portfolio_router.py` pour rester compatibles avec la nouvelle
+signature (aucune régression sur les 52 tests déjà en place dans ce fichier).
+Suite pytest complète : 1186 tests verts (mêmes 3 échecs pré-existants et
+non liés, déjà documentés dans la note Upgrade 2 —
+`test_duckdb_journal.py::TestShadowInsert::test_fail_open_on_bad_path`,
+`test_risk.py::TestSectorConcentration::test_blocks_when_sector_full`/
+`test_custom_max_per_sector`, environnement sandbox uniquement). `ruff` +
+`mypy` verts sur `routers/my_portfolio.py`. Frontend : `npm run build` +
+`npx vitest run` (45/45) + `npm run lint` verts, aucune régression.
 
 ---
 
