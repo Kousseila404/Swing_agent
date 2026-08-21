@@ -1196,6 +1196,8 @@
 .mp-value-cell { font-family: monospace; }
 .mp-stale { color: var(--warning); margin-left: 0.3rem; cursor: help; }
 .mp-price-sub { display: block; font-size: 0.68rem; color: var(--text-muted); font-family: monospace; margin-top: 0.1rem; }
+.mp-price-ts { cursor: help; }
+.mp-price-ts-stale { color: var(--warning); font-weight: 700; }
 
 /* P&L — axe séparé du poids/dérive (prix d'entrée réel vs prix actuel). */
 .mp-pnl-pos { color: var(--success); font-weight: 700; }

@@ -45,6 +45,30 @@ export function fmtPrice(v, digits = 2, fallback = DASH) {
   return isNumeric(v) ? `$${v.toFixed(digits)}` : fallback;
 }
 
+// fmtTimeAgo("2026-08-21T14:30:00Z") → "il y a 3 min" — âge relatif d'un
+// timestamp ISO. Sert à repérer visuellement un prix qui ne se rafraîchit
+// plus (ticker resté bloqué sur le même horodatage source d'un chargement
+// à l'autre) plutôt que de le découvrir en comparant manuellement avec un
+// broker externe.
+export function fmtTimeAgo(iso, fallback = DASH) {
+  const mins = ageMinutes(iso);
+  if (mins === null) return fallback;
+  if (mins < 1) return "à l'instant";
+  if (mins < 60) return `il y a ${Math.floor(mins)} min`;
+  const hours = mins / 60;
+  if (hours < 24) return `il y a ${Math.floor(hours)}h`;
+  return `il y a ${Math.floor(hours / 24)}j`;
+}
+
+// ageMinutes("2026-08-21T14:30:00Z") → âge en minutes (float), ou null si
+// le timestamp est absent/invalide.
+export function ageMinutes(iso) {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return null;
+  return Math.max(0, (Date.now() - then) / 60000);
+}
+
 // safeCompare(null, ">=", 60) → false (évite de colorer du vert par défaut)
 export function safeCompare(v, op, threshold) {
   if (!isNumeric(v)) return false;

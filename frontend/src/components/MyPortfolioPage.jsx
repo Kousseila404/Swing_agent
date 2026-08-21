@@ -23,7 +23,12 @@
 import ApiErrorBanner from './common/ApiErrorBanner';
 import { PageSkeleton } from './common/Skeleton';
 import { useMyPortfolio } from '../hooks/useApi';
-import { fmtSignedPct } from '../utils/format';
+import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../utils/format';
+
+// Au-delà de ce seuil, "dernière mise à jour" bascule en alerte visible —
+// signe qu'un ticker ne se rafraîchit plus normalement plutôt qu'un simple
+// jour férié/weekend sur une place étrangère (fenêtre de tolérance 3j).
+const STALE_PRICE_AGE_MINUTES = 3 * 24 * 60;
 
 function fmtUsd(n) {
   return Number.isFinite(n) ? `$${n.toFixed(2)}` : '—';
@@ -165,6 +170,18 @@ export default function MyPortfolioPage() {
                     {Number.isFinite(p.current_price) && (
                       <span className="mp-price-sub">{p.current_price.toFixed(2)} / action</span>
                     )}
+                    {p.price_as_of && (() => {
+                      const age = ageMinutes(p.price_as_of);
+                      const stale = age !== null && age > STALE_PRICE_AGE_MINUTES;
+                      return (
+                        <span
+                          className={`mp-price-sub mp-price-ts ${stale ? 'mp-price-ts-stale' : ''}`}
+                          title={`Prix daté du ${new Date(p.price_as_of).toLocaleString('fr-FR')}${stale ? ' — ne se rafraîchit peut-être plus correctement' : ''}`}
+                        >
+                          {stale && '⚠ '}maj {fmtTimeAgo(p.price_as_of)}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="mp-value-cell">
                     {p.pnl_usd == null ? (
