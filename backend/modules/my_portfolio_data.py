@@ -14,6 +14,22 @@ l'utilisateur, 2026-08-20) → sert UNIQUEMENT au calcul du P&L (axe
 "combien j'ai gagné/perdu"), un tracking distinct et indépendant du
 poids/dérive vs allocation cible. `None` = position pas encore ouverte
 (LNVGY) → P&L non calculable.
+
+`currency` (défaut "USD") = devise native de `price_ticker` sur son
+marché de cotation. Quand ≠ "USD", le routeur convertit le prix ET
+`entry_price` avec le taux live du jour (voir get_fx_rate) — les deux
+legs du P&L doivent rester dans la même devise, sinon le calcul est
+faux. Approximation acceptée : aucun historique FX n'est capturé, donc
+`entry_price` (natif) est reconverti au taux ACTUEL plutôt qu'au taux du
+jour d'achat — dérive FX résiduelle ignorée (hors scope d'un book perso).
+
+`price_ticker` (défaut = `ticker`) = symbole réellement interrogé pour le
+prix live, quand il diffère du ticker d'affichage (ex : ADR US illiquide
+sans données yfinance fiables → on interroge la cotation locale).
+
+`shares_per_adr` (défaut 1) = ratio de conversion si `price_ticker` cote
+la valeur ordinaire sous-jacente plutôt que l'ADR (ex : LNVGY = 20 actions
+ordinaires Lenovo/ADR — Yahoo/Nasdaq).
 """
 from __future__ import annotations
 
@@ -21,6 +37,7 @@ POSITIONS: list[dict] = [
     {
         "ticker": "BNP.PA", "target_weight_pct": 15.0, "target_amount": 300.0,
         "shares": 2.338323, "entry_price": 110.64, "beta": 0.36,
+        "currency": "EUR",
         "reason": "Stabilisateur, corrélation max 0.22 avec le book",
         "sell_signal": "Beta >0.8 durable ou corrélation >0.40",
     },
@@ -57,6 +74,10 @@ POSITIONS: list[dict] = [
     {
         "ticker": "LNVGY", "target_weight_pct": 7.0, "target_amount": 140.0,
         "shares": 0.0, "entry_price": None, "beta": 0.99,
+        # LNVGY (ADR US non sponsorisée) ne remonte pas de prix fiable sur
+        # yfinance → on interroge la cotation primaire HKEX (0992.HK) et on
+        # reconstruit l'équivalent ADR : 1 LNVGY = 20 actions ordinaires HK.
+        "price_ticker": "0992.HK", "currency": "HKD", "shares_per_adr": 20,
         "reason": "Conviction WS la plus forte (5.00/5)",
         "sell_signal": "2 trimestres manqués consécutifs",
         "badge": "⏳ En attente earnings 21/08",

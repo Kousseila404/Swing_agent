@@ -26,24 +26,61 @@ from modules.my_portfolio_data import (
     TOTAL_ENVELOPE_AMOUNT,
     WATCHLIST,
 )
-from modules.tracker.market import get_current_price
+from modules.tracker.market import get_current_price_detailed, get_fx_rate
 
 router = APIRouter(prefix="/api", tags=["my_portfolio"])
 
+# Paire yfinance à interroger par devise native, et comment l'appliquer pour
+# obtenir un multiplicateur "× taux → USD" (EURUSD=X cote déjà en USD par
+# EUR ; USDHKD=X cote en HKD par USD, donc on inverse).
+_FX_PAIR_FOR_CURRENCY = {"EUR": "EURUSD=X", "HKD": "USDHKD=X"}
 
-def _safe_price(ticker: str) -> float | None:
-    try:
-        return get_current_price(ticker)
-    except Exception as exc:
-        logger.warning(f"[my_portfolio] Prix indisponible pour {ticker}: {exc}")
+
+def _usd_multiplier(currency: str) -> float | None:
+    if currency == "USD":
+        return 1.0
+    pair = _FX_PAIR_FOR_CURRENCY.get(currency)
+    if pair is None:
+        logger.error(f"[my_portfolio] Devise {currency} sans paire FX configurée")
         return None
+    rate = get_fx_rate(pair)
+    if rate is None or rate <= 0:
+        return None
+    return rate if currency == "EUR" else 1.0 / rate
+
+
+def _safe_price(p: dict) -> tuple[float | None, str | None]:
+    """Prix live d'une position, converti en USD, + timestamp source (as_of)."""
+    ticker       = p["ticker"]
+    price_ticker = p.get("price_ticker", ticker)
+    currency     = p.get("currency", "USD")
+    shares_per_adr = p.get("shares_per_adr", 1)
+
+    try:
+        raw_price, as_of, _fetched_at = get_current_price_detailed(price_ticker)
+    except Exception as exc:
+        logger.warning(f"[my_portfolio] Prix indisponible pour {ticker} ({price_ticker}): {exc}")
+        return None, None
+
+    if raw_price is None:
+        return None, None
+
+    fx = _usd_multiplier(currency)
+    if fx is None:
+        logger.warning(f"[my_portfolio] Taux de change {currency} indisponible pour {ticker} — prix ignoré")
+        return None, None
+
+    return raw_price * shares_per_adr * fx, as_of
 
 
 @router.get("/my_portfolio")
 def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
-    tickers = [p["ticker"] for p in POSITIONS]
-    with ThreadPoolExecutor(max_workers=max(1, len(tickers))) as ex:
-        prices = dict(zip(tickers, ex.map(_safe_price, tickers), strict=True))
+    with ThreadPoolExecutor(max_workers=max(1, len(POSITIONS))) as ex:
+        results = dict(zip(
+            (p["ticker"] for p in POSITIONS), ex.map(_safe_price, POSITIONS), strict=True
+        ))
+    prices = {t: r[0] for t, r in results.items()}
+    prices_as_of = {t: r[1] for t, r in results.items()}
 
     rows: list[dict[str, Any]] = []
     for p in POSITIONS:
@@ -65,7 +102,14 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         # gagné/perdu vs mon prix d'entrée réel", indépendant de l'allocation
         # cible. Nécessite un prix d'entrée connu (None pour LNVGY, pas
         # encore ouverte) et un prix live valide (pas de fallback stale).
+        # entry_price est natif à `currency` (même devise que le prix brut
+        # avant conversion) → reconverti au taux live actuel pour rester
+        # cohérent avec `price` (déjà en USD). Voir docstring my_portfolio_data.
         entry_price = p["entry_price"]
+        currency = p.get("currency", "USD")
+        if entry_price and currency != "USD":
+            fx = _usd_multiplier(currency)
+            entry_price = entry_price * fx if fx is not None else None
         if entry_price and shares > 0 and price is not None:
             pnl_usd = (price - entry_price) * shares
             pnl_pct = (price / entry_price - 1) * 100
@@ -77,6 +121,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "current_price": price,
             "current_value": round(current_value, 2),
             "price_stale":   price_stale,
+            "price_as_of":   prices_as_of.get(p["ticker"]),
             "is_pending":    shares <= 0,
             "pnl_usd":       round(pnl_usd, 2) if pnl_usd is not None else None,
             "pnl_pct":       round(pnl_pct, 1) if pnl_pct is not None else None,

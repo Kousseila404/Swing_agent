@@ -96,14 +96,35 @@ def get_current_price(ticker: str) -> float | None:
     Fallback automatique sur EOD si l'appel intraday échoue.
     Retourne None si toutes les tentatives échouent — trade reste OPEN.
     """
+    price, _as_of, _fetched_at = get_current_price_detailed(ticker)
+    return price
+
+
+def get_current_price_detailed(ticker: str) -> tuple[float | None, str | None, str]:
+    """Retourne (prix, as_of, fetched_at).
+
+    `fetched_at` : horodatage de cet appel (le chemin de fetch n'a AUCUNE
+    couche de cache — chaque appel tape yfinance/Alpaca en direct).
+    `as_of` : horodatage de la barre de prix elle-même, tel que renvoyé par
+    la source. Une donnée "fraîchement fetchée" (fetched_at = maintenant)
+    peut quand même porter un `as_of` vieux de plusieurs heures si la source
+    elle-même sert un prix retardé/périmé — ce champ permet de distinguer
+    les deux et de repérer les tickers qui ne se rafraîchissent pas
+    correctement côté fournisseur, plutôt que de le découvrir en comparant
+    manuellement avec un broker externe.
+    """
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
     # BROKER_MODE=alpaca → Alpaca Data API (temps réel, pas de délai)
     if getattr(config, "BROKER_MODE", "paper").lower() == "alpaca":
         try:
             from modules.alpaca_data import get_latest_price
             price = get_latest_price(ticker)
             if price is not None and price > 0:
-                logger.debug(f"[{ticker}] Prix Alpaca : {price:.4f}")
-                return price
+                logger.debug(f"[{ticker}] Prix Alpaca : {price:.4f} fetched_at={fetched_at}")
+                # Cotation "latest quote" Alpaca : pas de barre historique à
+                # dater séparément, la donnée EST l'instant du fetch.
+                return price, fetched_at, fetched_at
         except Exception as _ae:
             logger.debug(f"[{ticker}] Alpaca price fallback yfinance : {_ae}")
 
@@ -117,19 +138,31 @@ def get_current_price(ticker: str) -> float | None:
             hist = yf.Ticker(ticker).history(period="1d", timeout=FETCH_TIMEOUT)
 
         if not hist.empty:
-            return float(hist["Close"].iloc[-1])
+            price = float(hist["Close"].iloc[-1])
+            as_of = hist.index[-1]
+            as_of_iso = as_of.isoformat()
+            age_s = (datetime.now(as_of.tzinfo) - as_of).total_seconds()
+            logger.info(
+                f"[{ticker}] price={price:.4f} as_of={as_of_iso} "
+                f"fetched_at={fetched_at} age={age_s:.0f}s"
+            )
+            return price, as_of_iso, fetched_at
 
         logger.warning(f"[{ticker}] Aucune donnée de prix disponible.")
-        return None
+        return None, None, fetched_at
 
     except Exception as exc:
         if intraday:
             try:
                 hist = yf.Ticker(ticker).history(period="1d", timeout=FETCH_TIMEOUT)
                 if not hist.empty:
-                    logger.debug(f"[{ticker}] Fallback EOD après échec intraday")
-                    return float(hist["Close"].iloc[-1])
+                    price = float(hist["Close"].iloc[-1])
+                    as_of_iso = hist.index[-1].isoformat()
+                    logger.debug(
+                        f"[{ticker}] Fallback EOD après échec intraday, as_of={as_of_iso}"
+                    )
+                    return price, as_of_iso, fetched_at
             except Exception:
                 pass
         logger.error(f"[{ticker}] Erreur yfinance : {exc}")
-        return None
+        return None, None, fetched_at
