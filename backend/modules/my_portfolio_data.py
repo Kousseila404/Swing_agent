@@ -73,14 +73,18 @@ POSITIONS: list[dict] = [
     },
     {
         "ticker": "LNVGY", "target_weight_pct": 7.0, "target_amount": 140.0,
-        "shares": 0.0, "entry_price": None, "beta": 0.99,
+        # Position ouverte 2026-08-21 (post-earnings) : 37.094844 ACTIONS
+        # ORDINAIRES 0992.HK détenues directement (relevé eToro), pas des
+        # unités ADR LNVGY — donc shares_per_adr=1 (défaut), pas de ×20.
+        # (37.094844 × prix 0992.HK / USDHKD ≈ $140.9 ≈ target_amount : le
+        # calcul confirme l'hypothèse "actions ordinaires directes".)
+        "shares": 37.094844, "entry_price": None, "beta": 0.99,
         # LNVGY (ADR US non sponsorisée) ne remonte pas de prix fiable sur
-        # yfinance → on interroge la cotation primaire HKEX (0992.HK) et on
-        # reconstruit l'équivalent ADR : 1 LNVGY = 20 actions ordinaires HK.
-        "price_ticker": "0992.HK", "currency": "HKD", "shares_per_adr": 20,
+        # yfinance → on interroge la cotation primaire HKEX (0992.HK), qui
+        # est aussi l'instrument réellement détenu ici (voir ci-dessus).
+        "price_ticker": "0992.HK", "currency": "HKD",
         "reason": "Conviction WS la plus forte (5.00/5)",
         "sell_signal": "2 trimestres manqués consécutifs",
-        "badge": "⏳ En attente earnings 21/08",
     },
     {
         "ticker": "MU", "target_weight_pct": 4.5, "target_amount": 90.0,
