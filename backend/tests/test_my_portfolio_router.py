@@ -3,6 +3,13 @@
 Book personnel long terme, statique, hors moteur TITAN. Auth bypass via
 ALLOW_UNAUTH=True pour isoler la logique de calcul (poids réel, dérive,
 badge LNVGY).
+
+`_safe_price` retourne désormais un tuple (prix_usd, price_as_of) et prend
+la position (dict) en argument, pas juste le ticker — nécessaire pour
+résoudre price_ticker/currency/shares_per_adr par ligne (BNP.PA EUR,
+LNVGY via 0992.HK). Les tests ci-dessous monkeypatchent `_safe_price`
+directement pour rester agnostiques à cette résolution ; la conversion FX
+elle-même (`_usd_multiplier`/`get_fx_rate`) est testée séparément plus bas.
 """
 from __future__ import annotations
 
@@ -19,8 +26,13 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(api.app)
 
 
+def _flat_price(value, as_of=None):
+    """Fabrique un _safe_price qui retourne le même prix pour toutes les lignes."""
+    return lambda p: (value, as_of)
+
+
 def test_my_portfolio_happy_path_prices_available(monkeypatch):
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: 100.0)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     r = _client(monkeypatch).get("/api/my_portfolio")
     assert r.status_code == 200
     body = r.json()
@@ -34,7 +46,7 @@ def test_my_portfolio_happy_path_prices_available(monkeypatch):
 
 
 def test_my_portfolio_lnvgy_is_pending_with_badge_and_no_drift(monkeypatch):
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: 50.0)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(50.0))
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
@@ -52,8 +64,8 @@ def test_my_portfolio_partial_deployment_shows_progress_not_drift_alert(monkeypa
     # prix) ne représente qu'une fraction du montant cible (< seuil 70%) —
     # ça doit basculer en statut "en cours de déploiement", pas en alerte
     # de dérive, même si l'écart au poids cible dépasse largement ±25%.
-    def _price(ticker):
-        return 240.47 if ticker == "PSX" else 100.0  # ~$78 / $230 déployé (34%)
+    def _price(p):
+        return (240.47 if p["ticker"] == "PSX" else 100.0, None)  # ~$78 / $230 déployé (34%)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -68,8 +80,8 @@ def test_my_portfolio_fully_deployed_position_keeps_drift_alert(monkeypatch):
     # PSX pleinement déployé (valeur actuelle > 70% du montant cible) mais
     # avec un poids réel qui a dérivé au-delà de ±25% -> l'alerte de
     # rééquilibrage classique doit s'appliquer, pas la barre de déploiement.
-    def _price(ticker):
-        return 1000.0 if ticker == "PSX" else 100.0  # $324.4 / $230 = 141% déployé
+    def _price(p):
+        return (1000.0 if p["ticker"] == "PSX" else 100.0, None)  # $324.4 / $230 = 141% déployé
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -81,7 +93,7 @@ def test_my_portfolio_fully_deployed_position_keeps_drift_alert(monkeypatch):
 
 
 def test_my_portfolio_price_fetch_failure_falls_back_to_target_amount(monkeypatch):
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: None)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(None))
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
@@ -92,8 +104,8 @@ def test_my_portfolio_price_fetch_failure_falls_back_to_target_amount(monkeypatc
 def test_my_portfolio_rebalance_alert_fires_beyond_threshold(monkeypatch):
     # BNP.PA cible 15% ($300 sur ~$2000). On force son prix très haut pour
     # que son poids réel s'envole et dépasse la dérive tolérée de ±25%.
-    def _price(ticker):
-        return 100_000.0 if ticker == "BNP.PA" else 1.0
+    def _price(p):
+        return (100_000.0 if p["ticker"] == "BNP.PA" else 1.0, None)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -129,10 +141,11 @@ def test_my_portfolio_real_weight_uses_fixed_2000_envelope_not_invested_sum(monk
         ]
     }
 
-    def _price(ticker):
+    def _price(p):
+        ticker = p["ticker"]
         if ticker == "PSX":
-            return 1.0  # quasi rien investi : $0.32 sur $230 cible
-        return price_at_target.get(ticker, 100.0)
+            return (1.0, None)  # quasi rien investi : $0.32 sur $230 cible
+        return (price_at_target.get(ticker, 100.0), None)
 
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
@@ -156,9 +169,17 @@ def test_my_portfolio_real_weight_uses_fixed_2000_envelope_not_invested_sum(monk
 
 def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
     """P&L est un axe séparé du poids/dérive : (prix actuel - prix
-    d'entrée réel) × actions, indépendant du montant/poids cible."""
-    def _price(ticker):
-        return {"BNP.PA": 120.64, "PSX": 200.0}.get(ticker, 100.0)
+    d'entrée réel) × actions, indépendant du montant/poids cible.
+
+    BNP.PA étant coté EUR, on neutralise la conversion FX (taux 1.0) pour
+    tester la formule P&L elle-même indépendamment du taux de change —
+    voir test_bnp_pa_pnl_converts_entry_price_with_same_fx_as_current_price
+    pour la conversion FX bout en bout.
+    """
+    monkeypatch.setattr(my_portfolio_router, "_usd_multiplier", lambda c: 1.0)
+
+    def _price(p):
+        return ({"BNP.PA": 120.64, "PSX": 200.0}.get(p["ticker"], 100.0), None)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -178,7 +199,7 @@ def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
 
 
 def test_my_portfolio_lnvgy_has_no_pnl_no_entry_price(monkeypatch):
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: 100.0)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     lnvgy = next(p for p in body["positions"] if p["ticker"] == "LNVGY")
@@ -190,7 +211,7 @@ def test_my_portfolio_lnvgy_has_no_pnl_no_entry_price(monkeypatch):
 def test_my_portfolio_pnl_none_when_price_fetch_fails(monkeypatch):
     # Prix live indisponible -> current_value fallback sur target_amount,
     # mais le P&L ne doit JAMAIS utiliser ce fallback (pas un vrai prix).
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: None)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(None))
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
@@ -200,7 +221,7 @@ def test_my_portfolio_pnl_none_when_price_fetch_fails(monkeypatch):
 
 
 def test_my_portfolio_total_pnl_usd_sums_open_positions_only(monkeypatch):
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: 100.0)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
     expected = round(
@@ -215,7 +236,89 @@ def test_my_portfolio_total_pnl_usd_sums_open_positions_only(monkeypatch):
 def test_my_portfolio_requires_auth_when_configured(monkeypatch):
     monkeypatch.setattr(api_core, "API_TOKEN", "secret-token")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
-    monkeypatch.setattr(my_portfolio_router, "_safe_price", lambda t: 100.0)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     client = TestClient(api.app)
     r = client.get("/api/my_portfolio")
     assert r.status_code == 401
+
+
+def test_my_portfolio_price_as_of_surfaced_per_row(monkeypatch):
+    def _price(p):
+        return (100.0, "2026-08-21T14:30:00+00:00")
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["price_as_of"] == "2026-08-21T14:30:00+00:00"
+
+
+# ─────────────────────────────────────────────────────────────────
+# FX — conversion EUR/HKD → USD (bug BNP.PA + mapping LNVGY→0992.HK)
+# ─────────────────────────────────────────────────────────────────
+
+def test_usd_multiplier_is_identity_for_usd():
+    assert my_portfolio_router._usd_multiplier("USD") == 1.0
+
+
+def test_usd_multiplier_eur_multiplies_direct_quote(monkeypatch):
+    # EURUSD=X cote directement en USD par EUR (ex: 1.1677).
+    monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 1.1677 if pair == "EURUSD=X" else None)
+    assert my_portfolio_router._usd_multiplier("EUR") == 1.1677
+
+
+def test_usd_multiplier_hkd_inverts_usdhkd_quote(monkeypatch):
+    # USDHKD=X cote en HKD par USD -> il faut inverser pour obtenir un
+    # multiplicateur HKD -> USD.
+    monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 7.8 if pair == "USDHKD=X" else None)
+    assert my_portfolio_router._usd_multiplier("HKD") == 1.0 / 7.8
+
+
+def test_usd_multiplier_returns_none_when_fx_unavailable(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: None)
+    assert my_portfolio_router._usd_multiplier("EUR") is None
+
+
+def test_safe_price_bnp_pa_converts_eur_to_usd(monkeypatch):
+    # Bug réel : prix BNP.PA fetché en EUR (107.22) mais jamais converti,
+    # donnant $250.81 au lieu des ~$292.76 réels. Vérifie la conversion.
+    monkeypatch.setattr(
+        my_portfolio_router, "get_current_price_detailed",
+        lambda ticker: (107.22, "2026-08-21T15:00:00+00:00", "2026-08-21T15:00:05+00:00")
+    )
+    monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 1.1677 if pair == "EURUSD=X" else None)
+    bnp = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "BNP.PA")
+    price_usd, as_of = my_portfolio_router._safe_price(bnp)
+    assert price_usd == 107.22 * 1.1677
+    assert as_of == "2026-08-21T15:00:00+00:00"
+
+
+def test_safe_price_bnp_pa_returns_none_when_fx_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        my_portfolio_router, "get_current_price_detailed",
+        lambda ticker: (107.22, "2026-08-21T15:00:00+00:00", "2026-08-21T15:00:05+00:00")
+    )
+    monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: None)
+    bnp = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "BNP.PA")
+    price_usd, as_of = my_portfolio_router._safe_price(bnp)
+    assert price_usd is None
+
+
+def test_safe_price_lnvgy_queries_hk_alias_and_applies_adr_ratio(monkeypatch):
+    # LNVGY (ADR US illiquide, prix bloqué à $0) -> doit interroger 0992.HK
+    # (cotation primaire HKEX) et reconstruire l'équivalent ADR (20 actions
+    # ordinaires / ADR) converti en USD.
+    seen_tickers = []
+
+    def _fake_price(ticker):
+        seen_tickers.append(ticker)
+        return (100.0, "2026-08-21T08:00:00+00:00", "2026-08-21T08:00:05+00:00")  # 0992.HK en HKD
+
+    monkeypatch.setattr(my_portfolio_router, "get_current_price_detailed", _fake_price)
+    monkeypatch.setattr(my_portfolio_router, "get_fx_rate", lambda pair: 7.8 if pair == "USDHKD=X" else None)
+
+    lnvgy = next(p for p in my_portfolio_router.POSITIONS if p["ticker"] == "LNVGY")
+    price_usd, as_of = my_portfolio_router._safe_price(lnvgy)
+
+    assert seen_tickers == ["0992.HK"]  # jamais "LNVGY" directement
+    assert price_usd == 100.0 * 20 * (1.0 / 7.8)
+    assert as_of == "2026-08-21T08:00:00+00:00"
