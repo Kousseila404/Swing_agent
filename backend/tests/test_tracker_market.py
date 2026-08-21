@@ -53,7 +53,12 @@ class _MockTicker:
             raise RuntimeError("simulated network error")
         if self._price is None:
             return pd.DataFrame(columns=["Close"])
-        return pd.DataFrame({"Close": [self._price]})
+        # DatetimeIndex tz-aware — reflète le format réel de yfinance,
+        # nécessaire depuis que get_current_price_detailed lit hist.index[-1]
+        # comme timestamp `as_of` de la source.
+        return pd.DataFrame(
+            {"Close": [self._price]}, index=[pd.Timestamp.now(tz="UTC")]
+        )
 
 
 def test_get_current_price_alpaca_success(monkeypatch):
@@ -116,3 +121,70 @@ def test_get_current_price_all_fail_returns_none(monkeypatch):
     monkeypatch.setattr(market, "is_market_hours", lambda: True)
     monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(raise_error=True))
     assert market.get_current_price("AAPL") is None
+
+
+# ─────────────────────────────────────────────────────────────────
+# get_current_price_detailed — expose le timestamp `as_of` de la source
+# (diagnostic staleness FMX/HRTG/PSX, sans couche de cache).
+# ─────────────────────────────────────────────────────────────────
+
+def test_get_current_price_detailed_returns_bar_timestamp_as_of(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "BROKER_MODE", "paper", raising=False)
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(close_price=150.0))
+    price, as_of, fetched_at = market.get_current_price_detailed("AAPL")
+    assert price == 150.0
+    assert as_of is not None
+    assert fetched_at is not None
+
+
+def test_get_current_price_detailed_none_when_empty(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "BROKER_MODE", "paper", raising=False)
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(close_price=None))
+    price, as_of, fetched_at = market.get_current_price_detailed("AAPL")
+    assert price is None
+    assert as_of is None
+    assert fetched_at is not None  # on sait toujours QUAND on a tenté le fetch
+
+
+# ─────────────────────────────────────────────────────────────────
+# get_fx_rate — taux de change live, caché 5 min
+# ─────────────────────────────────────────────────────────────────
+
+def test_get_fx_rate_returns_live_rate(monkeypatch):
+    market._FX_CACHE.clear()
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(close_price=1.1677))
+    assert market.get_fx_rate("EURUSD=X") == 1.1677
+
+
+def test_get_fx_rate_caches_within_ttl(monkeypatch):
+    market._FX_CACHE.clear()
+    calls = {"n": 0}
+    def _ticker_factory(_t):
+        calls["n"] += 1
+        return _MockTicker(close_price=1.1677 + calls["n"])
+    monkeypatch.setattr(market.yf, "Ticker", _ticker_factory)
+    first = market.get_fx_rate("EURUSD=X")
+    second = market.get_fx_rate("EURUSD=X")
+    assert first == second  # 2e appel sert le cache, pas un nouveau fetch
+    assert calls["n"] == 1
+
+
+def test_get_fx_rate_falls_back_to_stale_cache_on_error(monkeypatch):
+    market._FX_CACHE.clear()
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(close_price=1.1677))
+    first = market.get_fx_rate("EURUSD=X")
+    assert first == 1.1677
+
+    # Force l'expiration du cache puis simule un échec réseau -> doit
+    # retourner le dernier taux connu plutôt que None.
+    market._FX_CACHE["EURUSD=X"] = (first, 0.0)
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(raise_error=True))
+    assert market.get_fx_rate("EURUSD=X") == 1.1677
+
+
+def test_get_fx_rate_returns_none_when_never_fetched_and_fails(monkeypatch):
+    market._FX_CACHE.clear()
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(raise_error=True))
+    assert market.get_fx_rate("EURUSD=X") is None

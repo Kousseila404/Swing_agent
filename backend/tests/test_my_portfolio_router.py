@@ -23,6 +23,12 @@ from modules import api_core
 def _client(monkeypatch) -> TestClient:
     monkeypatch.setattr(api_core, "API_TOKEN", "")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", True)
+    # Neutralise la conversion FX par défaut (identité) — le routeur
+    # l'applique aussi à `entry_price` indépendamment de _safe_price (mocké
+    # dans presque tous les tests ci-dessous), donc sans ce défaut chaque
+    # test toucherait le réseau (get_fx_rate -> yfinance) pour BNP.PA (EUR).
+    # La conversion FX elle-même est testée isolément plus bas.
+    monkeypatch.setattr(my_portfolio_router, "_usd_multiplier", lambda c: 1.0)
     return TestClient(api.app)
 
 
@@ -171,13 +177,10 @@ def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
     """P&L est un axe séparé du poids/dérive : (prix actuel - prix
     d'entrée réel) × actions, indépendant du montant/poids cible.
 
-    BNP.PA étant coté EUR, on neutralise la conversion FX (taux 1.0) pour
-    tester la formule P&L elle-même indépendamment du taux de change —
-    voir test_bnp_pa_pnl_converts_entry_price_with_same_fx_as_current_price
-    pour la conversion FX bout en bout.
+    BNP.PA étant coté EUR, la conversion FX est neutralisée (taux 1.0) par
+    `_client()` pour tester la formule P&L elle-même indépendamment du taux
+    de change — voir la section FX plus bas pour la conversion bout en bout.
     """
-    monkeypatch.setattr(my_portfolio_router, "_usd_multiplier", lambda c: 1.0)
-
     def _price(p):
         return ({"BNP.PA": 120.64, "PSX": 200.0}.get(p["ticker"], 100.0), None)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
