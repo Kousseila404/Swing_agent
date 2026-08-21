@@ -78,7 +78,9 @@ POSITIONS: list[dict] = [
         # unités ADR LNVGY — donc shares_per_adr=1 (défaut), pas de ×20.
         # (37.094844 × prix 0992.HK / USDHKD ≈ $140.9 ≈ target_amount : le
         # calcul confirme l'hypothèse "actions ordinaires directes".)
-        "shares": 37.094844, "entry_price": None, "beta": 0.99,
+        # entry_price natif HKD (exécution 21/08/2026, relevé eToro) — reconverti
+        # en USD par le routeur au taux live (même mécanisme que current_price).
+        "shares": 37.094844, "entry_price": 29.58, "beta": 0.99,
         # LNVGY (ADR US non sponsorisée) ne remonte pas de prix fiable sur
         # yfinance → on interroge la cotation primaire HKEX (0992.HK), qui
         # est aussi l'instrument réellement détenu ici (voir ci-dessus).
