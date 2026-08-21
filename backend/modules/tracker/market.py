@@ -7,13 +7,46 @@ Stratégie adaptative :
 """
 from __future__ import annotations
 
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 
 import yfinance as yf
 
 import config
 
 from .state import FETCH_TIMEOUT, logger
+
+# Cache mémoire des taux de change (5 min) — évite de marteler yfinance à
+# chaque requête dashboard pour une donnée qui ne bouge pas seconde par
+# seconde. Contrairement aux prix actions (aucune couche de cache, voir
+# get_current_price_detailed), un taux FX stale de quelques minutes est
+# un compromis acceptable.
+_FX_CACHE: dict[str, tuple[float, float]] = {}  # pair -> (rate, fetched_epoch)
+_FX_CACHE_TTL_SECONDS = 300.0
+
+
+def get_fx_rate(pair: str) -> float | None:
+    """Taux de change live pour une paire yfinance (ex: "EURUSD=X", "USDHKD=X").
+
+    Retourne le dernier taux connu (même expiré) si le fetch échoue, plutôt
+    que None, pour éviter de casser l'affichage sur un simple hoquet réseau.
+    """
+    now = time.time()
+    cached = _FX_CACHE.get(pair)
+    if cached is not None and (now - cached[1]) < _FX_CACHE_TTL_SECONDS:
+        return cached[0]
+
+    try:
+        hist = yf.Ticker(pair).history(period="1d", timeout=FETCH_TIMEOUT)
+        if not hist.empty:
+            rate = float(hist["Close"].iloc[-1])
+            _FX_CACHE[pair] = (rate, now)
+            return rate
+        logger.warning(f"[FX] Aucune donnée pour {pair}.")
+    except Exception as exc:
+        logger.warning(f"[FX] Erreur taux {pair} : {exc}")
+
+    return cached[0] if cached is not None else None
 
 
 def is_market_hours() -> bool:
