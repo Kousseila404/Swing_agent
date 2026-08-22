@@ -7,6 +7,8 @@ Couvre :
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pandas as pd
 import pytest
 
@@ -208,3 +210,123 @@ def test_get_fx_rate_returns_none_when_never_fetched_and_fails(monkeypatch):
     market._FX_CACHE.clear()
     monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(raise_error=True))
     assert market.get_fx_rate("EURUSD=X") is None
+
+
+# ─────────────────────────────────────────────────────────────────
+# get_historical_price / get_historical_fx_rate — reconstruction de prix de
+# référence passés (Upgrade 4, journal d'exécution my_portfolio)
+# ─────────────────────────────────────────────────────────────────
+
+class _HistTicker:
+    """Simule yf.Ticker().history(start=, end=, interval=) : dispatché
+    selon la présence de `interval="1m"` (intraday) vs clôture journalière."""
+    def __init__(self, intraday_df=None, daily_df=None, raise_intraday=False, raise_daily=False):
+        self._intraday_df = intraday_df
+        self._daily_df = daily_df
+        self._raise_intraday = raise_intraday
+        self._raise_daily = raise_daily
+
+    def history(self, **kw) -> pd.DataFrame:
+        if kw.get("interval") == "1m":
+            if self._raise_intraday:
+                raise RuntimeError("simulated network error")
+            return self._intraday_df if self._intraday_df is not None else pd.DataFrame(columns=["Close"])
+        if self._raise_daily:
+            raise RuntimeError("simulated network error")
+        return self._daily_df if self._daily_df is not None else pd.DataFrame(columns=["Close"])
+
+
+def _intraday_df(base: datetime, offsets_prices: dict) -> pd.DataFrame:
+    idx = pd.DatetimeIndex([base + timedelta(minutes=m) for m in offsets_prices], tz="UTC")
+    return pd.DataFrame({"Close": list(offsets_prices.values())}, index=idx)
+
+
+def test_get_historical_price_rejects_naive_datetime():
+    with pytest.raises(ValueError):
+        market.get_historical_price("AAPL", datetime(2026, 8, 1, 10, 0))
+
+
+def test_get_historical_price_recent_uses_intraday_nearest_bar(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=5)
+    df = _intraday_df(at, {-2: 100.0, 0: 101.0, 3: 102.0})
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _HistTicker(intraday_df=df))
+    price, resolution = market.get_historical_price("AAPL", at)
+    assert price == 101.0
+    assert resolution == "intraday"
+
+
+def test_get_historical_price_recent_falls_back_daily_close_when_intraday_empty(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=5)
+    daily = pd.DataFrame(
+        {"Close": [95.0, 97.5]},
+        index=pd.DatetimeIndex([at - timedelta(days=1), at], tz="UTC"),
+    )
+    monkeypatch.setattr(
+        market.yf, "Ticker",
+        lambda _t: _HistTicker(intraday_df=pd.DataFrame(columns=["Close"]), daily_df=daily),
+    )
+    price, resolution = market.get_historical_price("AAPL", at)
+    assert price == 97.5
+    assert resolution == "daily_close"
+
+
+def test_get_historical_price_old_skips_intraday_uses_daily_close(monkeypatch):
+    """`at` hors fenêtre _INTRADAY_MAX_AGE_DAYS -> ne tente même pas
+    l'intraday (limite connue yfinance ~30j), direct daily_close."""
+    at = datetime.now(UTC) - timedelta(days=200)
+    calls = {"intraday": 0}
+
+    class _Tracking(_HistTicker):
+        def history(self, **kw):
+            if kw.get("interval") == "1m":
+                calls["intraday"] += 1
+            return super().history(**kw)
+
+    daily = pd.DataFrame({"Close": [88.0]}, index=pd.DatetimeIndex([at], tz="UTC"))
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _Tracking(daily_df=daily))
+    price, resolution = market.get_historical_price("AAPL", at)
+    assert price == 88.0
+    assert resolution == "daily_close"
+    assert calls["intraday"] == 0
+
+
+def test_get_historical_price_both_fail_returns_none_none(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=5)
+    monkeypatch.setattr(
+        market.yf, "Ticker",
+        lambda _t: _HistTicker(raise_intraday=True, raise_daily=True),
+    )
+    price, resolution = market.get_historical_price("AAPL", at)
+    assert price is None
+    assert resolution is None
+
+
+def test_get_historical_fx_rate_rejects_naive_datetime():
+    with pytest.raises(ValueError):
+        market.get_historical_fx_rate("EURUSD=X", datetime(2026, 8, 1, 10, 0))
+
+
+def test_get_historical_fx_rate_returns_close_at_date(monkeypatch):
+    at = datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
+    hist = pd.DataFrame(
+        {"Close": [1.05, 1.06]},
+        index=pd.DatetimeIndex([at - timedelta(days=1), at], tz="UTC"),
+    )
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _HistTicker(daily_df=hist))
+    assert market.get_historical_fx_rate("EURUSD=X", at) == 1.06
+
+
+def test_get_historical_fx_rate_falls_back_to_nearest_prior_day_on_holiday(monkeypatch):
+    """Jour férié FX simulé : aucune barre le jour exact -> repli sur la
+    dernière barre disponible dans la fenêtre (jour de bourse valide le
+    plus proche AVANT `at`)."""
+    at = datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
+    hist = pd.DataFrame({"Close": [1.04]}, index=pd.DatetimeIndex([at - timedelta(days=2)], tz="UTC"))
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _HistTicker(daily_df=hist))
+    assert market.get_historical_fx_rate("EURUSD=X", at) == 1.04
+
+
+def test_get_historical_fx_rate_returns_none_on_failure(monkeypatch):
+    at = datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
+    monkeypatch.setattr(market.yf, "Ticker", lambda _t: _HistTicker(raise_daily=True))
+    assert market.get_historical_fx_rate("EURUSD=X", at) is None

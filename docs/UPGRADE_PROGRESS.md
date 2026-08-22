@@ -327,7 +327,7 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
 - [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
@@ -368,6 +368,46 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite)** : Deuxième incrément — `get_historical_price(ticker, at)`
+et `get_historical_fx_rate(pair, at)` ajoutés à `modules/tracker/market.py`
+(extensions additives, aucune fonction existante modifiée). Résolution à
+deux paliers pour `get_historical_price` : si `at` est dans la fenêtre
+`_INTRADAY_MAX_AGE_DAYS=30` (limite connue yfinance), tente une barre 1-min
+sur une fenêtre ±15min autour de `at` (`DatetimeIndex.get_indexer(...,
+method="nearest")` pour la barre la plus proche exacte) → `resolution=
+"intraday"` ; sinon, ou si l'intraday échoue/est vide, repli sur la
+clôture journalière la plus proche AVANT `at` (fenêtre `[jour-10, jour+1)`,
+dernière ligne du résultat) → `resolution="daily_close"`. `(None, None)` si
+les deux échouent — jamais de valeur approximative silencieuse.
+`get_historical_fx_rate` réutilise le même repli clôture journalière (même
+fenêtre `[jour-10, jour+1)`, dernière ligne) : gère nativement le cas
+"jour férié FX" de la spec (aucune barre le jour exact → la barre valide la
+plus proche avant `at` est simplement la dernière du résultat), sans logique
+de repli séparée à écrire. Les deux fonctions rejettent un `at` naïf
+(`ValueError` explicite, même choix que `exchange_hours.is_open` — mieux
+vaut échouer fort que deviner un fuseau, cas limite "erreur de fuseau à la
+saisie" de la spec).
+Tests : 9 nouveaux tests dans `test_tracker_market.py` (`_HistTicker` mock
+dispatché selon présence de `interval="1m"`, même esprit que `_MockTicker`
+existant) — datetime naïf rejeté (prix et FX), intraday nominal (barre la
+plus proche choisie sur 3 candidates), repli daily_close quand l'intraday
+est vide, `at` hors fenêtre 30j ne tente même pas l'intraday (compteur
+d'appels vérifié), échec total → `(None, None)`, FX nominal, FX repli jour
+férié, FX échec → `None`. Aucun appel réseau réel.
+Suite pytest complète : 1236 tests collectés au total (9 nouveaux dans
+`test_tracker_market.py`, qui passe de 15 à 24), 1233 verts + mêmes 3
+échecs pré-existants et non liés déjà documentés dans les notes
+Upgrade 2/3/1 (`test_duckdb_journal.py::TestShadowInsert::
+test_fail_open_on_bad_path`, `test_risk.py::TestSectorConcentration::
+test_blocks_when_sector_full`/`test_custom_max_per_sector`, environnement
+sandbox uniquement, reproduits en isolation sans aucun rapport avec ce
+changement). `ruff` + `mypy` verts sur `modules/tracker/market.py`.
+Frontend : `npm run build` + `npx vitest run` (45/45, aucune régression) —
+aucun JS/JSX touché ce run, pas de `npm run lint` nécessaire.
+Prochain run : `data/my_portfolio_executions.csv` +
+`modules/my_portfolio_executions.py` (CRUD + calcul slippage/référence,
+consommant `exchange_hours.is_open` + les deux fonctions ajoutées ici).
 
 ---
 

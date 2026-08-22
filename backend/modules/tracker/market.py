@@ -8,8 +8,9 @@ Stratégie adaptative :
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import pandas as pd
 import yfinance as yf
 
 import config
@@ -178,3 +179,95 @@ def get_current_price_detailed(
                 pass
         logger.error(f"[{ticker}] Erreur yfinance : {exc}")
         return None, None, fetched_at
+
+
+# Fenêtre connue d'historique intraday 1-minute yfinance (Upgrade 4 —
+# journal d'exécution my_portfolio, reconstruction de prix de référence
+# passés). Au-delà, repli sur la clôture journalière.
+_INTRADAY_MAX_AGE_DAYS = 30.0
+
+
+def get_historical_price(ticker: str, at: datetime) -> tuple[float | None, str | None]:
+    """Retourne (prix, resolution) pour `ticker` à l'instant passé `at`.
+
+    Extension additive pour le journal d'exécution (Upgrade 4) —
+    reconstruction d'un prix de référence a posteriori, distinct de
+    `get_current_price_detailed` (prix "maintenant").
+
+    `resolution` :
+      - "intraday" : barre 1-minute la plus proche de `at`, si `at` est dans
+        la fenêtre `_INTRADAY_MAX_AGE_DAYS` (limite connue de yfinance).
+      - "daily_close" : repli clôture journalière la plus proche AVANT `at`,
+        si l'intraday est indisponible ou `at` trop ancien.
+    `(None, None)` si les deux échouent — jamais de valeur approximative
+    silencieuse.
+
+    `at` doit être timezone-aware (offset explicite requis).
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+    age_days = (datetime.now(UTC) - at_utc).total_seconds() / 86400
+
+    if 0 <= age_days <= _INTRADAY_MAX_AGE_DAYS:
+        try:
+            hist = yf.Ticker(ticker).history(
+                start=at_utc - timedelta(minutes=15),
+                end=at_utc + timedelta(minutes=15),
+                interval="1m",
+                timeout=FETCH_TIMEOUT,
+            )
+            if not hist.empty:
+                at_ts = pd.Timestamp(at_utc)
+                nearest_pos = hist.index.get_indexer([at_ts], method="nearest")[0]
+                price = float(hist["Close"].iloc[nearest_pos])
+                return price, "intraday"
+        except Exception as exc:
+            logger.warning(f"[{ticker}] Erreur prix historique intraday à {at_utc} : {exc}")
+
+    try:
+        day_start = datetime(at_utc.year, at_utc.month, at_utc.day, tzinfo=UTC)
+        hist = yf.Ticker(ticker).history(
+            start=day_start - timedelta(days=10),
+            end=day_start + timedelta(days=1),
+            timeout=FETCH_TIMEOUT,
+        )
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1]), "daily_close"
+        logger.warning(f"[{ticker}] Aucune donnée de prix historique disponible pour {at_utc}.")
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Erreur prix historique daily_close à {at_utc} : {exc}")
+
+    return None, None
+
+
+def get_historical_fx_rate(pair: str, at: datetime) -> float | None:
+    """Taux de change historique pour `pair` (ex: "EURUSD=X") à l'instant `at`.
+
+    Contrairement à `get_fx_rate` (taux live, cache 5 min), interroge
+    l'historique yfinance à la date de `at`. Repli automatique sur le taux
+    de bourse valide le plus proche AVANT `at` si le jour exact est un jour
+    férié FX ou que les données sont incomplètes (cas limite "FX historique
+    manquant" de la spec) — jamais de valeur codée en dur.
+
+    `at` doit être timezone-aware. `None` si aucune donnée sur la fenêtre.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+    try:
+        day_start = datetime(at_utc.year, at_utc.month, at_utc.day, tzinfo=UTC)
+        hist = yf.Ticker(pair).history(
+            start=day_start - timedelta(days=10),
+            end=day_start + timedelta(days=1),
+            timeout=FETCH_TIMEOUT,
+        )
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+        logger.warning(f"[FX] Aucune donnée historique pour {pair} à {at_utc}.")
+    except Exception as exc:
+        logger.warning(f"[FX] Erreur taux historique {pair} à {at_utc} : {exc}")
+
+    return None
