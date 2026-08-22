@@ -8,8 +8,9 @@ Stratégie adaptative :
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
+import pandas as pd
 import yfinance as yf
 
 import config
@@ -178,3 +179,113 @@ def get_current_price_detailed(
                 pass
         logger.error(f"[{ticker}] Erreur yfinance : {exc}")
         return None, None, fetched_at
+
+
+# ─────────────────────────────────────────────────────────────────
+# HISTORIQUE — prix/FX de référence pour le journal d'exécution
+# (Upgrade 4 my_portfolio, incrément 2 — extensions additives, ne changent
+# rien au comportement live ci-dessus.)
+# ─────────────────────────────────────────────────────────────────
+_INTRADAY_WINDOW_DAYS = 30  # fenêtre yfinance connue pour l'historique 1m
+_FX_HISTORICAL_LOOKBACK_DAYS = 7  # recul max pour retrouver un jour de bourse FX valide
+
+
+def _daily_close(symbol: str, day: date) -> float | None:
+    """Close journalier de `symbol` pour la date calendaire `day` (UTC).
+
+    Utilisé aussi bien pour un prix action (repli daily_close) que pour un
+    taux FX (`pair` yfinance, ex "EURUSD=X") — même requête `.history()`
+    quotidienne, seul le symbole change.
+    """
+    try:
+        start = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+        hist = yf.Ticker(symbol).history(
+            start=start, end=start + timedelta(days=1), timeout=FETCH_TIMEOUT
+        )
+        if hist.empty:
+            return None
+        return float(hist["Close"].iloc[-1])
+    except Exception as exc:
+        logger.warning(f"[{symbol}] Erreur close journalier {day.isoformat()} : {exc}")
+        return None
+
+
+def _historical_intraday_price(ticker: str, at: datetime) -> float | None:
+    """Barre 1-minute la plus proche de `at` (fenêtre ±15 min)."""
+    try:
+        target_utc = at.astimezone(UTC)
+        hist = yf.Ticker(ticker).history(
+            start=target_utc - timedelta(minutes=15),
+            end=target_utc + timedelta(minutes=15),
+            interval="1m",
+            timeout=FETCH_TIMEOUT,
+        )
+        if hist.empty:
+            return None
+        idx = hist.index
+        idx = idx.tz_convert(UTC) if idx.tz is not None else idx.tz_localize(UTC)
+        pos = idx.get_indexer([pd.Timestamp(target_utc)], method="nearest")[0]
+        if pos == -1:
+            return None
+        return float(hist["Close"].iloc[pos])
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Erreur prix intraday historique {at.isoformat()} : {exc}")
+        return None
+
+
+def get_historical_price(ticker: str, at: datetime) -> tuple[float | None, str | None]:
+    """Prix de référence historique pour `ticker` à l'instant `at`.
+
+    Résolution "intraday" (barre 1-minute la plus proche de `at`) si `at` se
+    situe dans la fenêtre ~30 jours supportée par l'historique intraday
+    yfinance ; sinon (ou si l'intraday ne renvoie rien) repli sur le close
+    journalier de la date de `at`, `résolution="daily_close"` (précision
+    dégradée — cas limite explicite Upgrade 4 : le caller doit exposer cette
+    résolution à l'utilisateur plutôt que de laisser croire à une précision
+    intraday inexistante).
+
+    `at` doit être timezone-aware (offset explicite) — même contrainte que
+    `exchange_hours.is_open`, un datetime naïf est une source d'erreur
+    silencieuse connue pour ce diagnostic.
+
+    Retourne (prix, résolution) ; (None, None) si aucune donnée trouvée.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    age_days = (datetime.now(UTC) - at.astimezone(UTC)).total_seconds() / 86400
+    if 0 <= age_days <= _INTRADAY_WINDOW_DAYS:
+        price = _historical_intraday_price(ticker, at)
+        if price is not None:
+            return price, "intraday"
+
+    price = _daily_close(ticker, at.astimezone(UTC).date())
+    if price is not None:
+        return price, "daily_close"
+    return None, None
+
+
+def get_historical_fx_rate(pair: str, at: datetime) -> tuple[float | None, bool]:
+    """Taux de change historique pour `pair` (ex "EURUSD=X") à l'instant `at`.
+
+    Contrairement à `get_fx_rate` (taux live, cache 5 min), interroge le
+    close journalier à la date de `at`. Si ce jour précis n'a aucune donnée
+    (jour férié FX, données Yahoo incomplètes), recule jour par jour jusqu'à
+    `_FX_HISTORICAL_LOOKBACK_DAYS` pour retrouver le dernier jour de bourse
+    valide — cas limite explicite Upgrade 4 : `is_approximate=True` signale
+    alors ce repli pour que l'UI ne présente pas ce taux comme exact.
+
+    `at` doit être timezone-aware (même contrainte que `get_historical_price`).
+
+    Retourne (taux, is_approximate) ; (None, False) si rien trouvé dans la
+    fenêtre de repli.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    day = at.astimezone(UTC).date()
+    for offset in range(_FX_HISTORICAL_LOOKBACK_DAYS + 1):
+        rate = _daily_close(pair, day - timedelta(days=offset))
+        if rate is not None:
+            return rate, offset > 0
+    return None, False

@@ -327,7 +327,7 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
 - [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
@@ -368,6 +368,38 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite)** : Deuxième incrément —
+`get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+ajoutés à `modules/tracker/market.py` (extensions additives, aucune
+fonction existante modifiée). `get_historical_price` : résolution
+"intraday" si `at` est dans la fenêtre ~30j supportée par l'historique 1m
+yfinance (`.history(start=at-15min, end=at+15min, interval="1m")`, barre la
+plus proche via `DatetimeIndex.get_indexer(method="nearest")`), sinon repli
+direct sur `daily_close` (pas de tentative intraday inutile hors fenêtre) ;
+même repli si l'intraday ne renvoie rien dans la fenêtre. `get_historical_fx_rate`
+: close journalier à la date de `at`, recule jour par jour jusqu'à 7j si le
+jour exact n'a aucune donnée (jour férié FX) — `is_approximate=True` signale
+ce repli (cas limite explicite de la spec, "FX historique manquant"). Les
+deux fonctions rejettent un `at` naïf (`ValueError`), même contrainte que
+`exchange_hours.is_open`. `_daily_close(symbol, day)` factorisée en interne
+et réutilisée par les deux (même requête `.history()` quotidienne, seul le
+symbole change entre un ticker action et une paire FX yfinance).
+Tests : 9 nouveaux tests dans `test_tracker_market.py` (`_MockHistoryTicker`
+et deux mocks locaux conditionnels sur les kwargs `interval`/`start` pour
+distinguer intraday vide vs jour FX manquant) — datetime naïf rejeté ×2,
+résolution intraday nominale (barre la plus proche parmi 3), repli
+daily_close sur date ancienne (>30j), repli daily_close si intraday vide sur
+date récente, échec total → `(None, None)`, FX jour exact trouvé, FX repli
+jour précédent (`is_approximate=True`), FX rien dans la fenêtre de repli →
+`(None, False)`. Aucun appel réseau réel. Suite pytest complète : 1233 tests
+verts (1224 + 9, mêmes 3 échecs pré-existants et non liés déjà documentés
+dans les notes Upgrade 2/3/1, environnement sandbox uniquement). `ruff` +
+`mypy` verts sur `modules/tracker/market.py`. Frontend inchangé ce run
+(aucun JS/JSX touché, pas de build nécessaire).
+Prochain run : CRUD `my_portfolio_executions.py` (calcul slippage/référence,
+consomme `exchange_hours.is_open` + `get_historical_price`/
+`get_historical_fx_rate`), puis le CSV + le router + le frontend.
 
 ---
 
