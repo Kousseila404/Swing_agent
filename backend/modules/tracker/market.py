@@ -8,13 +8,22 @@ Stratégie adaptative :
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import yfinance as yf
 
 import config
 
 from .state import FETCH_TIMEOUT, logger
+
+# Fenêtre yfinance où l'historique 1-minute est disponible (limite connue de
+# la source) — au-delà, `get_historical_price` replie sur le close journalier.
+_HISTORICAL_INTRADAY_MAX_AGE_DAYS = 30
+
+# Nombre de jours en arrière qu'`get_historical_fx_rate` accepte de remonter
+# pour trouver le dernier taux de change connu quand la date exacte est un
+# jour férié FX / un trou de données Yahoo.
+_FX_HISTORICAL_FALLBACK_MAX_DAYS = 7
 
 # Cache mémoire des taux de change (5 min) — évite de marteler yfinance à
 # chaque requête dashboard pour une donnée qui ne bouge pas seconde par
@@ -178,3 +187,104 @@ def get_current_price_detailed(
                 pass
         logger.error(f"[{ticker}] Erreur yfinance : {exc}")
         return None, None, fetched_at
+
+
+def get_historical_price(ticker: str, at: datetime) -> tuple[float | None, str]:
+    """Retourne (prix, resolution) pour `ticker` à l'instant historique `at`.
+
+    Extension additive (Upgrade 4 — journal d'exécution
+    `my_portfolio`, docs/UPGRADES_MY_PORTFOLIO.md) : `get_current_price_detailed`
+    ne sait fetcher que "maintenant", ici `at` est une date/heure passée
+    arbitraire (fill à reconstruire a posteriori).
+
+    `resolution` ∈ {"intraday", "daily_close"} : "intraday" (barre 1-minute
+    la plus proche de `at`) seulement si `at` est dans la fenêtre
+    `_HISTORICAL_INTRADAY_MAX_AGE_DAYS` où yfinance sert un historique
+    intraday — au-delà (ou si le fetch intraday échoue/est vide), repli sur
+    le close journalier de la date de `at` (résolution dégradée mais seule
+    disponible, à afficher tel quel côté UI plutôt que de laisser croire à
+    une précision intraday inexistante).
+
+    `at` doit être timezone-aware (même contrainte que
+    `exchange_hours.is_open` — un datetime naïf est une source d'erreur
+    silencieuse pour ce diagnostic, donc rejeté plutôt que supposé UTC/local).
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    age_days = (datetime.now(UTC) - at.astimezone(UTC)).days
+    if 0 <= age_days <= _HISTORICAL_INTRADAY_MAX_AGE_DAYS:
+        price = _intraday_price_near(ticker, at)
+        if price is not None:
+            return price, "intraday"
+
+    return _daily_close_price(ticker, at), "daily_close"
+
+
+def _intraday_price_near(ticker: str, at: datetime) -> float | None:
+    try:
+        window = timedelta(minutes=90)
+        hist = yf.Ticker(ticker).history(
+            start=at - window, end=at + window, interval="1m", timeout=FETCH_TIMEOUT
+        )
+        if hist.empty:
+            return None
+        diffs = [abs(ts - at) for ts in hist.index]
+        closest_pos = diffs.index(min(diffs))
+        return float(hist["Close"].iloc[closest_pos])
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Erreur historique intraday @ {at}: {exc}")
+        return None
+
+
+def _daily_close_price(ticker: str, at: datetime) -> float | None:
+    try:
+        day = at.date()
+        start = datetime(day.year, day.month, day.day, tzinfo=at.tzinfo)
+        hist = yf.Ticker(ticker).history(
+            start=start, end=start + timedelta(days=1), timeout=FETCH_TIMEOUT
+        )
+        if hist.empty:
+            return None
+        return float(hist["Close"].iloc[-1])
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Erreur close journalier @ {at}: {exc}")
+        return None
+
+
+def get_historical_fx_rate(pair: str, at: datetime) -> tuple[float | None, bool]:
+    """Taux de change historique (pas live) pour `pair` à l'instant `at`.
+
+    Retourne (taux, approximated). `approximated=True` signale que la date
+    exacte de `at` n'avait pas de donnée FX (jour férié FX / trou Yahoo) et
+    qu'un repli sur le dernier taux de bourse valide avant `at` a été utilisé
+    à la place (voir cas limite "FX historique manquant", Upgrade 4,
+    docs/UPGRADES_MY_PORTFOLIO.md) — à distinguer d'un `None` (aucune donnée
+    trouvable même en remontant `_FX_HISTORICAL_FALLBACK_MAX_DAYS` jours).
+
+    `at` doit être timezone-aware (même contrainte que `get_historical_price`).
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    try:
+        target_date = at.date()
+        start = at - timedelta(days=_FX_HISTORICAL_FALLBACK_MAX_DAYS)
+        hist = yf.Ticker(pair).history(
+            start=start, end=at + timedelta(days=1), timeout=FETCH_TIMEOUT
+        )
+        if hist.empty:
+            return None, False
+
+        exact = hist.loc[hist.index.date == target_date]
+        if not exact.empty:
+            return float(exact["Close"].iloc[-1]), False
+
+        before = hist.loc[hist.index.date < target_date]
+        if not before.empty:
+            return float(before["Close"].iloc[-1]), True
+
+        return None, False
+    except Exception as exc:
+        logger.warning(f"[FX-hist] Erreur taux historique {pair} @ {at}: {exc}")
+        return None, False

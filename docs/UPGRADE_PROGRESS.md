@@ -327,7 +327,7 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
 - [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
@@ -368,6 +368,48 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite)** : Deuxième incrément — `get_historical_price(ticker, at)`
+et `get_historical_fx_rate(pair, at)` ajoutés à `modules/tracker/market.py`
+(extensions additives, `get_current_price_detailed`/`get_fx_rate` existants
+inchangés). `get_historical_price` : fenêtre `_HISTORICAL_INTRADAY_MAX_AGE_DAYS`
+(30j) → tente `yf.Ticker(...).history(start=at±90min, interval="1m")` et
+prend la barre dont le timestamp est le plus proche de `at` (diff minimale
+en valeur absolue sur les `Timestamp` de l'index, pas de dépendance à
+`TimedeltaIndex.abs()` qui n'existe pas sur la version pandas de ce dépôt) ;
+si vide/hors fenêtre/erreur → repli sur `history(start=jour de `at`,
+end=jour+1)` et `Close` de la dernière barre (`resolution="daily_close"`,
+cas limite spec "fenêtre yfinance ~30j"). `get_historical_fx_rate` :
+`history(start=at-7j, end=at+1j)`, filtre la barre exacte du jour de `at`
+(`approximated=False`) sinon la dernière barre strictement avant cette date
+dans la fenêtre de repli (`approximated=True`, cas limite spec "FX
+historique manquant / jour férié FX") ; `(None, False)` si aucune barre
+trouvable même en remontant. Les deux fonctions rejettent un `at` naïf
+(`ValueError`), même contrainte que `exchange_hours.is_open` (cas limite
+spec "erreur de fuseau à la saisie") — aucun `try/except` autour de cette
+vérification, fail-fast volontaire avant tout fetch réseau.
+Tests : 10 nouveaux tests dans `test_tracker_market.py` (nouveau mock
+`_MockHistTicker`, dispatché par présence de `interval="1m"` dans les kwargs
+d'appel plutôt que par ticker — capture aussi les kwargs pour vérifier que
+l'appel intraday n'est même pas tenté au-delà de la fenêtre 30j) : barre la
+plus proche récupérée dans la fenêtre, repli daily_close si intraday
+vide, pas d'appel intraday au-delà de 30j, échec réseau total → `(None,
+"daily_close")`, datetime naïf rejeté (price) ; FX date exacte trouvée,
+repli sur jour valide antérieur avec flag, aucune donnée → `None`, échec
+réseau → `(None, False)`, datetime naïf rejeté (FX). Pas encore de
+router/endpoint/CRUD/frontend à ce stade (prochain run : `data/
+my_portfolio_executions.csv` + `modules/my_portfolio_executions.py`
+consommant `exchange_hours.is_open` + ces deux fonctions, puis le router
+`POST`/`GET /api/my_portfolio/executions`) — pas de vérification live
+`TestClient` ce run, aucun nouveau champ/endpoint HTTP exposé (même
+précédent que le premier incrément d'Upgrade 1 : la vérification live
+arrive quand le CRUD/router branche effectivement ces fonctions sur une
+route). Suite pytest complète : 1234 tests verts (1224 + 10, mêmes 3 échecs
+pré-existants et non liés déjà documentés ci-dessus, environnement sandbox
+uniquement). `ruff` + `mypy` verts sur `modules/tracker/market.py`.
+Frontend inchangé ce run : `npm run build` + `npx vitest run` (45/45)
+verts, pas de régression (pas de `npm run lint` nécessaire, aucun JS/JSX
+touché).
 
 ---
 
