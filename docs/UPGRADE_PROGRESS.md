@@ -176,38 +176,108 @@ non liés, déjà documentés dans la note Upgrade 2 —
 
 ### Upgrade 1 — Moteur de risque en tâche de fond (PRIORITÉ HAUTE)
 
-**Statut : NOT_STARTED**
+**Statut : IN_PROGRESS**
 
 Checklist :
 
-- [ ] `backend/modules/portfolio_risk.py` créé (historique 2 ans via
+- [x] `backend/modules/portfolio_risk.py` créé (historique 2 ans via
       yfinance, beta par ticker vs `^GSPC`, matrice de corrélation, ratio de
-      diversification, beta/corrélation pondérés portefeuille)
-- [ ] `data/my_portfolio_risk.json` — format de persistance défini et
-      versionné dans le code (pas juste écrit à la volée sans schéma)
-- [ ] Flag `--recompute-portfolio-risk` ajouté à `backend/main.py`
-- [ ] Champs `correlation_alert` structurés ajoutés à `my_portfolio_data.py`
-      pour BNP.PA / HRTG / ERO (remplace le seuil texte libre)
-- [ ] Mécanisme de streak "durable" (`correlation_streak_weeks`,
-      `persist_weeks`) — réutilise le pattern `recurrence_streaks()` de
-      `modules/proposals.py` en s'en inspirant, pas forcément en l'import direct
+      diversification, beta/corrélation pondérés portefeuille) — pondération
+      des agrégats via `target_weight_pct` et non `real_weight_pct`, voir
+      note de run (déviation documentée)
+- [x] `data/my_portfolio_risk.json` — format de persistance défini et
+      versionné dans le code (`SCHEMA_VERSION=1`, `_load_state` rejette tout
+      fichier à un autre schema_version → repart d'un état vide plutôt que
+      de désérialiser une structure inconnue)
+- [x] Flag `--recompute-portfolio-risk` ajouté à `backend/main.py`
+- [x] Champs `correlation_alert` structurés ajoutés à `my_portfolio_data.py`
+      pour BNP.PA / HRTG / ERO (ajoutés à côté de `sell_signal`, qui reste
+      affiché tel quel côté frontend — voir "Nouveaux champs" de la spec)
+- [x] Mécanisme de streak "durable" (`correlation_streak_weeks`,
+      `persist_weeks`) — porté par le state JSON de ce module (pas
+      `modules/proposals.py`, sans rapport avec ce book), même principe que
+      `recurrence_streaks()` (incrémente si condition vraie, reset sinon)
 - [ ] `routers/my_portfolio.py` merge `beta_recalculated` / `avg_correlation`
-      / flags par row + bloc racine `risk_snapshot`
-- [ ] Tests unitaires (jeux de données synthétiques/mockés — ne PAS dépendre
-      d'un vrai appel yfinance 2 ans dans les tests, trop lent et non
-      déterministe pour CI)
-- [ ] Vérification live via `TestClient` : `risk_snapshot` présent, cohérent
-      avec des données mockées de test
+      / flags par row + bloc racine `risk_snapshot` — **PAS FAIT ce run**
+- [x] Tests unitaires (jeux de données synthétiques/mockées, `_FakeTicker`
+      dispatché par symbole — `backend/tests/test_portfolio_risk.py`, 16
+      tests : beta/corrélation nominal, historique insuffisant, échec fetch,
+      FX EUR/HKD indisponible, devise non configurée, streak pur, alerte
+      corrélation moyenne (HRTG-like) sur 2 runs, alerte vs ticker précis
+      (ERO-like) immédiate, signal composite OR (BNP.PA-like), persistance
+      roundtrip + fail-open total, schema_version invalide/JSON corrompu,
+      intégration book réel 10 positions)
+- [ ] Vérification live via `TestClient` — **PAS FAIT ce run** : aucun champ
+      n'est encore exposé par `/api/my_portfolio` (router pas encore
+      modifié), donc rien à vérifier en `TestClient` pour l'instant ; le
+      round-trip pertinent ce run est `refresh_portfolio_risk` (calcul →
+      persistance disque → relecture), testé directement (voir tests
+      ci-dessus)
 - [ ] Frontend : colonne beta recalculé + highlight signal de vente +
-      bandeau risque (4 tuiles) + top paires corrélées
-- [ ] Cas limite historique <2 ans géré (`data_quality`) sans halluciner de
-      valeur
-- [ ] Cron hebdo documenté (même remarque que Upgrade 2 : la routine
-      documente la ligne crontab, ne l'active pas elle-même sur le VPS de
-      prod)
-- [ ] `npm run build` + `npx vitest run` + suite pytest complète verts
+      bandeau risque (4 tuiles) + top paires corrélées — **PAS FAIT ce run**
+- [x] Cas limite historique <2 ans géré (`data_quality: "insufficient_history"`)
+      au niveau module — pas encore affiché côté frontend (dépend de
+      l'intégration router)
+- [x] Cron hebdo documenté (dans le `help=` du flag CLI :
+      `--recompute-portfolio-risk`, `0 22 * * 0`, dimanche 22h30 après le
+      refresh cache marché existant) — ligne crontab à ajouter manuellement
+      par l'utilisateur sur le VPS de prod, même remarque que Upgrade 2
+- [x] `npm run build` + `npx vitest run` + suite pytest complète verts (voir
+      note de run pour les chiffres)
 
-**Note de run** : (vide)
+**Note de run (2026-08-22)** : Premier incrément — cœur du calcul (module
+`portfolio_risk.py`) implémenté et testé intégralement, router/frontend pas
+encore branchés (prochain run, en gardant l'ordre 2→3→1→4 : 1 reste la
+cible tant que sa checklist n'est pas complète). Réutilise tel quel
+`correlation_check._to_returns`/`_MIN_PAIRWISE_DAYS` (importés, pas
+réécrits) et `backtest._capm_alpha_beta` (beta OLS, terme risk-free ignoré
+car s'annule dans le calcul du beta seul). Devise des séries : prix convertis
+en USD avant calcul des log-returns (`EURUSD=X`/`USDHKD=X` fetchés en
+historique 2 ans au même format que les prix, alignés par date avec
+`ffill`) — pas de nouveau mécanisme, même pattern de fetch que les prix.
+Index normalisé en date calendaire nue (`tz_localize(None).normalize()`)
+pour aligner des séries de marchés différents (NYSE vs HKEX pour 0992.HK).
+
+**Déviation documentée** : la spec demande `wᵢ = real_weight_pct/100` pour
+les agrégats portefeuille pondérés (beta pondéré, corrélation moyenne
+pondérée, ratio de diversification). Ce module tourne en job batch
+hebdomadaire hors contexte de requête HTTP (pas de prix live disponible
+sans dupliquer le fetch prix déjà fait par le router) — utilise
+`target_weight_pct` (poids cible statique) à la place : un snapshot de
+risque hebdo caractérise le profil de risque de l'allocation *cible*, pas
+l'instantané de dérive du jour (déjà exposé séparément via
+`drift_pct`/`rebalance_alert`, Upgrade 3). Somme des `target_weight_pct` +
+`CASH_RESERVE_PCT` = 100% dans `my_portfolio_data.py` actuel, donc les poids
+utilisés restent normalisés.
+
+Autres choix d'implémentation : tickers en `data_quality` != "ok" exclus
+des agrégats pondérés sans renormalisation des poids restants (leur poids
+"disparaît" plutôt que d'être redistribué) — accepté comme limite pour un
+cas rare (nouvelle ligne récente), cohérent avec "ne pas halluciner de
+valeur" plutôt que de fabriquer une redistribution arbitraire. `cash_weight_pct`
+n'entre dans aucun calcul de corrélation/diversification (aucune série de
+retours pour du cash) ; pour le beta pondéré, sa contribution est
+structurellement nulle (`β_cash=0`) donc son inclusion explicite dans la
+somme aurait été un no-op — non implémentée, juste documentée.
+
+Tests : 16 nouveaux tests (voir checklist), tous verts, aucun appel réseau
+réel (`_FakeTicker` dispatché par symbole, séries de prix synthétiques
+`numpy.random.default_rng` seedé). Suite pytest complète : 1202 tests verts
+(1186 + 16, mêmes 3 échecs pré-existants et non liés déjà documentés dans
+les notes Upgrade 2/3 — `test_duckdb_journal.py::TestShadowInsert::
+test_fail_open_on_bad_path`, `test_risk.py::TestSectorConcentration::
+test_blocks_when_sector_full`/`test_custom_max_per_sector`, environnement
+sandbox uniquement, aucun rapport avec cet upgrade). `ruff` + `mypy` verts
+sur `modules/portfolio_risk.py`. Frontend inchangé ce run : `npm run build`
++ `npx vitest run` (45/45) verts, pas de régression (pas de `npm run lint`
+nécessaire, aucun JS/JSX touché).
+
+Prochain run (reste sur Upgrade 1, checklist incomplète) : brancher
+`routers/my_portfolio.py` (lire `data/my_portfolio_risk.json`, merger
+`beta_recalculated`/`avg_correlation`/`correlation_vs_ref`/flags par row +
+bloc racine `risk_snapshot`), test d'intégration `TestClient` correspondant,
+puis frontend (colonne beta, highlight `.mp-row-risk-alert`, bandeau 4
+tuiles, top paires corrélées).
 
 ---
 

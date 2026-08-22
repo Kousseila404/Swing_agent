@@ -88,6 +88,15 @@ Exemples :
             "avant le digest Telegram 07h30 (ex. `0 7 * * *`)."
         ),
     )
+    mode_group.add_argument(
+        "--recompute-portfolio-risk", action="store_true",
+        help=(
+            "Recalcule le beta 2 ans / la matrice de corrélation du book "
+            "my_portfolio vs S&P500, persiste data/my_portfolio_risk.json. "
+            "Appeler via cron hebdo (ex. dimanche 22h30, après le refresh "
+            "cache marché existant `0 22 * * 0`)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -120,6 +129,12 @@ Exemples :
             symbols = sorted({p.get("price_ticker", p["ticker"]).upper() for p in POSITIONS + WATCHLIST})
             diag = refresh_earnings(symbols)
             logger.info(f"[my_portfolio_earnings] refreshed {len(diag)} symbols")
+        elif getattr(args, "recompute_portfolio_risk", False):
+            from modules.my_portfolio_data import CASH_RESERVE_PCT, POSITIONS
+            from modules.portfolio_risk import refresh_portfolio_risk
+            snapshot = refresh_portfolio_risk(POSITIONS, cash_weight_pct=CASH_RESERVE_PCT)
+            ok = snapshot["risk_snapshot"]["n_tickers_ok"]
+            logger.info(f"[portfolio_risk] recompute done — {ok}/{len(POSITIONS)} tickers ok")
 
     except KeyboardInterrupt:
         logger.info("⚠️  Arrêt demandé par l'utilisateur (Ctrl+C)")

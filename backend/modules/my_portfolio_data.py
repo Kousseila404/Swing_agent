@@ -40,6 +40,7 @@ POSITIONS: list[dict] = [
         "currency": "EUR",
         "reason": "Stabilisateur, corrélation max 0.22 avec le book",
         "sell_signal": "Beta >0.8 durable ou corrélation >0.40",
+        "correlation_alert": {"ref": None, "threshold": 0.40, "persist_weeks": 2},
     },
     {
         "ticker": "FMX", "target_weight_pct": 14.0, "target_amount": 280.0,
@@ -70,6 +71,7 @@ POSITIONS: list[dict] = [
         "shares": 5.31915, "entry_price": 33.84, "beta": 0.34,
         "reason": "Meilleur diversifiant mesuré (corr +0.037)",
         "sell_signal": "Corrélation moyenne >0.30 durable",
+        "correlation_alert": {"ref": None, "threshold": 0.30, "persist_weeks": 2},
     },
     {
         "ticker": "LNVGY", "target_weight_pct": 7.0, "target_amount": 140.0,
@@ -105,6 +107,7 @@ POSITIONS: list[dict] = [
         "shares": 1.76367, "entry_price": 34.02, "beta": 1.63,
         "reason": "Exposition matériaux/Brésil, réduit (corrélé MU)",
         "sell_signal": "Corrélation MU >0.50",
+        "correlation_alert": {"ref": "MU", "threshold": 0.50, "persist_weeks": 1},
     },
 ]
 
