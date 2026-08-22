@@ -222,6 +222,8 @@ export const fetchAttribution = () => get('/attribution');
 // MON PORTEFEUILLE — book personnel LT, statique, hors univers TITAN.
 // ─────────────────────────────────────────────────────────────────
 export const fetchMyPortfolio = () => get('/my_portfolio');
+export const fetchMyPortfolioExecutions = () => get('/my_portfolio/executions');
+export const logMyPortfolioExecution = (body) => post('/my_portfolio/executions', body);
 
 // ─────────────────────────────────────────────────────────────────
 // WATCHLIST + NOTES

@@ -21,6 +21,7 @@
 // croire que ces positions sont notées ou décidées par TITAN.
 
 import ApiErrorBanner from './common/ApiErrorBanner';
+import MyPortfolioExecutionJournal from './MyPortfolioExecutionJournal';
 import { PageSkeleton } from './common/Skeleton';
 import { useMyPortfolio } from '../hooks/useApi';
 import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../utils/format';
@@ -322,6 +323,10 @@ export default function MyPortfolioPage() {
           ))}
         </div>
       )}
+
+      <MyPortfolioExecutionJournal
+        tickers={positions.map(p => ({ ticker: p.ticker, currency: p.currency || 'USD' }))}
+      />
     </div>
   );
 }

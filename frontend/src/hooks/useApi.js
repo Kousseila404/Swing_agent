@@ -26,6 +26,7 @@ import {
   fetchMacro,
   fetchMacroCalendar,
   fetchMyPortfolio,
+  fetchMyPortfolioExecutions,
   fetchNotes,
   fetchPerformanceMetrics,
   fetchPortfolio,
@@ -41,6 +42,7 @@ import {
   fetchWfoHistory,
   fetchWfoWeights,
   killJob,
+  logMyPortfolioExecution,
   refreshProposals,
   regenerateProposals,
   rejectProposal,
@@ -73,6 +75,17 @@ export const useMyPortfolio = (opts = {}) =>
     staleTime: STALE.MY_PORTFOLIO,
     ...opts,
   })
+
+export const useMyPortfolioExecutions = (opts = {}) =>
+  useQuery({ queryKey: ['my_portfolio_executions'], queryFn: fetchMyPortfolioExecutions, ...opts })
+
+export const useLogExecution = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => logMyPortfolioExecution(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['my_portfolio_executions'] }),
+  })
+}
 
 export const useEquityCurve = (opts = {}) =>
   useQuery({ queryKey: ['equity_curve'], queryFn: fetchEquityCurve, ...opts })

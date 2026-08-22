@@ -78,6 +78,9 @@ from routers import (
     my_portfolio as my_portfolio_router,
 )
 from routers import (
+    my_portfolio_executions as my_portfolio_executions_router,
+)
+from routers import (
     news as news_router,
 )
 from routers import (
@@ -242,6 +245,7 @@ app.include_router(monitor_router.router)
 app.include_router(sector_benchmark_router.router)
 app.include_router(attribution_router.router)
 app.include_router(my_portfolio_router.router)
+app.include_router(my_portfolio_executions_router.router)
 
 
 # ─────────────────────────────────────────────────────────────────
