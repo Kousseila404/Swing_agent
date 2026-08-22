@@ -327,7 +327,7 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
 - [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
@@ -368,6 +368,45 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite)** : Deuxième incrément —
+`get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+ajoutés à `modules/tracker/market.py` (extensions pures, aucune fonction
+existante modifiée). Les deux rejettent un `at` naïf (`ValueError`, même
+contrainte que `exchange_hours.is_open`).
+`get_historical_price` : si `at` a moins de ~30 jours (limite yfinance sur
+les barres 1-minute), tente d'abord `yf.Ticker(ticker).history(interval="1m")`
+sur une fenêtre de ±1 jour autour de `at` et prend la dernière barre à `at`
+ou avant (`hist.index <= at_utc`) → `resolution="intraday"`. Sinon (ou si le
+fetch intraday échoue/est vide), repli sur `_daily_close_asof` (nouvelle
+fonction privée partagée avec `get_historical_fx_rate`) → close journalier
+le plus récent à `at` ou avant sur une fenêtre de 10 jours calendaires
+(gère naturellement les week-ends/jours fériés, qui n'ont simplement pas de
+barre ce jour-là dans la réponse yfinance) → `resolution="daily_close"`.
+Aucune donnée trouvée par aucune des deux voies → `(None, "unavailable")`.
+`get_historical_fx_rate` réutilise `_daily_close_asof` sur la paire
+(ex. `EURUSD=X`) : si la barre trouvée tombe le jour calendaire exact de
+`at` → `resolution="exact"`, sinon (jour férié FX, repli sur le jour de
+bourse FX valide précédent) → `resolution="nearest_prior_day"` — le champ
+`resolution` porte le flag d'approximation demandé par la spec (cas limite
+"FX historique manquant"), à consommer par
+`my_portfolio_executions.py` (prochain incrément) pour peupler
+`Reference_Price_Resolution`.
+Tests : 9 nouveaux tests dans `test_tracker_market.py`
+(`_HistMockTicker`, nouveau mock dédié distinguant barres minute/jour par
+`interval=`, pattern cohérent avec `_MockTicker` existant) — datetime naïf
+rejeté (les deux fonctions), intraday <30j nominal (barre après `at`
+correctement exclue), >30j bascule direct sur daily_close, échec fetch
+intraday → fallback daily_close, aucune donnée → unavailable (les deux
+fonctions), FX jour exact, FX repli jour précédent, FX unavailable.
+Suite pytest complète : 1233 tests verts (1224 + 9, mêmes 3 échecs
+pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1,
+environnement sandbox uniquement). `ruff` + `mypy` verts sur
+`modules/tracker/market.py`. Frontend inchangé ce run (aucun JS/JSX touché,
+pas de build nécessaire). Prochain incrément : `data/my_portfolio_executions.csv`
++ `modules/my_portfolio_executions.py` (CRUD + calcul slippage), qui
+consommeront `exchange_hours.is_open` + `get_historical_price` +
+`get_historical_fx_rate`.
 
 ---
 

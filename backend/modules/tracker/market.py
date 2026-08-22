@@ -8,13 +8,19 @@ Stratégie adaptative :
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import yfinance as yf
 
 import config
 
 from .state import FETCH_TIMEOUT, logger
+
+# get_historical_price : au-delà de cette ancienneté, yfinance ne sert plus
+# de barres 1-minute (limite connue du provider, ~30j) — on bascule sur le
+# close journalier (résolution dégradée, exposée via le 2e élément du tuple
+# retourné pour ne pas laisser croire à une précision intraday inexistante).
+_HISTORICAL_INTRADAY_MAX_AGE_DAYS = 30.0
 
 # Cache mémoire des taux de change (5 min) — évite de marteler yfinance à
 # chaque requête dashboard pour une donnée qui ne bouge pas seconde par
@@ -178,3 +184,93 @@ def get_current_price_detailed(
                 pass
         logger.error(f"[{ticker}] Erreur yfinance : {exc}")
         return None, None, fetched_at
+
+
+def _daily_close_asof(symbol: str, at_utc: datetime) -> tuple[float | None, datetime | None]:
+    """Close journalier le plus récent à `at_utc` ou avant (weekend/férié
+    exclus naturellement — pas de barre ce jour-là dans la réponse yfinance).
+
+    Retourne `(None, None)` si aucune barre disponible dans la fenêtre de
+    recherche (10 jours calendaires avant `at_utc`).
+    """
+    try:
+        hist = yf.Ticker(symbol).history(
+            start=at_utc - timedelta(days=10),
+            end=at_utc + timedelta(days=1),
+            interval="1d",
+            timeout=FETCH_TIMEOUT,
+        )
+        if hist.empty:
+            return None, None
+        eligible = hist[hist.index <= at_utc]
+        if eligible.empty:
+            return None, None
+        return float(eligible["Close"].iloc[-1]), eligible.index[-1].to_pydatetime()
+    except Exception as exc:
+        logger.warning(f"[{symbol}] Erreur close journalier historique à {at_utc.isoformat()} : {exc}")
+        return None, None
+
+
+def get_historical_price(ticker: str, at: datetime) -> tuple[float | None, str]:
+    """Prix de référence reconstruit a posteriori pour `ticker` à l'instant `at`.
+
+    Retourne `(price, resolution)` avec `resolution` ∈
+    `{"intraday", "daily_close", "unavailable"}` :
+      - `"intraday"` : barre 1-minute la plus proche de `at` (à ou avant),
+        seulement si `at` a moins de ~30 jours (limite yfinance sur les
+        barres intraday).
+      - `"daily_close"` : repli sur le close journalier le plus récent à
+        `at` ou avant (fenêtre trop ancienne pour l'intraday, ou fetch
+        intraday sans résultat).
+      - `"unavailable"` : aucune donnée trouvée par aucune des deux voies.
+
+    `at` doit être timezone-aware (même contrainte que
+    `exchange_hours.is_open` — un datetime naïf est une source d'erreur
+    silencieuse connue pour ce diagnostic).
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+    age_days = (datetime.now(UTC) - at_utc).total_seconds() / 86400.0
+
+    if age_days <= _HISTORICAL_INTRADAY_MAX_AGE_DAYS:
+        try:
+            hist = yf.Ticker(ticker).history(
+                start=at_utc - timedelta(days=1),
+                end=at_utc + timedelta(days=1),
+                interval="1m",
+                timeout=FETCH_TIMEOUT,
+            )
+            if not hist.empty:
+                eligible = hist[hist.index <= at_utc]
+                if not eligible.empty:
+                    return float(eligible["Close"].iloc[-1]), "intraday"
+        except Exception as exc:
+            logger.warning(f"[{ticker}] Erreur prix intraday historique à {at_utc.isoformat()} : {exc}")
+
+    price, _bar_at = _daily_close_asof(ticker, at_utc)
+    return price, ("daily_close" if price is not None else "unavailable")
+
+
+def get_historical_fx_rate(pair: str, at: datetime) -> tuple[float | None, str]:
+    """Taux de change historique pour `pair` (ex: "EURUSD=X") à l'instant `at`.
+
+    Retourne `(rate, resolution)` avec `resolution` ∈
+    `{"exact", "nearest_prior_day", "unavailable"}` — `"nearest_prior_day"`
+    signale un repli sur le dernier jour de bourse FX valide avant `at`
+    (jour férié FX, données Yahoo incomplètes ce jour précis), pour ne pas
+    laisser croire à une conversion exacte à la date du fill.
+
+    `at` doit être timezone-aware, même contrainte que `get_historical_price`.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+    rate, bar_at = _daily_close_asof(pair, at_utc)
+    if rate is None or bar_at is None:
+        return None, "unavailable"
+
+    resolution = "exact" if bar_at.date() == at_utc.date() else "nearest_prior_day"
+    return rate, resolution
