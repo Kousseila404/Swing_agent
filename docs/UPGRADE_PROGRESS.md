@@ -176,7 +176,7 @@ non liés, déjà documentés dans la note Upgrade 2 —
 
 ### Upgrade 1 — Moteur de risque en tâche de fond (PRIORITÉ HAUTE)
 
-**Statut : IN_PROGRESS**
+**Statut : DONE_VERIFIED**
 
 Checklist :
 
@@ -197,8 +197,8 @@ Checklist :
       `persist_weeks`) — porté par le state JSON de ce module (pas
       `modules/proposals.py`, sans rapport avec ce book), même principe que
       `recurrence_streaks()` (incrémente si condition vraie, reset sinon)
-- [ ] `routers/my_portfolio.py` merge `beta_recalculated` / `avg_correlation`
-      / flags par row + bloc racine `risk_snapshot` — **PAS FAIT ce run**
+- [x] `routers/my_portfolio.py` merge `beta_recalculated` / `avg_correlation`
+      / flags par row + bloc racine `risk_snapshot`
 - [x] Tests unitaires (jeux de données synthétiques/mockées, `_FakeTicker`
       dispatché par symbole — `backend/tests/test_portfolio_risk.py`, 16
       tests : beta/corrélation nominal, historique insuffisant, échec fetch,
@@ -207,23 +207,31 @@ Checklist :
       (ERO-like) immédiate, signal composite OR (BNP.PA-like), persistance
       roundtrip + fail-open total, schema_version invalide/JSON corrompu,
       intégration book réel 10 positions)
-- [ ] Vérification live via `TestClient` — **PAS FAIT ce run** : aucun champ
-      n'est encore exposé par `/api/my_portfolio` (router pas encore
-      modifié), donc rien à vérifier en `TestClient` pour l'instant ; le
-      round-trip pertinent ce run est `refresh_portfolio_risk` (calcul →
-      persistance disque → relecture), testé directement (voir tests
-      ci-dessus)
-- [ ] Frontend : colonne beta recalculé + highlight signal de vente +
-      bandeau risque (4 tuiles) + top paires corrélées — **PAS FAIT ce run**
+- [x] Vérification live via `TestClient` :
+      `test_my_portfolio_risk_live_roundtrip_via_disk_state` (state disque
+      réellement écrit via `_save_state` puis relu bout-en-bout par le
+      router — beta/corrélation/flags par ticker + `risk_snapshot` racine
+      dans le JSON HTTP) + `test_my_portfolio_risk_fields_default_when_no_
+      snapshot_computed` (fail-open : aucun fichier → valeurs par défaut,
+      `risk_snapshot: null`, jamais de `KeyError` pour un ticker absent de
+      l'état persisté), dans `test_my_portfolio_router.py`
+- [x] Frontend : colonne beta recalculé (`βʳᵉᶜᵃˡᶜ` + badge ⚠ si
+      `beta_flag`) + highlight signal de vente (`.mp-row-risk-alert` +
+      préfixe 🔴, déclenché par `correlation_alert_triggered` OU `beta_flag`
+      indépendamment) + bandeau risque (4 tuiles : beta portefeuille /
+      corrélation moyenne pondérée / ratio de diversification / dernier
+      recalcul via `fmtTimeAgo`) + top paires corrélées — `MyPortfolioPage.jsx`
+      + `index.css` (classes `mp-risk-*`, `mp-row-risk-alert`, `mp-beta-*`)
 - [x] Cas limite historique <2 ans géré (`data_quality: "insufficient_history"`)
-      au niveau module — pas encore affiché côté frontend (dépend de
-      l'intégration router)
+      au niveau module ; côté router/frontend, un ticker sans entrée dans
+      l'état persisté (ou `data_quality != "ok"`) reçoit les valeurs par
+      défaut fail-open (`beta_recalculated: null`, pas de highlight halluciné)
 - [x] Cron hebdo documenté (dans le `help=` du flag CLI :
       `--recompute-portfolio-risk`, `0 22 * * 0`, dimanche 22h30 après le
       refresh cache marché existant) — ligne crontab à ajouter manuellement
       par l'utilisateur sur le VPS de prod, même remarque que Upgrade 2
-- [x] `npm run build` + `npx vitest run` + suite pytest complète verts (voir
-      note de run pour les chiffres)
+- [x] `npm run build` + `npx vitest run` + `npm run lint` + suite pytest
+      complète verts (voir note de run pour les chiffres)
 
 **Note de run (2026-08-22)** : Premier incrément — cœur du calcul (module
 `portfolio_risk.py`) implémenté et testé intégralement, router/frontend pas
@@ -272,12 +280,41 @@ sur `modules/portfolio_risk.py`. Frontend inchangé ce run : `npm run build`
 + `npx vitest run` (45/45) verts, pas de régression (pas de `npm run lint`
 nécessaire, aucun JS/JSX touché).
 
-Prochain run (reste sur Upgrade 1, checklist incomplète) : brancher
-`routers/my_portfolio.py` (lire `data/my_portfolio_risk.json`, merger
-`beta_recalculated`/`avg_correlation`/`correlation_vs_ref`/flags par row +
-bloc racine `risk_snapshot`), test d'intégration `TestClient` correspondant,
-puis frontend (colonne beta, highlight `.mp-row-risk-alert`, bandeau 4
-tuiles, top paires corrélées).
+**Note de run (2026-08-22, suite)** : Deuxième incrément — checklist complétée
+intégralement, Upgrade 1 → `DONE_VERIFIED`. `modules/portfolio_risk.py` gagne
+`load_snapshot()` (wrapper public de `_load_state`, même nom/style que
+`my_portfolio_earnings.get_earnings_snapshot` — lecture seule, aucun
+recalcul, fail-open dict vide si absent/corrompu/schema obsolète).
+`routers/my_portfolio.py` : `_risk_fields(ticker, risk_by_ticker)` merge par
+row les 8 champs de la spec (défauts `_RISK_FIELDS_DEFAULT` si le ticker est
+absent de l'état persisté — jamais de `KeyError`, jamais de valeur
+approximative), `risk_snapshot` exposé tel quel au niveau racine (`None` si
+le job hebdo n'a jamais tourné). Pas de nouveau fetch réseau dans le
+handler HTTP — lecture d'un petit JSON déjà persisté par le job batch,
+même coût qu'`get_earnings_snapshot`.
+Tests : 2 nouveaux tests d'intégration `TestClient` dans
+`test_my_portfolio_router.py` (monkeypatch `portfolio_risk._STATE_PATH` vers
+`tmp_path`, même pattern que le test earnings live existant) — round-trip
+état disque → réponse HTTP (beta/corrélation/flags par ticker + bloc
+`risk_snapshot` racine, y compris un ticker absent de l'état → défauts) et
+comportement par défaut avant tout run `--recompute-portfolio-risk` (fichier
+absent → `risk_snapshot: null`, champs par ticker tous `null`/`false`/`0`).
+Suite pytest complète : 1204 tests verts (1202 + 2, mêmes 3 échecs
+pré-existants et non liés déjà documentés dans les notes Upgrade 2/3,
+environnement sandbox uniquement). `ruff` + `mypy` verts sur
+`modules/portfolio_risk.py` et `routers/my_portfolio.py`.
+Frontend : colonne Beta affiche le beta statique + `βʳᵉᶜᵃˡᶜ` (badge ⚠ rouge
+si `beta_flag`, tooltip avec l'écart %) ; ligne surlignée
+(`.mp-row-risk-alert`, même style que `.mp-row-alert`) et signal de vente
+préfixé 🔴 quand `correlation_alert_triggered` OU `beta_flag` (OR
+indépendant, cas limite "signal composite" BNP.PA de la spec) ; nouveau
+bandeau `.mp-risk-card` (4 tuiles, masqué tant que `risk_snapshot` est
+`null` — pas de tuiles vides avant le premier run hebdo) + liste des paires
+les plus corrélées sous le bandeau. `npm run build` + `npx vitest run`
+(45/45, aucune régression) + `npm run lint` verts.
+Env sandbox : venv recréé avec `python3.12` explicite (même note que
+Upgrade 2 — `python3` système = 3.11, casse sur une f-string existante sans
+rapport avec cet upgrade).
 
 ---
 

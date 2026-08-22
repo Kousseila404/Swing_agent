@@ -56,6 +56,14 @@ function fmtOrderAmount(order) {
   return `${native} / ${usd}`;
 }
 
+// Signal de vente composite (Upgrade 1) : `correlation_alert_triggered` et
+// `beta_flag` déclenchent chacun indépendamment le badge rouge (texte
+// original BNP.PA "Beta >0.8 OU corrélation >0.40" — voir cas limite
+// "signal composite" dans docs/UPGRADES_MY_PORTFOLIO.md).
+function isRiskAlert(p) {
+  return Boolean(p.correlation_alert_triggered || p.beta_flag);
+}
+
 export default function MyPortfolioPage() {
   const q = useMyPortfolio();
 
@@ -81,6 +89,7 @@ export default function MyPortfolioPage() {
   const driftThreshold = data.drift_threshold_pct ?? 25;
   const alertCount = positions.filter(p => p.rebalance_alert).length;
   const deployingCount = positions.filter(p => p.is_deploying).length;
+  const risk = data.risk_snapshot || null;
 
   return (
     <div className="mp-page animate-fade-in">
@@ -123,6 +132,50 @@ export default function MyPortfolioPage() {
         </div>
       </div>
 
+      {risk && (
+        <div className="mp-card mp-risk-card">
+          <div className="mp-risk-tiles">
+            <div className="mp-tile">
+              <span className="mp-tile-label">Beta portefeuille</span>
+              <span className="mp-tile-value">
+                {Number.isFinite(risk.portfolio_beta) ? risk.portfolio_beta.toFixed(2) : '—'}
+              </span>
+            </div>
+            <div className="mp-tile">
+              <span className="mp-tile-label">Corrélation moy. pondérée</span>
+              <span className="mp-tile-value">
+                {Number.isFinite(risk.avg_weighted_correlation) ? risk.avg_weighted_correlation.toFixed(2) : '—'}
+              </span>
+            </div>
+            <div className="mp-tile">
+              <span className="mp-tile-label">Ratio de diversification</span>
+              <span className="mp-tile-value">
+                {Number.isFinite(risk.diversification_ratio) ? risk.diversification_ratio.toFixed(2) : '—'}
+              </span>
+            </div>
+            <div className="mp-tile">
+              <span className="mp-tile-label">Dernier recalcul</span>
+              <span className="mp-tile-value mp-risk-recalc-date" title={risk.last_recalc_date || ''}>
+                {fmtTimeAgo(risk.last_recalc_date)}
+              </span>
+              {risk.n_tickers_missing > 0 && (
+                <small>{risk.n_tickers_missing} ticker(s) sans données</small>
+              )}
+            </div>
+          </div>
+          {risk.most_correlated_pairs?.length > 0 && (
+            <div className="mp-risk-pairs">
+              <span className="mp-risk-pairs-label">Paires les plus corrélées :</span>
+              {risk.most_correlated_pairs.map(pair => (
+                <span key={`${pair.a}-${pair.b}`} className="mp-risk-pair">
+                  {pair.a} ↔ {pair.b} : {pair.corr.toFixed(2)}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mp-card">
         <div style={{ overflowX: 'auto' }}>
           <table className="mp-table">
@@ -141,7 +194,13 @@ export default function MyPortfolioPage() {
             </thead>
             <tbody>
               {positions.map(p => (
-                <tr key={p.ticker} className={p.rebalance_alert ? 'mp-row-alert' : ''}>
+                <tr
+                  key={p.ticker}
+                  className={[
+                    p.rebalance_alert && 'mp-row-alert',
+                    isRiskAlert(p) && 'mp-row-risk-alert',
+                  ].filter(Boolean).join(' ')}
+                >
                   <td>
                     <div className="mp-ticker-cell">
                       <span className="mp-ticker">{p.ticker}</span>
@@ -220,9 +279,19 @@ export default function MyPortfolioPage() {
                       </>
                     )}
                   </td>
-                  <td className="mp-value-cell">{Number.isFinite(p.beta) ? p.beta.toFixed(2) : '—'}</td>
+                  <td className="mp-value-cell">
+                    {Number.isFinite(p.beta) ? p.beta.toFixed(2) : '—'}
+                    {Number.isFinite(p.beta_recalculated) && (
+                      <span
+                        className={`mp-price-sub mp-beta-recalc ${p.beta_flag ? 'mp-beta-flag' : ''}`}
+                        title={`Beta recalculé sur 2 ans vs S&P500${Number.isFinite(p.beta_diff_pct) ? `, écart de ${p.beta_diff_pct > 0 ? '+' : ''}${p.beta_diff_pct}% avec le beta déclaré` : ''}.`}
+                      >
+                        {p.beta_flag && '⚠ '}βʳᵉᶜᵃˡᶜ {p.beta_recalculated.toFixed(2)}
+                      </span>
+                    )}
+                  </td>
                   <td className="mp-reason">{p.reason}</td>
-                  <td className="mp-sell">{p.sell_signal}</td>
+                  <td className="mp-sell">{isRiskAlert(p) ? `🔴 ${p.sell_signal}` : p.sell_signal}</td>
                 </tr>
               ))}
             </tbody>

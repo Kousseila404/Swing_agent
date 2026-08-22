@@ -28,9 +28,28 @@ from modules.my_portfolio_data import (
     WATCHLIST,
 )
 from modules.my_portfolio_earnings import get_earnings_snapshot
+from modules.portfolio_risk import load_snapshot as load_risk_snapshot
 from modules.tracker.market import get_current_price_detailed, get_fx_rate
 
 router = APIRouter(prefix="/api", tags=["my_portfolio"])
+
+# Valeurs par défaut quand le job hebdo (`--recompute-portfolio-risk`) n'a
+# encore jamais tourné pour ce ticker — jamais halluciner un beta/corrélation,
+# voir Upgrade 1 (docs/UPGRADES_MY_PORTFOLIO.md).
+_RISK_FIELDS_DEFAULT: dict[str, Any] = {
+    "beta_recalculated": None,
+    "beta_diff_pct": None,
+    "beta_flag": False,
+    "avg_correlation": None,
+    "correlation_vs_ref": None,
+    "correlation_alert_triggered": False,
+    "correlation_streak_weeks": 0,
+    "data_quality": None,
+}
+
+
+def _risk_fields(ticker: str, risk_by_ticker: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return risk_by_ticker.get(ticker, _RISK_FIELDS_DEFAULT)
 
 # Fenêtre d'affichage du badge earnings — voir docs/UPGRADES_MY_PORTFOLIO.md
 # Upgrade 2 : "à venir" jusqu'à 14j avant, "résultats publiés" pendant les 5j
@@ -165,6 +184,8 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         p.get("price_ticker", p["ticker"]).upper() for p in POSITIONS + WATCHLIST
     })
     earnings_snapshot = get_earnings_snapshot(earnings_symbols)
+    risk_state = load_risk_snapshot()
+    risk_by_ticker: dict[str, dict[str, Any]] = risk_state.get("tickers", {})
 
     rows: list[dict[str, Any]] = []
     for p in POSITIONS:
@@ -210,6 +231,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "pnl_usd":       round(pnl_usd, 2) if pnl_usd is not None else None,
             "pnl_pct":       round(pnl_pct, 1) if pnl_pct is not None else None,
             **_earnings_fields(p, today, earnings_snapshot),
+            **_risk_fields(p["ticker"], risk_by_ticker),
         })
 
     # Valeur actuelle réelle du book — purement informative (tuile "Valeur
@@ -272,4 +294,5 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         "total_pnl_usd":          round(total_pnl_usd, 2),
         "drift_threshold_pct":    REBALANCE_DRIFT_THRESHOLD_PCT,
         "deployment_threshold_pct": DEPLOYMENT_THRESHOLD_PCT,
+        "risk_snapshot":          risk_state.get("risk_snapshot"),
     }

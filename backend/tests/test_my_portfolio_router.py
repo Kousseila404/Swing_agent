@@ -22,6 +22,7 @@ import api
 import routers.my_portfolio as my_portfolio_router
 from modules import api_core
 from modules import my_portfolio_earnings as earnings_mod
+from modules import portfolio_risk as risk_mod
 
 
 def _client(monkeypatch) -> TestClient:
@@ -618,3 +619,84 @@ def test_my_portfolio_earnings_live_roundtrip_via_disk_cache(monkeypatch, tmp_pa
     assert bnp["earnings_days_until"] == 5
     assert bnp["earnings_source"] == "finnhub"
     assert bnp["badge"] == "📅 Earnings dans 5 j"
+
+
+def test_my_portfolio_risk_fields_default_when_no_snapshot_computed(monkeypatch, tmp_path):
+    """Upgrade 1 : avant tout run `--recompute-portfolio-risk`, aucun fichier
+    `my_portfolio_risk.json` n'existe → chaque ligne reçoit les valeurs par
+    défaut fail-open (jamais de beta/corrélation halluciné), et le bloc
+    racine `risk_snapshot` est `null`."""
+    monkeypatch.setattr(risk_mod, "_STATE_PATH", tmp_path / "my_portfolio_risk.json")
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["risk_snapshot"] is None
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["beta_recalculated"] is None
+    assert bnp["beta_flag"] is False
+    assert bnp["avg_correlation"] is None
+    assert bnp["correlation_alert_triggered"] is False
+    assert bnp["correlation_streak_weeks"] == 0
+    assert bnp["data_quality"] is None
+
+
+def test_my_portfolio_risk_live_roundtrip_via_disk_state(monkeypatch, tmp_path):
+    """Vérification live (Upgrade 1, même définition que Upgrade 2/3 — voir
+    docs/UPGRADE_PROGRESS.md) : TestClient(api.app) bout-en-bout SANS mock
+    du router pour la partie risque — l'état disque produit par
+    `refresh_portfolio_risk`/`compute_portfolio_risk` est réellement écrit
+    puis relu par `routers/my_portfolio.py`, prouvant le pipeline complet
+    (pas seulement `compute_portfolio_risk` isolé, déjà testé dans
+    `test_portfolio_risk.py`)."""
+    monkeypatch.setattr(risk_mod, "_STATE_PATH", tmp_path / "my_portfolio_risk.json")
+    risk_mod._save_state({
+        "schema_version": risk_mod.SCHEMA_VERSION,
+        "risk_snapshot": {
+            "portfolio_beta": 0.653,
+            "avg_weighted_correlation": 0.11,
+            "diversification_ratio": 2.15,
+            "most_correlated_pairs": [{"a": "MU", "b": "ERO", "corr": 0.43}],
+            "last_recalc_date": "2026-08-17",
+            "next_recalc_date": "2026-08-24",
+            "n_tickers_ok": 10,
+            "n_tickers_missing": 0,
+        },
+        "tickers": {
+            "BNP.PA": {
+                "beta_recalculated": 0.42, "beta_diff_pct": 16.7, "beta_flag": False,
+                "avg_correlation": 0.09, "correlation_vs_ref": None,
+                "correlation_alert_triggered": False, "correlation_streak_weeks": 1,
+                "data_quality": "ok",
+            },
+            "ERO": {
+                "beta_recalculated": 1.8, "beta_diff_pct": 10.4, "beta_flag": False,
+                "avg_correlation": 0.31, "correlation_vs_ref": 0.55,
+                "correlation_alert_triggered": True, "correlation_streak_weeks": 1,
+                "data_quality": "ok",
+            },
+        },
+        "fetched_at": time.time(),
+    })
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["risk_snapshot"]["portfolio_beta"] == 0.653
+    assert body["risk_snapshot"]["most_correlated_pairs"] == [{"a": "MU", "b": "ERO", "corr": 0.43}]
+
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["beta_recalculated"] == 0.42
+    assert bnp["correlation_alert_triggered"] is False
+
+    ero = next(p for p in body["positions"] if p["ticker"] == "ERO")
+    assert ero["correlation_vs_ref"] == 0.55
+    assert ero["correlation_alert_triggered"] is True
+
+    # Ticker sans entrée dans l'état persisté (ex : ajouté au book après le
+    # dernier run hebdo) → valeurs par défaut, jamais de KeyError.
+    fmx = next(p for p in body["positions"] if p["ticker"] == "FMX")
+    assert fmx["beta_recalculated"] is None
+    assert fmx["data_quality"] is None

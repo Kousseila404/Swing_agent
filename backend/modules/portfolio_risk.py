@@ -382,6 +382,14 @@ def _save_state(state: dict[str, Any]) -> None:
         logger.warning(f"[portfolio_risk] state write failed: {e}")
 
 
+def load_snapshot() -> dict[str, Any]:
+    """Dernier snapshot persisté, lecture seule (pas de recalcul, pas de
+    fetch réseau) — utilisé par `routers/my_portfolio.py`. Fail-open : dict
+    vide si le fichier est absent, corrompu, ou d'un `schema_version`
+    différent (même garde que `refresh_portfolio_risk`)."""
+    return _load_state()
+
+
 def refresh_portfolio_risk(
     positions: list[dict[str, Any]],
     *,

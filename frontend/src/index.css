@@ -1175,6 +1175,25 @@
 .mp-table td { padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: top; }
 .mp-table tr:last-child td { border-bottom: none; }
 .mp-table tr.mp-row-alert { background: rgba(239, 68, 68, 0.05); }
+.mp-table tr.mp-row-risk-alert { background: rgba(239, 68, 68, 0.05); }
+
+/* Bandeau risque (Upgrade 1) — beta/corrélation recalculés en tâche de
+   fond, voir docs/UPGRADES_MY_PORTFOLIO.md. */
+.mp-risk-card { padding: 1rem 1.4rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.mp-risk-tiles {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.85rem;
+}
+.mp-risk-recalc-date { font-size: 1rem; }
+.mp-risk-pairs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.78rem; }
+.mp-risk-pairs-label { color: var(--text-muted); }
+.mp-risk-pair {
+  font-family: monospace; padding: 0.15rem 0.5rem; border-radius: 6px;
+  background: rgba(217, 119, 6, 0.1); border: 1px solid var(--mp-accent-border);
+}
+
+.mp-beta-recalc { margin-top: 0.2rem; }
+.mp-beta-flag { color: var(--danger); font-weight: 700; }
 
 .mp-ticker-cell { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .mp-ticker { font-weight: 700; font-family: monospace; color: var(--mp-accent); }
