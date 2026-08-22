@@ -327,7 +327,7 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
 - [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
@@ -368,6 +368,48 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite 2)** : Deuxième incrément —
+`get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+ajoutés à `modules/tracker/market.py` (extensions additives, aucune fonction
+existante modifiée). `get_historical_price` : si `at` est dans la fenêtre
+intraday yfinance (~30j, `_INTRADAY_WINDOW_DAYS`), fetch `history(start=at-6h,
+end=at+6h, interval="1m")` et sélectionne la barre la plus proche de `at`
+(`(hist.index - at_utc).abs().argmin()`) → `resolution="intraday"` ; sinon,
+ou si l'intraday échoue/est vide, repli sur `history(start=jour(at)-5j,
+end=jour(at)+1j)` et dernière barre du fichier (= clôture du dernier jour de
+bourse valide ≤ `at`, gère nativement les week-ends/jours fériés sans table
+dédiée) → `resolution="daily_close"`. Aucune barre trouvée nulle part →
+`(None, "unavailable")` (fail-open, jamais de prix approximé). `at` doit
+être timezone-aware (`ValueError` sinon, même contrainte que
+`exchange_hours.is_open`). `get_historical_fx_rate` : même fenêtre de
+recherche ±5j/+1j que le repli `daily_close` (gère le cas limite "FX
+historique manquant" — jour férié FX — en retombant sur le dernier taux
+connu avant `at` plutôt que d'échouer), `resolution="historical"` ou
+`"unavailable"`. Pas de nouveau mécanisme de cache (contrairement à
+`get_fx_rate` live) — ces deux fonctions ne sont appelées qu'à la saisie
+d'un fill (Upgrade 4), pas sur le chemin chaud du dashboard.
+Tests : 11 nouveaux tests dans `test_tracker_market.py` (mock `_SeqMockTicker`
+— une même instance de ticker mockée réutilisée à travers les 2 appels
+`yf.Ticker(...)` successifs possibles d'un même appel de fonction, contrairement
+à `_MockTicker` existant qui recrée un historique par appel) : datetime naïf
+rejeté (prix et FX), sélection de la barre intraday la plus proche,
+au-delà de la fenêtre intraday → daily_close direct (une seule requête),
+intraday vide → repli daily_close, intraday en erreur → repli daily_close,
+tout échoue → `unavailable`, FX historique nominal, FX repli jour férié
+(barre trouvée 2j avant `at` dans la fenêtre de 5j), FX vide/erreur →
+`unavailable`. Suite pytest complète : 1235 tests verts (1224 + 11, mêmes 3
+échecs pré-existants et non liés déjà documentés ci-dessus, environnement
+sandbox uniquement — reproduits en isolation sans aucun changement de code
+pour confirmer l'absence de régression). `ruff` + `mypy` verts sur
+`modules/tracker/market.py`. Frontend inchangé ce run (aucun JS/JSX touché) :
+`npm run build` + `npx vitest run` (45/45) verts, pas de régression.
+Prochain run (Upgrade 4 reste la cible tant que sa checklist n'est pas
+complète) : `data/my_portfolio_executions.csv` (schéma de colonnes) +
+`backend/modules/my_portfolio_executions.py` (CRUD + calcul slippage,
+consommant `exchange_hours.is_open` + `get_historical_price`/
+`get_historical_fx_rate` construits ce run), puis le router
+`my_portfolio_executions.py` et le frontend.
 
 ---
 
