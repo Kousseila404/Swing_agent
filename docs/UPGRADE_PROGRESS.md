@@ -320,11 +320,11 @@ rapport avec cet upgrade).
 
 ### Upgrade 4 — Journal de qualité d'exécution
 
-**Statut : NOT_STARTED**
+**Statut : IN_PROGRESS**
 
 Checklist :
 
-- [ ] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
+- [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
 - [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
@@ -341,7 +341,33 @@ Checklist :
       nouvel endpoint
 - [ ] `npm run build` + `npx vitest run` + suite pytest complète verts
 
-**Note de run** : (vide)
+**Note de run (2026-08-22)** : Premier incrément — `exchange_hours.py` créé
+(table de sessions par place, minutes-depuis-minuit locales, HKEX modélisé
+en 2 sessions distinctes 09:30-12:00/13:00-16:00 HKT pour la pause
+déjeuner). `is_open(exchange, at)` : `at` doit être timezone-aware (rejette
+un datetime naïf avec `ValueError` explicite — cas limite "erreur de fuseau
+à la saisie" de la spec, mieux vaut échouer fort que deviner un fuseau),
+converti via `.astimezone()` vers le fuseau IANA de la place puis comparé
+aux bornes de session. DST géré nativement par `zoneinfo` (pas de table de
+dates spéciales) — mêmes fuseaux que `is_market_hours()` pour US
+(`America/New_York`), + `Europe/Paris`/`Asia/Hong_Kong` nouveaux. N'importe
+et ne modifie pas `is_market_hours()` (fonction séparée, chemin critique
+TITAN/tracker intact). Tests : 20 tests (`test_exchange_hours.py`) —
+sessions US/Euronext/HKEX nominal, pause déjeuner HKEX (12h15 fermé, bornes
+exactes 12h00/13h00), week-end, DST hiver/été, conversion cross-fuseau
+(Paris→HKT, UTC→NY), reproduction du cas CNC réel (09h50 Paris = hors
+séance US), datetime naïf rejeté, place inconnue rejetée. Pas encore de
+router/endpoint/frontend à ce stade (prochain run : `get_historical_price`/
+`get_historical_fx_rate` dans `modules/tracker/market.py`, puis le CRUD
+`my_portfolio_executions.py` qui consommera `exchange_hours.is_open`).
+Suite pytest complète : 1224 tests verts (1204 + 20, mêmes 3 échecs
+pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
+`test_duckdb_journal.py::TestShadowInsert::test_fail_open_on_bad_path`,
+`test_risk.py::TestSectorConcentration::test_blocks_when_sector_full`/
+`test_custom_max_per_sector`, environnement sandbox uniquement). `ruff` +
+`mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
+(aucun JS/JSX touché, pas de build nécessaire — même pratique que le
+premier incrément d'Upgrade 1).
 
 ---
 
