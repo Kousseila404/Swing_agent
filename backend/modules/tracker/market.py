@@ -8,13 +8,19 @@ Stratégie adaptative :
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import pandas as pd
 import yfinance as yf
 
 import config
 
 from .state import FETCH_TIMEOUT, logger
+
+# get_historical_price : au-delà de cette ancienneté, yfinance ne sert plus
+# de barres 1-minute (limite connue de la source, pas un choix produit) —
+# repli sur la clôture journalière (Upgrade 4 — journal d'exécution).
+_INTRADAY_MAX_AGE_DAYS = 30
 
 # Cache mémoire des taux de change (5 min) — évite de marteler yfinance à
 # chaque requête dashboard pour une donnée qui ne bouge pas seconde par
@@ -178,3 +184,99 @@ def get_current_price_detailed(
                 pass
         logger.error(f"[{ticker}] Erreur yfinance : {exc}")
         return None, None, fetched_at
+
+
+def get_historical_price(ticker: str, at: datetime) -> tuple[float | None, str]:
+    """Retourne (prix, résolution) au plus proche de `at` (Upgrade 4).
+
+    `at` doit être timezone-aware (offset explicite) — même garde-fou que
+    `exchange_hours.is_open`, un datetime naïf est une source d'erreur
+    silencieuse connue pour ce diagnostic.
+
+    `résolution` ∈ {"intraday", "daily_close"} : barre 1-minute la plus
+    proche de `at` si `at` a moins de `_INTRADAY_MAX_AGE_DAYS` (limite
+    connue de yfinance), sinon repli sur la clôture journalière — toujours
+    renvoyée, même quand `prix` est `None`, pour que l'appelant sache quelle
+    résolution a été tentée. Aucune barre exploitable → `(None, "daily_close")`.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+    age_days = (datetime.now(UTC) - at_utc).total_seconds() / 86400
+
+    if 0 <= age_days <= _INTRADAY_MAX_AGE_DAYS:
+        try:
+            hist = yf.Ticker(ticker).history(
+                start=at_utc - timedelta(minutes=30),
+                end=at_utc + timedelta(minutes=30),
+                interval="1m",
+                timeout=FETCH_TIMEOUT,
+            )
+            if not hist.empty:
+                diffs = abs(hist.index - pd.Timestamp(at_utc))
+                pos = diffs.argmin()
+                price = float(hist["Close"].iloc[pos])
+                logger.info(
+                    f"[{ticker}] Prix historique intraday @ {at_utc.isoformat()} : "
+                    f"{price:.4f} (barre @ {hist.index[pos].isoformat()})"
+                )
+                return price, "intraday"
+        except Exception as exc:
+            logger.warning(
+                f"[{ticker}] Erreur historique intraday @ {at_utc.isoformat()} : {exc}"
+            )
+
+    try:
+        day = at_utc.date()
+        hist = yf.Ticker(ticker).history(
+            start=day - timedelta(days=5),
+            end=day + timedelta(days=1),
+            interval="1d",
+            timeout=FETCH_TIMEOUT,
+        )
+        if not hist.empty:
+            price = float(hist["Close"].iloc[-1])
+            logger.info(
+                f"[{ticker}] Prix historique daily_close @ {at_utc.isoformat()} : {price:.4f}"
+            )
+            return price, "daily_close"
+        logger.warning(f"[{ticker}] Aucune donnée historique disponible @ {at_utc.isoformat()}.")
+    except Exception as exc:
+        logger.warning(f"[{ticker}] Erreur historique daily @ {at_utc.isoformat()} : {exc}")
+
+    return None, "daily_close"
+
+
+def get_historical_fx_rate(pair: str, at: datetime) -> float | None:
+    """Taux de change historique pour une paire yfinance à l'instant `at` (Upgrade 4).
+
+    Contrairement à `get_fx_rate` (live, cache 5 min), interroge la clôture
+    journalière au jour de `at`. Si `at` tombe un jour férié FX/week-end
+    (aucune barre à cette date exacte), repli sur la dernière clôture connue
+    strictement antérieure à `at` dans la fenêtre récupérée — jamais une
+    barre future, qui introduirait un biais de dérive temporelle dans le
+    calcul de slippage.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+    try:
+        hist = yf.Ticker(pair).history(
+            start=at_utc.date() - timedelta(days=7),
+            end=at_utc.date() + timedelta(days=1),
+            interval="1d",
+            timeout=FETCH_TIMEOUT,
+        )
+        if not hist.empty:
+            eligible = hist[hist.index <= pd.Timestamp(at_utc)]
+            row = eligible.iloc[-1] if not eligible.empty else hist.iloc[0]
+            rate = float(row["Close"])
+            logger.info(f"[FX] Taux historique {pair} @ {at_utc.isoformat()} : {rate:.4f}")
+            return rate
+        logger.warning(f"[FX] Aucune donnée historique pour {pair} @ {at_utc.isoformat()}.")
+    except Exception as exc:
+        logger.warning(f"[FX] Erreur taux historique {pair} @ {at_utc.isoformat()} : {exc}")
+
+    return None

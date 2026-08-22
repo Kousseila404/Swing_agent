@@ -327,7 +327,7 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
 - [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
@@ -368,6 +368,48 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite)** : Deuxième incrément — extensions
+additives de `modules/tracker/market.py` : `get_historical_price(ticker, at)`
+retourne `(prix, résolution)` avec `résolution ∈ {"intraday", "daily_close"}`
+toujours renvoyée (même si `prix is None`), pour que l'appelant (le futur
+`my_portfolio_executions.py`) sache directement quelle précision a été
+obtenue sans la re-dériver. Barre 1-minute la plus proche de `at`
+(`yf.Ticker(...).history(start=at-30min, end=at+30min, interval="1m")`,
+sélection par `abs(index - at).argmin()`) si `at` a moins de 30 jours
+(`_INTRADAY_MAX_AGE_DAYS`, limite connue yfinance) ; sinon repli direct sur
+`interval="1d"` (clôture la plus récente dans une fenêtre de 5j pour couvrir
+week-end/jour férié). Échec intraday (exception ou vide) → repli daily,
+jamais de levée d'exception hors du garde-fou `ValueError` sur datetime
+naïf (même contrat que `exchange_hours.is_open`, cohérence délibérée entre
+les deux garde-fous du même upgrade). `get_historical_fx_rate(pair, at)`
+même contrat : clôture journalière au jour de `at` ou, si absente
+(week-end/jour férié FX), la dernière clôture strictement antérieure dans
+la fenêtre récupérée (jamais une barre future — biais de dérive temporelle
+sur le calcul de slippage sinon) ; `None` si aucune donnée ou erreur
+(fail-open, pas de levée hors `ValueError` sur naïf). Pas de nouveau cache
+(contrairement à `get_fx_rate` live) : ces deux fonctions sont appelées une
+fois par ligne au moment de la saisie d'un fill, pas à chaque refresh
+dashboard — pas de justification à une couche de cache ici.
+Tests : 10 nouveaux tests dans `test_tracker_market.py` (`_MockHistTicker`/
+`_RecordingHistTicker`, même famille que `_MockTicker` existant) — intraday
+nominal, repli daily si intraday vide, repli daily si intraday lève, skip
+intraday au-delà de 30j (vérifié via l'historique des `interval` passés à
+`.history()`), `None` si les deux sources sont vides, datetime naïf rejeté
+(prix ET FX), FX nominal au jour exact, FX repli sur la dernière clôture
+antérieure (jamais une barre future), FX `None` si vide/erreur. Suite
+pytest complète : 1234 tests verts (1224 + 10, mêmes 3 échecs pré-existants
+et non liés déjà documentés dans les notes Upgrade 2/3/1, environnement
+sandbox uniquement). `ruff` + `mypy` verts sur `modules/tracker/market.py`.
+Frontend inchangé ce run (aucun JS/JSX touché) : `npm run build` +
+`npx vitest run` (45/45) verts, aucune régression — vérifiés quand même
+malgré l'absence de changement JS, par prudence (dépendances npm
+fraîchement réinstallées ce run).
+Prochain run : `data/my_portfolio_executions.csv` (schéma de colonnes) +
+`backend/modules/my_portfolio_executions.py` (CRUD + calcul slippage,
+consommera `exchange_hours.is_open` + `get_historical_price`/
+`get_historical_fx_rate` construits ce run), puis le router
+`routers/my_portfolio_executions.py` (POST/GET) et enfin le frontend.
 
 ---
 
