@@ -327,7 +327,7 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
 - [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
@@ -368,6 +368,47 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite)** : Deuxième incrément — `get_historical_price(ticker, at)`
+et `get_historical_fx_rate(pair, at)` ajoutés à `modules/tracker/market.py`
+(extensions additives, aucune fonction existante modifiée). Les deux
+partagent un helper interne `_nearest_historical_bar(symbol, at_utc, start=,
+end=, interval=)` (fetch `yf.Ticker(...).history(...)` + `DatetimeIndex.
+get_indexer(method="nearest")` pour la barre la plus proche de `at` —
+factorisé car les deux fonctions font exactement la même opération "fenêtre
+étroite → barre la plus proche", pas une abstraction anticipée). Les deux
+rejettent un `at` naïf avec `ValueError` explicite (même contrainte que
+`exchange_hours.is_open`, cas limite "erreur de fuseau à la saisie" de la
+spec). `get_historical_price` : intraday 1m (fenêtre ±5min autour de `at`)
+si `at` a moins de ~30 jours (`_INTRADAY_HISTORY_WINDOW_DAYS`, limite connue
+yfinance — au-delà, un seul fetch daily est tenté, pas de tentative
+intraday inutile), sinon/en cas d'échec repli sur la clôture journalière
+(fenêtre ±1 jour) ; retourne toujours la résolution utilisée
+(`"intraday"`/`"daily_close"`) pour que l'UI du journal d'exécution
+n'affiche jamais une précision non garantie. `get_historical_fx_rate` :
+fenêtre ±1 jour d'abord, puis repli fenêtre ±7 jours avec `is_approximate=True`
+si le jour même n'a aucune donnée (jour férié FX / trou Yahoo, cas limite
+explicite de la spec) — jamais de taux fabriqué, `None` si les deux fenêtres
+échouent. Aucun changement aux fonctions existantes (`get_fx_rate`,
+`get_current_price_detailed`, `is_market_hours`) — purement additif.
+Tests : 9 nouveaux tests dans `test_tracker_market.py` (`_MockHistTicker`,
+même pattern que `_MockTicker` existant mais avec `DatetimeIndex` contrôlé
+pour piloter la barre la plus proche) — datetime naïf rejeté (les 2
+fonctions), intraday nominal, fill ancien saute directement au daily
+(vérifie qu'un seul fetch réseau est fait, pas deux), intraday vide → repli
+daily, échec réseau total → `None`, FX jour même nominal, FX repli fenêtre
+élargie avec flag approximatif, FX échec total → `None`. Suite pytest
+complète : 1233 tests verts (1224 + 9, mêmes 3 échecs pré-existants et non
+liés déjà documentés dans les notes Upgrade 2/3/1 —
+`test_duckdb_journal.py::TestShadowInsert::test_fail_open_on_bad_path`,
+`test_risk.py::TestSectorConcentration::test_blocks_when_sector_full`/
+`test_custom_max_per_sector`, environnement sandbox uniquement). `ruff` +
+`mypy` verts sur `modules/tracker/market.py`. Frontend inchangé ce run
+(aucun JS/JSX touché) : `npm run build` + `npx vitest run` (45/45) verts,
+aucune régression, revérifiés malgré l'absence de changement frontend (même
+pratique que les incréments précédents).
+Env sandbox : `venv` recréé avec `python3.12` explicite (même note que les
+runs précédents).
 
 ---
 

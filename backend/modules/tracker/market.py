@@ -8,13 +8,17 @@ Stratégie adaptative :
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import yfinance as yf
 
 import config
 
 from .state import FETCH_TIMEOUT, logger
+
+# Fenêtre au-delà de laquelle yfinance ne sert plus d'historique intraday
+# (1m) — limite connue du fournisseur, pas une valeur choisie ici.
+_INTRADAY_HISTORY_WINDOW_DAYS = 30
 
 # Cache mémoire des taux de change (5 min) — évite de marteler yfinance à
 # chaque requête dashboard pour une donnée qui ne bouge pas seconde par
@@ -178,3 +182,99 @@ def get_current_price_detailed(
                 pass
         logger.error(f"[{ticker}] Erreur yfinance : {exc}")
         return None, None, fetched_at
+
+
+def _nearest_historical_bar(
+    symbol: str, at_utc: datetime, *, start: datetime, end: datetime, interval: str | None = None
+) -> tuple[float, datetime] | None:
+    """Barre `Close` la plus proche de `at_utc` dans `yf.Ticker(symbol).history(start, end)`.
+
+    Retourne None si la fenêtre ne contient aucune donnée ou en cas d'erreur
+    réseau — l'appelant décide du repli (fenêtre plus large, résolution
+    dégradée), cette fonction ne fabrique jamais de valeur approximative
+    elle-même.
+    """
+    kwargs: dict = {"start": start, "end": end, "timeout": FETCH_TIMEOUT}
+    if interval is not None:
+        kwargs["interval"] = interval
+    try:
+        hist = yf.Ticker(symbol).history(**kwargs)
+    except Exception as exc:
+        logger.warning(
+            f"[{symbol}] Erreur historique {start.isoformat()}..{end.isoformat()} : {exc}"
+        )
+        return None
+    if hist.empty:
+        return None
+    idx = hist.index.get_indexer([at_utc], method="nearest")[0]
+    return float(hist["Close"].iloc[idx]), hist.index[idx].to_pydatetime()
+
+
+def get_historical_price(ticker: str, at: datetime) -> tuple[float | None, str]:
+    """Retourne (prix, résolution) pour `ticker` à l'instant historique `at`.
+
+    Résolution :
+      - "intraday" : barre 1 minute la plus proche de `at`, si `at` est dans
+        les ~30 derniers jours (fenêtre intraday connue de yfinance).
+      - "daily_close" : repli sur la clôture du jour de `at` — hors fenêtre
+        intraday, ou si le fetch 1m échoue/est vide.
+
+    `at` doit être timezone-aware (offset explicite) — un fill saisi avec un
+    datetime naïf est une source d'erreur silencieuse connue pour ce
+    diagnostic (Upgrade 4), donc rejeté plutôt que supposé UTC ou local.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+    age_days = (datetime.now(UTC) - at_utc).days
+
+    if age_days <= _INTRADAY_HISTORY_WINDOW_DAYS:
+        bar = _nearest_historical_bar(
+            ticker, at_utc,
+            start=at_utc - timedelta(minutes=5), end=at_utc + timedelta(minutes=5),
+            interval="1m",
+        )
+        if bar is not None:
+            return bar[0], "intraday"
+
+    bar = _nearest_historical_bar(
+        ticker, at_utc, start=at_utc - timedelta(days=1), end=at_utc + timedelta(days=1)
+    )
+    if bar is not None:
+        return bar[0], "daily_close"
+
+    logger.warning(f"[{ticker}] Aucun prix historique disponible pour {at_utc.isoformat()}.")
+    return None, "daily_close"
+
+
+def get_historical_fx_rate(pair: str, at: datetime) -> tuple[float | None, bool]:
+    """Retourne (taux, is_approximate) pour la paire FX `pair` à l'instant `at`.
+
+    `is_approximate=True` quand aucune donnée n'existe au jour même de `at`
+    (jour férié FX, trou Yahoo) et qu'on retombe sur le taux du jour de
+    bourse valide le plus proche via une fenêtre élargie — pour que
+    l'appelant puisse le signaler plutôt que de laisser croire à une
+    précision exacte.
+
+    `at` doit être timezone-aware, même contrainte que `get_historical_price`.
+    """
+    if at.tzinfo is None:
+        raise ValueError("`at` doit être timezone-aware (offset explicite requis)")
+
+    at_utc = at.astimezone(UTC)
+
+    bar = _nearest_historical_bar(
+        pair, at_utc, start=at_utc - timedelta(days=1), end=at_utc + timedelta(days=1)
+    )
+    if bar is not None:
+        return bar[0], False
+
+    bar = _nearest_historical_bar(
+        pair, at_utc, start=at_utc - timedelta(days=7), end=at_utc + timedelta(days=7)
+    )
+    if bar is not None:
+        return bar[0], True
+
+    logger.warning(f"[FX] Aucun taux historique disponible pour {pair} à {at_utc.isoformat()}.")
+    return None, False

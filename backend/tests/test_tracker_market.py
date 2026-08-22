@@ -7,6 +7,8 @@ Couvre :
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pandas as pd
 import pytest
 
@@ -208,3 +210,119 @@ def test_get_fx_rate_returns_none_when_never_fetched_and_fails(monkeypatch):
     market._FX_CACHE.clear()
     monkeypatch.setattr(market.yf, "Ticker", lambda _t: _MockTicker(raise_error=True))
     assert market.get_fx_rate("EURUSD=X") is None
+
+
+# ─────────────────────────────────────────────────────────────────
+# get_historical_price / get_historical_fx_rate — Upgrade 4 (journal
+# d'exécution) : prix/FX de référence reconstruits a posteriori.
+# ─────────────────────────────────────────────────────────────────
+
+class _MockHistTicker:
+    """Simule yf.Ticker().history(start=, end=, interval=) avec des barres
+    Close à des timestamps contrôlés."""
+    def __init__(self, bars: list[tuple[str, float]] | None = None, raise_error: bool = False):
+        self._bars = bars or []
+        self._raise = raise_error
+        self.calls: list[dict] = []
+
+    def history(self, **kw) -> pd.DataFrame:
+        self.calls.append(kw)
+        if self._raise:
+            raise RuntimeError("simulated network error")
+        if not self._bars:
+            return pd.DataFrame(columns=["Close"])
+        index = pd.DatetimeIndex([pd.Timestamp(ts) for ts, _ in self._bars])
+        return pd.DataFrame({"Close": [c for _, c in self._bars]}, index=index)
+
+
+def test_get_historical_price_rejects_naive_datetime():
+    with pytest.raises(ValueError):
+        market.get_historical_price("CNC", datetime(2026, 8, 19, 9, 50))
+
+
+def test_get_historical_price_recent_uses_intraday(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=2)
+    mock = _MockHistTicker(bars=[(at.isoformat(), 64.02)])
+    monkeypatch.setattr(market.yf, "Ticker", lambda _s: mock)
+    price, resolution = market.get_historical_price("CNC", at)
+    assert price == 64.02
+    assert resolution == "intraday"
+    assert mock.calls[0]["interval"] == "1m"
+
+
+def test_get_historical_price_old_fill_skips_intraday_uses_daily_close(monkeypatch):
+    """Fill de plus de ~30j : la fenêtre intraday yfinance n'existe plus,
+    un seul fetch (daily) doit être tenté, pas deux."""
+    at = datetime.now(UTC) - timedelta(days=90)
+    calls = {"n": 0}
+    def _factory(_s):
+        calls["n"] += 1
+        return _MockHistTicker(bars=[(at.isoformat(), 55.0)])
+    monkeypatch.setattr(market.yf, "Ticker", _factory)
+    price, resolution = market.get_historical_price("CNC", at)
+    assert price == 55.0
+    assert resolution == "daily_close"
+    assert calls["n"] == 1
+
+
+def test_get_historical_price_intraday_empty_falls_back_to_daily(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=2)
+    calls = {"n": 0}
+    def _factory(_s):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _MockHistTicker(bars=[])  # intraday vide
+        return _MockHistTicker(bars=[(at.isoformat(), 60.0)])  # daily
+    monkeypatch.setattr(market.yf, "Ticker", _factory)
+    price, resolution = market.get_historical_price("CNC", at)
+    assert price == 60.0
+    assert resolution == "daily_close"
+    assert calls["n"] == 2
+
+
+def test_get_historical_price_all_fail_returns_none(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=2)
+    monkeypatch.setattr(market.yf, "Ticker", lambda _s: _MockHistTicker(raise_error=True))
+    price, resolution = market.get_historical_price("CNC", at)
+    assert price is None
+    assert resolution == "daily_close"
+
+
+def test_get_historical_fx_rate_rejects_naive_datetime():
+    with pytest.raises(ValueError):
+        market.get_historical_fx_rate("EURUSD=X", datetime(2026, 8, 19, 9, 50))
+
+
+def test_get_historical_fx_rate_same_day(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=5)
+    mock = _MockHistTicker(bars=[(at.isoformat(), 1.09)])
+    monkeypatch.setattr(market.yf, "Ticker", lambda _s: mock)
+    rate, is_approx = market.get_historical_fx_rate("EURUSD=X", at)
+    assert rate == 1.09
+    assert is_approx is False
+
+
+def test_get_historical_fx_rate_holiday_falls_back_to_widened_window(monkeypatch):
+    """Jour férié FX / trou Yahoo pile au jour du fill : repli sur une
+    fenêtre élargie, taux marqué approximatif."""
+    at = datetime.now(UTC) - timedelta(days=5)
+    nearest = at - timedelta(days=3)
+    calls = {"n": 0}
+    def _factory(_s):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _MockHistTicker(bars=[])  # jour même : trou FX
+        return _MockHistTicker(bars=[(nearest.isoformat(), 1.08)])
+    monkeypatch.setattr(market.yf, "Ticker", _factory)
+    rate, is_approx = market.get_historical_fx_rate("EURUSD=X", at)
+    assert rate == 1.08
+    assert is_approx is True
+    assert calls["n"] == 2
+
+
+def test_get_historical_fx_rate_all_fail_returns_none(monkeypatch):
+    at = datetime.now(UTC) - timedelta(days=5)
+    monkeypatch.setattr(market.yf, "Ticker", lambda _s: _MockHistTicker(raise_error=True))
+    rate, is_approx = market.get_historical_fx_rate("EURUSD=X", at)
+    assert rate is None
+    assert is_approx is False
