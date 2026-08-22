@@ -327,19 +327,19 @@ Checklist :
 - [x] `backend/modules/exchange_hours.py` créé (table US / Euronext Paris /
       HKEX avec pause déjeuner, DST-aware via `zoneinfo`, additif — ne
       modifie PAS `is_market_hours()` existant)
-- [ ] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
+- [x] `get_historical_price(ticker, at)` et `get_historical_fx_rate(pair, at)`
       ajoutés à `modules/tracker/market.py` (extensions additives)
-- [ ] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
+- [x] `data/my_portfolio_executions.csv` — schéma de colonnes défini (voir
       spec) + `backend/modules/my_portfolio_executions.py` (CRUD + calcul
       slippage/référence)
 - [ ] `backend/routers/my_portfolio_executions.py` — endpoints POST/GET
 - [ ] Frontend : formulaire de saisie + table historique + tuile coût cumulé
       (nouveau composant ou onglet)
-- [ ] Tests unitaires (résolution intraday vs daily_close, pause déjeuner
+- [x] Tests unitaires (résolution intraday vs daily_close, pause déjeuner
       HKEX, DST, FX historique manquant — tous les cas limites de la spec)
 - [ ] Vérification live via `TestClient` : POST puis GET round-trip sur le
       nouvel endpoint
-- [ ] `npm run build` + `npx vitest run` + suite pytest complète verts
+- [x] `npm run build` + `npx vitest run` + suite pytest complète verts
 
 **Note de run (2026-08-22)** : Premier incrément — `exchange_hours.py` créé
 (table de sessions par place, minutes-depuis-minuit locales, HKEX modélisé
@@ -368,6 +368,96 @@ pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1 —
 `mypy` verts sur `modules/exchange_hours.py`. Frontend inchangé ce run
 (aucun JS/JSX touché, pas de build nécessaire — même pratique que le
 premier incrément d'Upgrade 1).
+
+**Note de run (2026-08-22, suite)** : Deuxième incrément — `get_historical_
+price(ticker, at)`/`get_historical_fx_rate(pair, at)` ajoutés à
+`modules/tracker/market.py` (extensions additives, aucune fonction
+existante modifiée), puis `backend/modules/my_portfolio_executions.py`
+créé (CRUD + calcul slippage/référence). Router/endpoints/frontend pas
+encore branchés (prochain run : `routers/my_portfolio_executions.py` avec
+`TestClient` pour la vérification live POST→GET, puis le formulaire/table
+frontend — Upgrade 4 reste la cible tant que sa checklist n'est pas
+complète).
+
+`get_historical_price` : si `at` est dans les ~30 derniers jours, tente une
+barre 1-minute dans une fenêtre de ±15 min autour de `at` (barre la plus
+proche retenue) ; sinon (ou si la fenêtre intraday est vide) replie sur la
+clôture journalière valide la plus récente <= `at`, recherchée jusqu'à 7
+jours en arrière — jamais de lookahead (une clôture postérieure à `at`
+n'est jamais utilisée, testé explicitement). `get_historical_fx_rate` :
+même fenêtre de repli 7 jours pour le jour férié FX, renvoie aussi la date
+de bourse effectivement utilisée (`date_iso`) pour que l'appelant puisse
+détecter un repli en la comparant à la date demandée. Les deux rejettent un
+`at` naïf avec `ValueError` (même contrainte que `exchange_hours.is_open`).
+12 nouveaux tests (`test_tracker_market.py`, mock `_MockHistTicker` dédié
+qui sert des rows différentes selon l'`interval` demandé — permet de
+distinguer la branche intraday de la branche daily_close dans un même test
+sans réseau).
+
+`my_portfolio_executions.py` : `compute_reference(...)` calcule
+`market_open_at_fill` (délègue à `exchange_hours.is_open`),
+`reference_price_usd`/`reference_price_resolution` (délègue à
+`get_historical_price`), puis `slippage_bps`/`slippage_usd` — fail-open à
+`None` si le prix ou le FX historiques sont indisponibles (jamais de
+valeur approximative affichée comme certaine). `_historical_usd_multiplier`
+duplique volontairement la convention `_FX_PAIR_FOR_CURRENCY`/inversion
+HKD de `routers/my_portfolio.py::_usd_multiplier` (paire yfinance par
+devise, EUR = taux direct, HKD = taux inversé) mais au taux HISTORIQUE
+(`get_historical_fx_rate`), pas live — dupliqué plutôt qu'importé pour
+garder ce module utilisable indépendamment de FastAPI, même principe que
+`my_portfolio_earnings.py` vis-à-vis du router.
+
+**Déviation documentée** : la spec donne la formule brute
+`(fill-ref)/ref×10000` "signée selon la direction" sans préciser le sens
+du flip pour SELL. Choix : signe = coût (positif = exécution coûteuse)
+quel que soit le sens du trade — un BUY payé plus cher que la référence ET
+un SELL vendu moins cher que la référence sont tous deux comptés
+positivement (flip de signe pour SELL). Cohérent avec l'exemple CNC de la
+spec (BUY, fill>ref, ≈493 bps positif) et avec le vocabulaire "coût
+d'exécution cumulé" de la tuile agrégée prévue. `Slippage_Usd` suit le même
+signe (`(slippage_bps/10000) × reference_price_usd × shares`), vérifié
+équivalent à `(fill_usd - reference_usd) × shares` pour un BUY sur le cas
+CNC (≈$10.32 vs $10.29 de l'exemple spec, écart de rounding du prix de
+référence donné en exemple). Le repli FX "jour férié" (`get_historical_
+fx_rate` cherchant jusqu'à 7j en arrière) n'est pas signalé par un flag CSV
+dédié — la spec accepte `Reference_Price_Resolution` OU un flag dédié
+("ou" explicite), et l'imprécision dominante pour ce diagnostic reste celle
+du prix de référence (déjà couverte), pas celle du taux FX (écart
+jour-à-jour marginal) — décision documentée, pas un oubli.
+
+`compute_reference`/`log_execution` prennent `price_ticker`/`currency`/
+`primary_exchange` en paramètres explicites (pas de lookup dans
+`my_portfolio_data.POSITIONS`) — respecte le cas limite spec "le journal
+reste indépendant de l'état courant des positions" (testé explicitement :
+un ticker absent du book reste journalisable). CSV : schéma propre à ce
+fichier (`ensure_csv_schema` de `modules/utils.py` est câblé en dur sur le
+schéma `trade_journal.csv`, pas réutilisable tel quel), `FileLock` +
+écriture atomique `.tmp`→rename (même pattern que
+`modules.tracker.evaluation.load_journal`/`save_journal`) — un seul
+`FileLock` par opération (pas de lock imbriqué entre lecture et écriture,
+pour éviter un deadlock sur deux instances `FileLock` distinctes du même
+fichier). `summarize(df)` calcule les agrégats de la spec (coût cumulé,
+% hors séance, top 3 pires exécutions par `abs(Slippage_Bps)`) — fail-open
+sur un journal vide ou des fills sans slippage calculable.
+
+20 nouveaux tests (`test_my_portfolio_executions.py`) : signe BUY/SELL
+(payé plus cher / vendu moins cher / vendu plus cher = négatif), conversion
+EUR/HKD historique (fill ET référence au même taux, pas de taux live),
+fail-open prix/FX manquant/devise non configurée, direction invalide
+rejetée, pause déjeuner HKEX (via `exchange_hours.is_open` réel, non
+mocké), CRUD (append sans écraser, indépendance vis-à-vis de POSITIONS,
+CSV vide), `summarize` (vide, agrégats, exclusion des fills non résolus du
+total $ tout en les comptant dans `fills_count`, top 3 trié), plus un
+round-trip disque réel (écriture CSV puis relecture directe du fichier,
+sans mock I/O — la définition "live" de ce diagnostic tant qu'aucun
+endpoint HTTP n'existe encore pour un `TestClient` round-trip).
+
+Suite pytest complète : 1256 tests verts (1224 + 32, mêmes 3 échecs
+pré-existants et non liés déjà documentés dans les notes Upgrade 2/3/1,
+environnement sandbox uniquement). `ruff` + `mypy` verts sur
+`modules/tracker/market.py` et `modules/my_portfolio_executions.py`.
+Frontend inchangé ce run (aucun JS/JSX touché) : `npm run build` +
+`npx vitest run` (45/45) verts, aucune régression.
 
 ---
 
