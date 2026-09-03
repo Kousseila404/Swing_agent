@@ -2,19 +2,45 @@
 // perso LT, hors moteur TITAN). Route `#/my_portfolio/<ticker>`.
 //
 // Ne recalcule RIEN : consolide dans une seule vue ce que
-// `/api/my_portfolio` (position, thèse/signal de vente, beta/corrélations —
+// `/api/my_portfolio` (position, thèse structurée, beta/corrélations —
 // Upgrade 1, earnings — Upgrade 2, rééquilibrage — Upgrade 3), le journal
 // d'exécution (Upgrade 4, filtré côté client par ticker) et le nouvel
 // endpoint `/api/my_portfolio/{ticker}/price_history` (seule donnée pas
 // déjà exposée par la liste — réutilise le même fetch yfinance que le
 // calcul beta/corrélation) exposent déjà.
+//
+// Thèse structurée (3 blocs, modules/my_portfolio_thesis.py côté backend) :
+//   A. why_bought      — catalyseurs / valorisation / rôle dans le book.
+//   B. sell_signals    — liste de signaux, chacun avec un statut éditorial
+//      (intact/à surveiller/déclenché) — jamais déduit automatiquement.
+//   C. verification    — dernière vérification humaine + historique.
+// Édité via PATCH /api/my_portfolio/{ticker}/thesis (useUpdateThesis) —
+// AUCUN de ces champs n'est jamais calculé depuis une donnée de marché.
 
 import { useState } from 'react';
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { useMyPortfolioExecutions, useMyPortfolioPriceHistory } from '../../hooks/useApi';
+import { useMyPortfolioExecutions, useMyPortfolioPriceHistory, useUpdateThesis } from '../../hooks/useApi';
 import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../../utils/format';
+import { pushToast } from '../../utils/toastBus';
+import StaleBadge from './StaleBadge';
+
+// Au-delà de ce nombre de jours depuis `derniere_verification`, badge
+// d'alerte — même seuil que modules/my_portfolio_thesis.py VERIFICATION_STALE_DAYS.
+const VERIFICATION_STALE_DAYS = 90;
+
+const SIGNAL_STATUS_META = {
+  intact:       { color: 'var(--success)', icon: '🟢', label: 'Intact' },
+  a_surveiller: { color: 'var(--warning)', icon: '🟡', label: 'À surveiller' },
+  declenche:    { color: 'var(--danger)',  icon: '🔴', label: 'Déclenché' },
+};
+
+function daysSince(dateStr) {
+  const then = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(then.getTime())) return null;
+  return Math.floor((Date.now() - then.getTime()) / 86_400_000);
+}
 
 const PERIODS = [
   { id: '3mo', label: '3M' },
@@ -50,10 +76,13 @@ function fmtOrderAmount(order) {
   return `${native} / ${usd}`;
 }
 
-function DetailSection({ title, children }) {
+function DetailSection({ title, action, children }) {
   return (
     <div className="mp-card mp-detail-section">
-      <h3 className="mp-detail-section-title">{title}</h3>
+      <div className="mp-detail-section-header">
+        <h3 className="mp-detail-section-title">{title}</h3>
+        {action}
+      </div>
       {children}
     </div>
   );
@@ -66,6 +95,10 @@ function Field({ label, children }) {
       <span className="mp-detail-field-value">{children}</span>
     </div>
   );
+}
+
+function EmptyDoc({ children }) {
+  return <em className="mp-detail-empty-doc">{children || 'à documenter'}</em>;
 }
 
 function PriceHistoryChart({ ticker }) {
