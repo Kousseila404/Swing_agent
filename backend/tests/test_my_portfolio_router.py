@@ -16,13 +16,23 @@ from __future__ import annotations
 import time
 from datetime import date, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 import api
 import routers.my_portfolio as my_portfolio_router
 from modules import api_core
 from modules import my_portfolio_earnings as earnings_mod
+from modules import my_portfolio_thesis as thesis_mod
 from modules import portfolio_risk as risk_mod
+
+
+@pytest.fixture(autouse=True)
+def _isolate_thesis_store(tmp_path, monkeypatch):
+    # Jamais lire/écrire le vrai data/my_portfolio_thesis.json de prod
+    # pendant les tests — même précaution que le risk state ci-dessous.
+    monkeypatch.setattr(thesis_mod, "STORE_PATH", tmp_path / "my_portfolio_thesis.json")
+    monkeypatch.setattr(thesis_mod, "_LOCK_PATH", tmp_path / "my_portfolio_thesis.json.lock")
 
 
 def _client(monkeypatch) -> TestClient:
@@ -278,6 +288,34 @@ def test_my_portfolio_total_pnl_usd_sums_positions_with_known_entry_price(monkey
     # Toutes les lignes ont désormais un entry_price connu (LNVGY inclus
     # depuis le 21/08/2026) -> aucune ne doit avoir un pnl_usd None ici.
     assert all(p["pnl_usd"] is not None for p in body["positions"])
+
+
+# ─────────────────────────────────────────────────────────────────
+# Thèse structurée — fusion dans /api/my_portfolio (modules/my_portfolio_thesis.py)
+# ─────────────────────────────────────────────────────────────────
+
+def test_my_portfolio_thesis_fields_default_empty_skeleton(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    body = r.json()
+    bnp = next(p for p in body["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["why_bought"] == {"catalyseurs": [], "valorisation": None, "role_portefeuille": None}
+    assert bnp["sell_signals"] == []
+    assert bnp["verification"] == {"derniere_verification": None, "verdict": None, "historique_verifications": []}
+    assert bnp["thesis_updated_at"] is None
+    # Les anciens champs texte libres n'existent plus sur POSITIONS.
+    assert "reason" not in bnp
+    assert "sell_signal" not in bnp
+
+
+def test_my_portfolio_thesis_fields_merged_when_edited(monkeypatch):
+    thesis_mod.update_thesis("BNP.PA", why_bought={"catalyseurs": ["Stabilisateur du book"]})
+    thesis_mod.update_thesis("BNP.PA", sell_signals=[{"libelle": "Corrélation > 0.40", "statut": "a_surveiller"}])
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["why_bought"]["catalyseurs"] == ["Stabilisateur du book"]
+    assert bnp["sell_signals"][0]["libelle"] == "Corrélation > 0.40"
 
 
 def test_my_portfolio_requires_auth_when_configured(monkeypatch):
