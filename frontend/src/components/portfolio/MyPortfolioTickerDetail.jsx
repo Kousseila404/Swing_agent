@@ -433,9 +433,9 @@ function SellSignalsSection({ ticker, sellSignals }) {
                 className="mini-input" value={r.statut} onChange={(e) => updateRow(i, 'statut', e.target.value)}
                 title={SIGNAL_STATUS_META[r.statut]?.hint}
               >
-                <option value="intact">🟢 Pas de signal</option>
-                <option value="a_surveiller">🟡 À surveiller</option>
-                <option value="declenche">🔴 Signal déclenché</option>
+                <option value="intact">✅ Pas de signal</option>
+                <option value="a_surveiller">⚠️ À surveiller</option>
+                <option value="declenche">🛑 Signal déclenché</option>
               </select>
               <input
                 className="mini-input" placeholder="Note (optionnel)" value={r.note || ''}

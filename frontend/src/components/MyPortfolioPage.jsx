@@ -28,12 +28,14 @@ import { PageSkeleton } from './common/Skeleton';
 import { useMyPortfolio } from '../hooks/useApi';
 import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../utils/format';
 
-// Mêmes libellés que portfolio/MyPortfolioTickerDetail.jsx (SIGNAL_STATUS_META)
-// — cohérence entre la colonne résumé de la liste et la vue détail.
+// Mêmes libellés/icônes que portfolio/MyPortfolioTickerDetail.jsx
+// (SIGNAL_STATUS_META) — cohérence entre la colonne résumé de la liste et la
+// vue détail. Icônes de forme distincte (pas juste des ronds de couleur
+// différente) pour rester lisible en cas de daltonisme.
 const SIGNAL_STATUS_META = {
-  intact:       { icon: '🟢', label: 'Pas de signal' },
-  a_surveiller: { icon: '🟡', label: 'À surveiller' },
-  declenche:    { icon: '🔴', label: 'Signal déclenché' },
+  intact:       { icon: '✅', label: 'Pas de signal' },
+  a_surveiller: { icon: '⚠️', label: 'À surveiller' },
+  declenche:    { icon: '🛑', label: 'Signal déclenché' },
 };
 const SIGNAL_SEVERITY_ORDER = ['declenche', 'a_surveiller', 'intact'];
 
