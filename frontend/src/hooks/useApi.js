@@ -28,6 +28,7 @@ import {
   fetchMyPortfolio,
   fetchMyPortfolioExecutions,
   fetchMyPortfolioPriceHistory,
+  patchMyPortfolioThesis,
   fetchNotes,
   fetchPerformanceMetrics,
   fetchPortfolio,
@@ -94,6 +95,17 @@ export const useLogExecution = () => {
   return useMutation({
     mutationFn: (body) => logMyPortfolioExecution(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['my_portfolio_executions'] }),
+  })
+}
+
+// Thèse structurée (why_bought/sell_signals/verification) — invalide la
+// liste ['my_portfolio'] plutôt que de merger optimistiquement : le PATCH
+// retourne juste le sous-objet thèse, la ligne complète vit dans la liste.
+export const useUpdateThesis = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ticker, body }) => patchMyPortfolioThesis(ticker, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['my_portfolio'] }),
   })
 }
 
