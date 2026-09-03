@@ -197,6 +197,328 @@ function ExecutionJournalForTicker({ ticker }) {
   );
 }
 
+// ListEditor — liste dynamique de chaînes (catalyseurs), sans distinction
+// 1 vs N item : toujours le même formulaire add/remove.
+function ListEditor({ items, onChange, placeholder }) {
+  return (
+    <div className="mp-detail-list-editor">
+      {items.map((item, i) => (
+        <div key={i} className="mp-detail-list-editor-row">
+          <input
+            className="mini-input"
+            value={item}
+            placeholder={placeholder}
+            onChange={(e) => onChange(items.map((it, idx) => (idx === i ? e.target.value : it)))}
+          />
+          <button
+            type="button"
+            className="mp-detail-remove-btn"
+            aria-label="Supprimer ce catalyseur"
+            onClick={() => onChange(items.filter((_, idx) => idx !== i))}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button type="button" className="mp-detail-add-btn" onClick={() => onChange([...items, ''])}>
+        + Ajouter un catalyseur
+      </button>
+    </div>
+  );
+}
+
+function EditActions({ onSave, onCancel, pending, disabled, error }) {
+  return (
+    <>
+      <div className="mp-detail-edit-actions">
+        <button type="button" className="btn btn-primary" onClick={onSave} disabled={pending || disabled}>
+          {pending ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+        <button type="button" className="mp-detail-edit-btn" onClick={onCancel}>Annuler</button>
+      </div>
+      {error && <p className="mp-exec-error">{error}</p>}
+    </>
+  );
+}
+
+// Bloc A — "Pourquoi j'ai acheté" (catalyseurs / valorisation / rôle).
+function WhyBoughtSection({ ticker, whyBought }) {
+  const mutation = useUpdateThesis();
+  const [editing, setEditing] = useState(false);
+  const [catalyseurs, setCatalyseurs] = useState([]);
+  const [valorisation, setValorisation] = useState('');
+  const [rolePortefeuille, setRolePortefeuille] = useState('');
+
+  function startEdit() {
+    setCatalyseurs(whyBought.catalyseurs?.length ? [...whyBought.catalyseurs] : ['']);
+    setValorisation(whyBought.valorisation || '');
+    setRolePortefeuille(whyBought.role_portefeuille || '');
+    setEditing(true);
+  }
+
+  function handleSave() {
+    mutation.mutate(
+      {
+        ticker,
+        body: {
+          why_bought: {
+            catalyseurs: catalyseurs.map((c) => c.trim()).filter(Boolean),
+            valorisation,
+            role_portefeuille: rolePortefeuille,
+          },
+        },
+      },
+      {
+        onSuccess: () => { setEditing(false); pushToast({ msg: '✅ Thèse mise à jour' }); },
+        onError: (err) => pushToast({ msg: `❌ ${err?.message || 'Échec de la mise à jour'}`, type: 'error' }),
+      },
+    );
+  }
+
+  return (
+    <DetailSection
+      title="Pourquoi j'ai acheté"
+      action={!editing && (
+        <button type="button" className="mp-detail-edit-btn" onClick={startEdit}>✏️ Modifier</button>
+      )}
+    >
+      {!editing ? (
+        <div className="mp-detail-fields-grid">
+          <Field label="Catalyseurs">
+            {whyBought.catalyseurs?.length ? (
+              <ul className="mp-detail-list">
+                {whyBought.catalyseurs.map((c, i) => <li key={i}>{c}</li>)}
+              </ul>
+            ) : <EmptyDoc />}
+          </Field>
+          <Field label="Valorisation à l'achat">{whyBought.valorisation || <EmptyDoc />}</Field>
+          <Field label="Rôle dans le portefeuille">{whyBought.role_portefeuille || <EmptyDoc />}</Field>
+        </div>
+      ) : (
+        <div className="mp-detail-edit-form">
+          <label className="mp-detail-edit-label">
+            Catalyseurs (ce qui devait se produire)
+            <ListEditor items={catalyseurs} onChange={setCatalyseurs} placeholder="ex: utilisation capacité > 90%" />
+          </label>
+          <label className="mp-detail-edit-label">
+            Valorisation à l'achat
+            <textarea
+              className="mp-detail-textarea" rows={2} value={valorisation}
+              onChange={(e) => setValorisation(e.target.value)}
+              placeholder="ex: P/E 12x vs médiane secteur 18x"
+            />
+          </label>
+          <label className="mp-detail-edit-label">
+            Rôle dans le portefeuille
+            <textarea
+              className="mp-detail-textarea" rows={2} value={rolePortefeuille}
+              onChange={(e) => setRolePortefeuille(e.target.value)}
+              placeholder="ex: diversification sectorielle, beta bas…"
+            />
+          </label>
+          <EditActions
+            onSave={handleSave} onCancel={() => setEditing(false)}
+            pending={mutation.isPending} error={mutation.isError ? mutation.error?.message : null}
+          />
+        </div>
+      )}
+    </DetailSection>
+  );
+}
+
+// Bloc B — signaux de vente, liste structurée (0..N sans cas particulier).
+function SellSignalsSection({ ticker, sellSignals }) {
+  const mutation = useUpdateThesis();
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState([]);
+
+  function startEdit() {
+    setRows(
+      sellSignals.length
+        ? sellSignals.map((s) => ({ ...s }))
+        : [{ libelle: '', statut: 'a_surveiller', note: '', date_maj: '' }],
+    );
+    setEditing(true);
+  }
+
+  function updateRow(i, field, value) {
+    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  }
+
+  function handleSave() {
+    const cleaned = rows
+      .filter((r) => r.libelle.trim())
+      .map((r) => ({
+        id: r.id, libelle: r.libelle.trim(), statut: r.statut,
+        note: r.note || null, date_maj: r.date_maj || null,
+      }));
+    mutation.mutate(
+      { ticker, body: { sell_signals: cleaned } },
+      {
+        onSuccess: () => { setEditing(false); pushToast({ msg: '✅ Signaux de vente mis à jour' }); },
+        onError: (err) => pushToast({ msg: `❌ ${err?.message || 'Échec de la mise à jour'}`, type: 'error' }),
+      },
+    );
+  }
+
+  return (
+    <DetailSection
+      title="Signaux de vente"
+      action={!editing && (
+        <button type="button" className="mp-detail-edit-btn" onClick={startEdit}>✏️ Modifier</button>
+      )}
+    >
+      {!editing ? (
+        sellSignals.length === 0 ? <EmptyDoc>Aucun signal de vente documenté</EmptyDoc> : (
+          <ul className="mp-signal-list">
+            {sellSignals.map((s) => {
+              const meta = SIGNAL_STATUS_META[s.statut] || {};
+              return (
+                <li key={s.id} className="mp-signal-row">
+                  <span className="mp-signal-dot" style={{ background: meta.color }} title={meta.label} />
+                  <span className="mp-signal-libelle">{s.libelle}</span>
+                  <span className="mp-signal-status-label" style={{ color: meta.color }}>{meta.icon} {meta.label}</span>
+                  {s.note && <span className="mp-signal-note">{s.note}</span>}
+                  {s.date_maj && <span className="mp-price-sub mp-signal-date">évalué le {s.date_maj}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )
+      ) : (
+        <div className="mp-detail-edit-form">
+          {rows.map((r, i) => (
+            <div key={i} className="mp-signal-edit-row">
+              <input
+                className="mini-input" placeholder="Libellé du critère" value={r.libelle}
+                onChange={(e) => updateRow(i, 'libelle', e.target.value)}
+              />
+              <select className="mini-input" value={r.statut} onChange={(e) => updateRow(i, 'statut', e.target.value)}>
+                <option value="intact">🟢 Intact</option>
+                <option value="a_surveiller">🟡 À surveiller</option>
+                <option value="declenche">🔴 Déclenché</option>
+              </select>
+              <input
+                className="mini-input" placeholder="Note (optionnel)" value={r.note || ''}
+                onChange={(e) => updateRow(i, 'note', e.target.value)}
+              />
+              <input
+                className="mini-input" type="date" value={r.date_maj || ''}
+                onChange={(e) => updateRow(i, 'date_maj', e.target.value)}
+                title="Date de dernière évaluation de ce signal"
+              />
+              <button
+                type="button" className="mp-detail-remove-btn" aria-label="Supprimer ce signal"
+                onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <button
+            type="button" className="mp-detail-add-btn"
+            onClick={() => setRows((rs) => [...rs, { libelle: '', statut: 'a_surveiller', note: '', date_maj: '' }])}
+          >
+            + Ajouter un signal
+          </button>
+          <EditActions
+            onSave={handleSave} onCancel={() => setEditing(false)}
+            pending={mutation.isPending} error={mutation.isError ? mutation.error?.message : null}
+          />
+        </div>
+      )}
+    </DetailSection>
+  );
+}
+
+// Bloc C — traçabilité des vérifications. `verification` est 100% éditoriale
+// (voir contrainte non négociable, modules/my_portfolio_thesis.py) : ce
+// composant ne fait qu'afficher/soumettre ce que l'utilisateur écrit, jamais
+// de déduction depuis une autre donnée.
+function VerificationSection({ ticker, verification }) {
+  const mutation = useUpdateThesis();
+  const [editing, setEditing] = useState(false);
+  const [date, setDate] = useState('');
+  const [verdict, setVerdict] = useState('');
+
+  function startEdit() {
+    setDate(new Date().toISOString().slice(0, 10));
+    setVerdict('');
+    setEditing(true);
+  }
+
+  function handleSave() {
+    mutation.mutate(
+      { ticker, body: { verification: { derniere_verification: date, verdict } } },
+      {
+        onSuccess: () => { setEditing(false); pushToast({ msg: '✅ Vérification enregistrée' }); },
+        onError: (err) => pushToast({ msg: `❌ ${err?.message || 'Échec de la mise à jour'}`, type: 'error' }),
+      },
+    );
+  }
+
+  const days = verification.derniere_verification ? daysSince(verification.derniere_verification) : null;
+  const stale = days !== null && days > VERIFICATION_STALE_DAYS;
+  const history = verification.historique_verifications || [];
+
+  return (
+    <DetailSection
+      title="Traçabilité des vérifications"
+      action={!editing && (
+        <button type="button" className="mp-detail-edit-btn" onClick={startEdit}>✅ Nouvelle vérification</button>
+      )}
+    >
+      {verification.derniere_verification ? (
+        <div className="mp-detail-fields-grid">
+          <Field label="Dernière vérification">
+            {verification.derniere_verification}
+            <StaleBadge
+              show={stale}
+              title={`Non vérifiée depuis ${days} jours (seuil ${VERIFICATION_STALE_DAYS}j)`}
+            />
+          </Field>
+          <Field label="Verdict">{verification.verdict}</Field>
+        </div>
+      ) : (
+        <p className="mp-detail-empty">Aucune vérification enregistrée.</p>
+      )}
+
+      {editing && (
+        <div className="mp-detail-edit-form" style={{ marginTop: verification.derniere_verification ? '0.8rem' : 0 }}>
+          <label className="mp-detail-edit-label">
+            Date de vérification
+            <input className="mini-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          <label className="mp-detail-edit-label">
+            Verdict
+            <textarea
+              className="mp-detail-textarea" rows={2} value={verdict}
+              onChange={(e) => setVerdict(e.target.value)}
+              placeholder="ex: thèse intacte, T2 au-dessus des attentes"
+            />
+          </label>
+          <EditActions
+            onSave={handleSave} onCancel={() => setEditing(false)}
+            pending={mutation.isPending} disabled={!verdict.trim()}
+            error={mutation.isError ? mutation.error?.message : null}
+          />
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <details className="mp-detail-history">
+          <summary>Historique des vérifications ({history.length})</summary>
+          <ul className="mp-detail-history-list">
+            {[...history].reverse().map((h, i) => (
+              <li key={i}><strong>{h.date}</strong> — {h.verdict}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </DetailSection>
+  );
+}
+
 export default function MyPortfolioTickerDetail({ position, driftThreshold, onBack }) {
   const p = position;
 
@@ -278,21 +600,9 @@ export default function MyPortfolioTickerDetail({ position, driftThreshold, onBa
         </div>
       </DetailSection>
 
-      <DetailSection title="Thèse d'achat & signal de vente">
-        <div className="mp-detail-fields-grid">
-          <Field label="Thèse d'achat">
-            {p.reason || <em style={{ color: 'var(--text-muted)' }}>Aucune thèse documentée</em>}
-          </Field>
-          <Field label="Signal de vente">
-            {p.sell_signal ? (
-              <>
-                {(p.correlation_alert_triggered || p.beta_flag) && '🔴 '}
-                {p.sell_signal}
-              </>
-            ) : <em style={{ color: 'var(--text-muted)' }}>Aucun signal de vente documenté</em>}
-          </Field>
-        </div>
-      </DetailSection>
+      <WhyBoughtSection ticker={p.ticker} whyBought={p.why_bought || {}} />
+      <SellSignalsSection ticker={p.ticker} sellSignals={p.sell_signals || []} />
+      <VerificationSection ticker={p.ticker} verification={p.verification || {}} />
 
       <DetailSection title="Beta & corrélations (Upgrade 1)">
         <div className="mp-detail-fields-grid">
@@ -333,7 +643,8 @@ export default function MyPortfolioTickerDetail({ position, driftThreshold, onBa
             <Field label="Badge">{p.badge || '—'}</Field>
             {p.earnings_data_stale && (
               <Field label="Fraîcheur">
-                <span className="mp-earnings-stale-text">⚠ Donnée non rafraîchie depuis &gt;48h</span>
+                <StaleBadge show title="Calendrier earnings indisponible depuis plus de 48h" />
+                {' '}Donnée non rafraîchie depuis &gt;48h
               </Field>
             )}
           </div>
