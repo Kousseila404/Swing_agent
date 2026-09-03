@@ -34,20 +34,25 @@ const VERIFICATION_STALE_DAYS = 90;
 // "intact" utilisé aux deux endroits pour des portées différentes (un signal
 // isolé vs la thèse entière) créait une ambiguïté. Ici chaque libellé décrit
 // directement ce qui se passerait si on lisait juste l'icône + le mot.
+//
+// Accessibilité daltonisme : la couleur seule (🟢/🟡/🔴, même forme) ne
+// suffit pas à distinguer les 3 statuts — icônes de FORME différente
+// (✅ rond plein / ⚠️ triangle / 🛑 octogone) + `borderStyle` distinct
+// (solid/dashed/double) en plus du texte, qui reste le signal principal.
 // bg/border repris du même pattern que THESIS_BADGE_PALETTE/LT_DECISION_PALETTE
 // (PortfolioPage.jsx) — cohérence visuelle des badges de statut dans l'app.
 const SIGNAL_STATUS_META = {
   intact: {
-    color: 'var(--success)', bg: 'rgba(34,197,94,0.14)', border: 'rgba(34,197,94,0.35)',
-    icon: '🟢', label: 'Pas de signal', hint: "Ce critère ne montre aucun signe d'alerte.",
+    color: 'var(--success)', bg: 'rgba(34,197,94,0.14)', border: 'rgba(34,197,94,0.35)', borderStyle: 'solid',
+    icon: '✅', label: 'Pas de signal', hint: "Ce critère ne montre aucun signe d'alerte.",
   },
   a_surveiller: {
-    color: 'var(--warning)', bg: 'rgba(251,191,36,0.16)', border: 'rgba(251,191,36,0.35)',
-    icon: '🟡', label: 'À surveiller', hint: 'Ce critère commence à se dégrader — à suivre de près.',
+    color: 'var(--warning)', bg: 'rgba(251,191,36,0.16)', border: 'rgba(251,191,36,0.35)', borderStyle: 'dashed',
+    icon: '⚠️', label: 'À surveiller', hint: 'Ce critère commence à se dégrader — à suivre de près.',
   },
   declenche: {
-    color: 'var(--danger)', bg: 'rgba(239,68,68,0.16)', border: 'rgba(239,68,68,0.35)',
-    icon: '🔴', label: 'Signal déclenché', hint: 'Le critère est atteint : le signal de vente est déclenché, réévaluer la position.',
+    color: 'var(--danger)', bg: 'rgba(239,68,68,0.16)', border: 'rgba(239,68,68,0.35)', borderStyle: 'double',
+    icon: '🛑', label: 'Signal déclenché', hint: 'Le critère est atteint : le signal de vente est déclenché, réévaluer la position.',
   },
 };
 
@@ -398,7 +403,11 @@ function SellSignalsSection({ ticker, sellSignals }) {
                   <li key={s.id} className="mp-signal-row">
                     <span
                       className="mp-signal-status-badge"
-                      style={{ color: meta.color, background: meta.bg, borderColor: meta.border }}
+                      style={{
+                        color: meta.color, background: meta.bg, borderColor: meta.border,
+                        borderStyle: meta.borderStyle,
+                        borderWidth: meta.borderStyle === 'double' ? '3px' : '1px',
+                      }}
                       title={meta.hint}
                     >
                       {meta.icon} {meta.label}

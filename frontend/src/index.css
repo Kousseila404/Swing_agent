@@ -1400,10 +1400,13 @@
 
 .mp-signal-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
 .mp-signal-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.85rem; }
+/* border-style/-width fournis inline par statut (solid/dashed/double) —
+   redondance non-couleur pour l'accessibilité daltonisme, voir
+   SIGNAL_STATUS_META dans MyPortfolioTickerDetail.jsx. */
 .mp-signal-status-badge {
   display: inline-flex; align-items: center; gap: 0.3rem; flex-shrink: 0;
   font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: 999px;
-  border: 1px solid; white-space: nowrap; cursor: help;
+  white-space: nowrap; cursor: help;
 }
 .mp-signal-libelle { color: var(--text-main); }
 .mp-signal-note { color: var(--text-muted); font-size: 0.78rem; font-style: italic; }
