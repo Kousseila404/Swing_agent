@@ -81,26 +81,18 @@ POSITIONS: list[dict] = [
         # yfinance → on interroge la cotation primaire HKEX (0992.HK), qui
         # est aussi l'instrument réellement détenu ici (voir ci-dessus).
         "price_ticker": "0992.HK", "currency": "HKD",
-        "reason": "Conviction WS la plus forte (5.00/5)",
-        "sell_signal": "2 trimestres manqués consécutifs",
     },
     {
         "ticker": "MU", "target_weight_pct": 4.5, "target_amount": 90.0,
         "shares": 0.09659, "entry_price": 931.79, "beta": 2.53,
-        "reason": "Pari sur contrats NAND prix plancher",
-        "sell_signal": "Retour cycle surcapacité classique",
     },
     {
         "ticker": "NUTX", "target_weight_pct": 4.0, "target_amount": 80.0,
         "shares": 0.41824, "entry_price": 191.28, "beta": 1.69,
-        "reason": "Décorrélé (max 0.18) malgré beta élevé",
-        "sell_signal": "Effondrement revenus arbitrage",
     },
     {
         "ticker": "ERO", "target_weight_pct": 3.0, "target_amount": 60.0,
         "shares": 1.76367, "entry_price": 34.02, "beta": 1.63,
-        "reason": "Exposition matériaux/Brésil, réduit (corrélé MU)",
-        "sell_signal": "Corrélation MU >0.50",
         "correlation_alert": {"ref": "MU", "threshold": 0.50, "persist_weeks": 1},
     },
 ]
