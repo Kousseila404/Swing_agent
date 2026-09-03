@@ -108,6 +108,9 @@ from routers import (
     system as system_router,
 )
 from routers import (
+    thesis_review_queue as thesis_review_queue_router,
+)
+from routers import (
     ticker_analysis as ticker_analysis_router,
 )
 from routers import (
@@ -250,6 +253,7 @@ app.include_router(attribution_router.router)
 app.include_router(my_portfolio_router.router)
 app.include_router(my_portfolio_executions_router.router)
 app.include_router(my_portfolio_thesis_router.router)
+app.include_router(thesis_review_queue_router.router)
 
 
 # ─────────────────────────────────────────────────────────────────

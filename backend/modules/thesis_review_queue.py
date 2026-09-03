@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -98,12 +98,12 @@ def add_entry(
     entry = {
         "id": f"rev_{uuid.uuid4().hex[:10]}",
         "ticker": ticker,
-        "date": run_date or datetime.now(timezone.utc).date().isoformat(),
+        "date": run_date or datetime.now(UTC).date().isoformat(),
         "execution_type": execution_type,
         "findings": _validate_findings(findings),
         "proposed_verdict": (proposed_verdict or "").strip() or None,
         "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     with FileLock(str(_LOCK_PATH), timeout=10):
@@ -137,6 +137,6 @@ def update_entry_status(ticker: str, entry_id: str, status: str) -> dict[str, An
         if entry is None:
             raise KeyError(f"entrée {entry_id!r} introuvable pour {ticker!r}")
         entry["status"] = status
-        entry["status_updated_at"] = datetime.now(timezone.utc).isoformat()
+        entry["status_updated_at"] = datetime.now(UTC).isoformat()
         _save_store_unlocked(store)
         return entry
