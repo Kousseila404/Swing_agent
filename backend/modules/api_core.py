@@ -82,6 +82,17 @@ API_TOKEN      = os.getenv("API_TOKEN", "")
 ALLOW_UNAUTH   = os.getenv("ALLOW_UNAUTHENTICATED", "false").lower() in {"1", "true", "yes"}
 bearer_scheme  = HTTPBearer(auto_error=False)
 
+# Token à portée RESTREINTE — routines cloud (ex: revue mensuelle de thèse,
+# modules/thesis_review_queue.py). Distinct d'API_TOKEN par construction :
+# une requête authentifiée avec CE token ne doit JAMAIS passer `require_auth`
+# (donc jamais atteindre un endpoint mutant type PATCH /thesis qui écrit
+# verification.*) — seulement `require_review_or_full_auth`, réservé aux
+# endpoints en lecture seule + à la soumission (pas la validation) de la
+# file de révision. C'est cette séparation de token, pas une consigne dans
+# le prompt de la routine, qui garantit techniquement qu'une routine ne
+# peut pas écrire dans le bloc verification.
+THESIS_REVIEW_TOKEN = os.getenv("THESIS_REVIEW_TOKEN", "")
+
 if not API_TOKEN and not ALLOW_UNAUTH:
     logger.warning(
         "[API] API_TOKEN absent — endpoints mutants refusés (set ALLOW_UNAUTHENTICATED=true pour dev local)"
@@ -109,7 +120,29 @@ def check_auth(credentials: HTTPAuthorizationCredentials | None) -> None:
 def require_auth(
     credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ) -> None:
-    """Dépendance FastAPI — vérifie le Bearer token. Fail-closed."""
+    """Dépendance FastAPI — vérifie le Bearer token complet. Fail-closed.
+
+    Utilisée sur TOUT endpoint mutant sensible (dont PATCH .../thesis qui
+    écrit verification.*) — le token de revue restreint (THESIS_REVIEW_TOKEN)
+    échoue toujours ici, voir docstring THESIS_REVIEW_TOKEN ci-dessus.
+    """
+    check_auth(credentials)
+
+
+def require_review_or_full_auth(
+    credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
+) -> None:
+    """Dépendance FastAPI — accepte le token de revue restreint OU le token
+    complet. Réservée aux endpoints en lecture seule et à la soumission
+    (POST, pas PATCH de validation) de la file de révision — jamais à un
+    endpoint qui écrit `data/my_portfolio_thesis.json`.
+    """
+    if (
+        THESIS_REVIEW_TOKEN
+        and credentials is not None
+        and credentials.credentials == THESIS_REVIEW_TOKEN
+    ):
+        return
     check_auth(credentials)
 
 

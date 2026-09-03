@@ -196,7 +196,12 @@ def _rebalance_order(r: dict[str, Any], raw_native_price: float | None, fx: floa
 
 
 @router.get("/my_portfolio")
-def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
+def get_my_portfolio(_auth: None = Security(api_core.require_review_or_full_auth)) -> dict[str, Any]:
+    # Auth élargie (token de revue OU complet) : une routine cloud (ex: revue
+    # mensuelle de thèse, modules/thesis_review_queue.py) doit pouvoir lire
+    # verification.derniere_verification + next_earnings_date ici — lecture
+    # seule, aucun risque à élargir (le token de revue reste bloqué sur tout
+    # endpoint mutant via require_auth strict, voir api_core.py).
     with ThreadPoolExecutor(max_workers=max(1, len(POSITIONS))) as ex:
         results = dict(zip(
             (p["ticker"] for p in POSITIONS), ex.map(_safe_price, POSITIONS), strict=True
