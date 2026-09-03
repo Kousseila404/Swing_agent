@@ -352,3 +352,31 @@ def test_full_book_integration_all_ten_positions(monkeypatch):
         assert row["beta_recalculated"] is not None
     assert result["risk_snapshot"]["portfolio_beta"] is not None
     assert result["risk_snapshot"]["diversification_ratio"] is not None
+
+
+# ─────────────────────────────────────────────────────────────────
+# get_price_history — page détail ticker (Mon Portefeuille)
+# ─────────────────────────────────────────────────────────────────
+
+def test_get_price_history_usd_ticker(monkeypatch):
+    price, _ = _price_series(seed=1, n=30)
+    monkeypatch.setattr(pr.yf, "Ticker", _ticker_factory({"MU": price}))
+    history = pr.get_price_history("MU", "USD", "1y")
+    assert history is not None
+    assert len(history) == 30
+    assert set(history[0].keys()) == {"date", "price"}
+    assert history[0]["price"] == round(float(price.iloc[0]), 4)
+
+
+def test_get_price_history_converts_eur_via_fx_series(monkeypatch):
+    native, _ = _price_series(seed=2, n=20)
+    fx = pd.Series(1.1, index=native.index)
+    monkeypatch.setattr(pr.yf, "Ticker", _ticker_factory({"BNP.PA": native, "EURUSD=X": fx}))
+    history = pr.get_price_history("BNP.PA", "EUR", "1y")
+    assert history is not None
+    assert history[0]["price"] == round(float(native.iloc[0]) * 1.1, 4)
+
+
+def test_get_price_history_none_when_fetch_fails(monkeypatch):
+    monkeypatch.setattr(pr.yf, "Ticker", _ticker_factory({}, raise_for=frozenset({"XYZ"})))
+    assert pr.get_price_history("XYZ", "USD", "1y") is None

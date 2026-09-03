@@ -700,3 +700,69 @@ def test_my_portfolio_risk_live_roundtrip_via_disk_state(monkeypatch, tmp_path):
     fmx = next(p for p in body["positions"] if p["ticker"] == "FMX")
     assert fmx["beta_recalculated"] is None
     assert fmx["data_quality"] is None
+
+
+# ─────────────────────────────────────────────────────────────────
+# GET /api/my_portfolio/{ticker}/price_history — page détail ticker
+# ─────────────────────────────────────────────────────────────────
+
+def test_price_history_happy_path(monkeypatch):
+    monkeypatch.setattr(
+        my_portfolio_router, "get_price_history",
+        lambda price_ticker, currency, period: [{"date": "2026-08-01", "price": 100.0}],
+    )
+    r = _client(monkeypatch).get("/api/my_portfolio/MU/price_history")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ticker"] == "MU"
+    assert body["period"] == "1y"
+    assert body["history"] == [{"date": "2026-08-01", "price": 100.0}]
+
+
+def test_price_history_case_insensitive_ticker_lookup(monkeypatch):
+    captured = {}
+
+    def _fake(price_ticker, currency, period):
+        captured["args"] = (price_ticker, currency, period)
+        return []
+    monkeypatch.setattr(my_portfolio_router, "get_price_history", _fake)
+    r = _client(monkeypatch).get("/api/my_portfolio/mu/price_history")
+    assert r.status_code == 200
+    assert captured["args"] == ("MU", "USD", "1y")
+
+
+def test_price_history_resolves_price_ticker_and_currency_for_lnvgy(monkeypatch):
+    captured = {}
+
+    def _fake(price_ticker, currency, period):
+        captured["args"] = (price_ticker, currency, period)
+        return []
+    monkeypatch.setattr(my_portfolio_router, "get_price_history", _fake)
+    r = _client(monkeypatch).get("/api/my_portfolio/LNVGY/price_history?period=5y")
+    assert r.status_code == 200
+    assert captured["args"] == ("0992.HK", "HKD", "5y")
+
+
+def test_price_history_unknown_ticker_404(monkeypatch):
+    r = _client(monkeypatch).get("/api/my_portfolio/NOPE/price_history")
+    assert r.status_code == 404
+
+
+def test_price_history_invalid_period_400(monkeypatch):
+    r = _client(monkeypatch).get("/api/my_portfolio/MU/price_history?period=1d")
+    assert r.status_code == 400
+
+
+def test_price_history_null_when_fetch_unavailable(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "get_price_history", lambda *a, **kw: None)
+    r = _client(monkeypatch).get("/api/my_portfolio/MU/price_history")
+    assert r.status_code == 200
+    assert r.json()["history"] is None
+
+
+def test_price_history_requires_auth_when_configured(monkeypatch):
+    monkeypatch.setattr(api_core, "API_TOKEN", "secret-token")
+    monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
+    client = TestClient(api.app)
+    r = client.get("/api/my_portfolio/MU/price_history")
+    assert r.status_code == 401

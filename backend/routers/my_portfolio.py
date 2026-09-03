@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Security
+from fastapi import APIRouter, HTTPException, Security
 
 from modules import api_core
 from modules.log import logger
@@ -28,6 +28,7 @@ from modules.my_portfolio_data import (
     WATCHLIST,
 )
 from modules.my_portfolio_earnings import get_earnings_snapshot
+from modules.portfolio_risk import PRICE_HISTORY_PERIODS, get_price_history
 from modules.portfolio_risk import load_snapshot as load_risk_snapshot
 from modules.tracker.market import get_current_price_detailed, get_fx_rate
 
@@ -295,4 +296,36 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
         "drift_threshold_pct":    REBALANCE_DRIFT_THRESHOLD_PCT,
         "deployment_threshold_pct": DEPLOYMENT_THRESHOLD_PCT,
         "risk_snapshot":          risk_state.get("risk_snapshot"),
+    }
+
+
+@router.get("/my_portfolio/{ticker}/price_history")
+def get_my_portfolio_price_history(
+    ticker: str, period: str = "1y", _auth: None = Security(api_core.require_auth),
+) -> dict[str, Any]:
+    """Historique de prix pour la page détail ticker — seule donnée pas déjà
+    exposée par `/api/my_portfolio` (le reste : position/thèse/risque/
+    earnings/rééquilibrage est déjà dans la ligne de la liste). Réutilise
+    `portfolio_risk.get_price_history` (même fetch que le calcul beta/
+    corrélation), aucune nouvelle source de données.
+    """
+    pos = next((p for p in POSITIONS if p["ticker"].upper() == ticker.upper()), None)
+    if pos is None:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker!r} introuvable dans Mon Portefeuille")
+    if period not in PRICE_HISTORY_PERIODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"period invalide ({period!r}) — attendu un de {sorted(PRICE_HISTORY_PERIODS)}",
+        )
+
+    price_ticker = pos.get("price_ticker", pos["ticker"])
+    currency = pos.get("currency", "USD")
+    history = get_price_history(price_ticker, currency, period)
+
+    return {
+        "ticker": pos["ticker"],
+        "price_ticker": price_ticker,
+        "currency": currency,
+        "period": period,
+        "history": history,
     }

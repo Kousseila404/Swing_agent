@@ -149,6 +149,30 @@ def _ticker_returns(price_ticker: str, currency: str, period: str) -> TickerRetu
     return TickerReturns(price_ticker, returns, "ok")
 
 
+# Périodes yfinance exposées pour le graphique de la page détail ticker (Mon
+# Portefeuille) — sous-ensemble sain des périodes yfinance valides.
+PRICE_HISTORY_PERIODS = frozenset({"3mo", "6mo", "1y", "2y", "5y", "max"})
+
+
+def get_price_history(
+    price_ticker: str, currency: str, period: str = "1y",
+) -> list[dict[str, Any]] | None:
+    """Historique de prix USD pour la page détail ticker (Mon Portefeuille).
+
+    Réutilise `_usd_close_series` — le même fetch/pipeline déjà utilisé pour
+    le calcul beta/corrélation (Upgrade 1) — plutôt que d'ajouter une nouvelle
+    source de données ou un nouveau calcul. `None` si l'historique est
+    indisponible (fetch échoué, ticker/FX inconnu).
+    """
+    series = _usd_close_series(price_ticker, currency, period)
+    if series is None or series.empty:
+        return None
+    return [
+        {"date": idx.date().isoformat(), "price": round(float(val), 4)}
+        for idx, val in series.items()
+    ]
+
+
 def _beta_recalculated(returns: pd.Series, bench_returns: pd.Series) -> float | None:
     common = returns.index.intersection(bench_returns.index)
     if len(common) < _MIN_PAIRWISE_DAYS:
