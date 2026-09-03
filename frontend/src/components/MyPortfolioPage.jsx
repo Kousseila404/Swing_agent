@@ -22,6 +22,7 @@
 
 import ApiErrorBanner from './common/ApiErrorBanner';
 import MyPortfolioExecutionJournal from './MyPortfolioExecutionJournal';
+import MyPortfolioTickerDetail from './portfolio/MyPortfolioTickerDetail';
 import { PageSkeleton } from './common/Skeleton';
 import { useMyPortfolio } from '../hooks/useApi';
 import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../utils/format';
@@ -65,7 +66,7 @@ function isRiskAlert(p) {
   return Boolean(p.correlation_alert_triggered || p.beta_flag);
 }
 
-export default function MyPortfolioPage() {
+export default function MyPortfolioPage({ routeParam, onNavigate }) {
   const q = useMyPortfolio();
 
   if (q.isLoading) {
@@ -91,6 +92,29 @@ export default function MyPortfolioPage() {
   const alertCount = positions.filter(p => p.rebalance_alert).length;
   const deployingCount = positions.filter(p => p.is_deploying).length;
   const risk = data.risk_snapshot || null;
+
+  const goToList = () => onNavigate?.('my_portfolio');
+
+  if (routeParam) {
+    const selected = positions.find(p => p.ticker.toUpperCase() === routeParam.toUpperCase());
+    if (!selected) {
+      return (
+        <div className="mp-page animate-fade-in">
+          <button type="button" className="mp-detail-back-btn" onClick={goToList}>← Retour</button>
+          <p className="mp-detail-empty">
+            Ticker « {routeParam} » introuvable dans Mon Portefeuille.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <MyPortfolioTickerDetail
+        position={selected}
+        driftThreshold={driftThreshold}
+        onBack={goToList}
+      />
+    );
+  }
 
   return (
     <div className="mp-page animate-fade-in">
@@ -198,9 +222,20 @@ export default function MyPortfolioPage() {
                 <tr
                   key={p.ticker}
                   className={[
+                    'mp-row-clickable',
                     p.rebalance_alert && 'mp-row-alert',
                     isRiskAlert(p) && 'mp-row-risk-alert',
                   ].filter(Boolean).join(' ')}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Voir le détail de ${p.ticker}`}
+                  onClick={() => onNavigate?.('my_portfolio', p.ticker)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onNavigate?.('my_portfolio', p.ticker);
+                    }
+                  }}
                 >
                   <td>
                     <div className="mp-ticker-cell">
