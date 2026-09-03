@@ -23,9 +23,35 @@
 import ApiErrorBanner from './common/ApiErrorBanner';
 import MyPortfolioExecutionJournal from './MyPortfolioExecutionJournal';
 import MyPortfolioTickerDetail from './portfolio/MyPortfolioTickerDetail';
+import StaleBadge from './portfolio/StaleBadge';
 import { PageSkeleton } from './common/Skeleton';
 import { useMyPortfolio } from '../hooks/useApi';
 import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../utils/format';
+
+const SIGNAL_STATUS_META = {
+  intact:       { icon: '🟢', label: 'intact' },
+  a_surveiller: { icon: '🟡', label: 'à surveiller' },
+  declenche:    { icon: '🔴', label: 'déclenché' },
+};
+const SIGNAL_SEVERITY_ORDER = ['declenche', 'a_surveiller', 'intact'];
+
+// Résumé compact pour la colonne liste — la vue détail affiche les 3 blocs
+// complets (why_bought/sell_signals/verification, voir portfolio/
+// MyPortfolioTickerDetail.jsx). Ici : le rôle/catalyseur principal, et le
+// signal de vente le plus sévère parmi la liste.
+function whyBoughtSummary(whyBought) {
+  if (!whyBought) return 'à documenter';
+  return whyBought.role_portefeuille || whyBought.catalyseurs?.[0] || 'à documenter';
+}
+
+function mostSevereSignal(sellSignals) {
+  if (!sellSignals || sellSignals.length === 0) return null;
+  for (const status of SIGNAL_SEVERITY_ORDER) {
+    const found = sellSignals.find(s => s.statut === status);
+    if (found) return found;
+  }
+  return sellSignals[0];
+}
 
 // Au-delà de ce seuil, "dernière mise à jour" bascule en alerte visible —
 // signe qu'un ticker ne se rafraîchit plus normalement plutôt qu'un simple
@@ -213,8 +239,8 @@ export default function MyPortfolioPage({ routeParam, onNavigate }) {
                 <th>Valeur actuelle</th>
                 <th>P&amp;L</th>
                 <th>Beta</th>
-                <th>Raison d'achat</th>
-                <th>Signal de vente</th>
+                <th>Pourquoi j'ai acheté</th>
+                <th>Signaux de vente</th>
               </tr>
             </thead>
             <tbody>
@@ -241,14 +267,10 @@ export default function MyPortfolioPage({ routeParam, onNavigate }) {
                     <div className="mp-ticker-cell">
                       <span className="mp-ticker">{p.ticker}</span>
                       {p.badge && <span className="mp-badge-pending">{p.badge}</span>}
-                      {p.earnings_data_stale && (
-                        <span
-                          className="mp-earnings-stale"
-                          title="Calendrier earnings indisponible depuis plus de 48h"
-                        >
-                          ?
-                        </span>
-                      )}
+                      <StaleBadge
+                        show={p.earnings_data_stale}
+                        title="Calendrier earnings indisponible depuis plus de 48h"
+                      />
                     </div>
                   </td>
                   <td className="mp-value-cell">{p.target_weight_pct}%</td>
@@ -326,8 +348,16 @@ export default function MyPortfolioPage({ routeParam, onNavigate }) {
                       </span>
                     )}
                   </td>
-                  <td className="mp-reason">{p.reason}</td>
-                  <td className="mp-sell">{isRiskAlert(p) ? `🔴 ${p.sell_signal}` : p.sell_signal}</td>
+                  <td className="mp-reason">{whyBoughtSummary(p.why_bought)}</td>
+                  <td className="mp-sell">
+                    {(() => {
+                      const worst = mostSevereSignal(p.sell_signals);
+                      if (!worst) return 'à documenter';
+                      const meta = SIGNAL_STATUS_META[worst.statut] || {};
+                      const extra = p.sell_signals.length > 1 ? ` (+${p.sell_signals.length - 1})` : '';
+                      return `${meta.icon || ''} ${worst.libelle}${extra}`;
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>

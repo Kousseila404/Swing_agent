@@ -1204,7 +1204,9 @@
   color: var(--mp-accent); white-space: nowrap;
 }
 
-.mp-earnings-stale {
+/* Badge circulaire "?" de fraîcheur — partagé entre earnings (48h) et
+   vérification de thèse (90j), voir components/portfolio/StaleBadge.jsx. */
+.mp-stale-badge {
   display: inline-flex; align-items: center; justify-content: center;
   width: 1.1rem; height: 1.1rem; border-radius: 50%; font-size: 0.62rem; font-weight: 700;
   color: var(--text-muted); background: rgba(148, 163, 184, 0.14);
