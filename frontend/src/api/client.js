@@ -230,6 +230,34 @@ export const fetchMyPortfolioPriceHistory = (ticker, period = '1y') =>
 // PATCH ne suit pas le pattern `post()` ci-dessus (throw sur non-2xx, pas
 // de {ok, ...}) — signature alignée sur `get()` pour que l'appelant utilise
 // try/catch + ApiError comme pour toute lecture.
+export const fetchThesisReviewQueue = (ticker) =>
+  get(`/my_portfolio/${encodeURIComponent(ticker)}/thesis_review_queue`);
+
+export const patchThesisReviewQueueStatus = async (ticker, entryId, status) => {
+  let r;
+  try {
+    r = await fetch(
+      `${BASE}/my_portfolio/${encodeURIComponent(ticker)}/thesis_review_queue/${encodeURIComponent(entryId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: JSON.stringify({ status }),
+      },
+    );
+  } catch {
+    throw new ApiError('Réseau indisponible', 0);
+  }
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try {
+      const d = await r.json();
+      if (d?.detail) detail = typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail);
+    } catch { /* body non-JSON → garder detail par défaut */ }
+    throw new ApiError(detail, r.status);
+  }
+  return r.json();
+};
+
 export const patchMyPortfolioThesis = async (ticker, body) => {
   let r;
   try {

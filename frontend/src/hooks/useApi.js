@@ -28,7 +28,9 @@ import {
   fetchMyPortfolio,
   fetchMyPortfolioExecutions,
   fetchMyPortfolioPriceHistory,
+  fetchThesisReviewQueue,
   patchMyPortfolioThesis,
+  patchThesisReviewQueueStatus,
   fetchNotes,
   fetchPerformanceMetrics,
   fetchPortfolio,
@@ -106,6 +108,24 @@ export const useUpdateThesis = () => {
   return useMutation({
     mutationFn: ({ ticker, body }) => patchMyPortfolioThesis(ticker, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['my_portfolio'] }),
+  })
+}
+
+// Révisions suggérées (routine cloud, modules/thesis_review_queue.py) —
+// propositions non validées affichées sur la page détail ticker.
+export const useThesisReviewQueue = (ticker, opts = {}) =>
+  useQuery({
+    queryKey: ['thesis_review_queue', ticker],
+    queryFn: () => fetchThesisReviewQueue(ticker),
+    enabled: Boolean(ticker),
+    ...opts,
+  })
+
+export const useUpdateReviewQueueStatus = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ticker, entryId, status }) => patchThesisReviewQueueStatus(ticker, entryId, status),
+    onSuccess: (_data, { ticker }) => qc.invalidateQueries({ queryKey: ['thesis_review_queue', ticker] }),
   })
 }
 
