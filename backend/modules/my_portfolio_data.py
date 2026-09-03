@@ -30,6 +30,12 @@ sans données yfinance fiables → on interroge la cotation locale).
 `shares_per_adr` (défaut 1) = ratio de conversion si `price_ticker` cote
 la valeur ordinaire sous-jacente plutôt que l'ADR (ex : LNVGY = 20 actions
 ordinaires Lenovo/ADR — Yahoo/Nasdaq).
+
+Les anciens champs texte libres `reason`/`sell_signal` ont été retirés
+(2026-09-03) et migrés vers `modules/my_portfolio_thesis.py` — thèse
+structurée éditable via `PATCH /api/my_portfolio/{ticker}/thesis`, persistée
+dans `data/my_portfolio_thesis.json` (survit aux redéploiements, contrairement
+à ce fichier). Migration initiale : `scripts/seed_my_portfolio_thesis.py`.
 """
 from __future__ import annotations
 
@@ -38,39 +44,27 @@ POSITIONS: list[dict] = [
         "ticker": "BNP.PA", "target_weight_pct": 15.0, "target_amount": 300.0,
         "shares": 2.338323, "entry_price": 110.64, "beta": 0.36,
         "currency": "EUR",
-        "reason": "Stabilisateur, corrélation max 0.22 avec le book",
-        "sell_signal": "Beta >0.8 durable ou corrélation >0.40",
         "correlation_alert": {"ref": None, "threshold": 0.40, "persist_weeks": 2},
     },
     {
         "ticker": "FMX", "target_weight_pct": 14.0, "target_amount": 280.0,
         "shares": 2.29508, "entry_price": 122.00, "beta": 0.37,
-        "reason": "Seule exposition staples + Amérique latine",
-        "sell_signal": "Dégradation durable OXXO/Coca volumes",
     },
     {
         "ticker": "PSX", "target_weight_pct": 11.5, "target_amount": 230.0,
         "shares": 0.32436, "entry_price": 246.64, "beta": 0.72,
-        "reason": "Décorrélation historique du marché (raffinage)",
-        "sell_signal": "Retournement crack spreads 2-3 trimestres",
     },
     {
         "ticker": "DRH", "target_weight_pct": 11.0, "target_amount": 220.0,
         "shares": 17.40506, "entry_price": 12.64, "beta": 1.03,
-        "reason": "Seule exposition REIT/immobilier",
-        "sell_signal": "Chute RevPAR durable, coupe dividende",
     },
     {
         "ticker": "CNC", "target_weight_pct": 11.0, "target_amount": 220.0,
         "shares": 3.27527, "entry_price": 67.17, "beta": 0.19,
-        "reason": "Beta le plus bas du book, quasi non corrélé",
-        "sell_signal": "Guidance abaissée 2 trimestres consécutifs",
     },
     {
         "ticker": "HRTG", "target_weight_pct": 9.0, "target_amount": 180.0,
         "shares": 5.31915, "entry_price": 33.84, "beta": 0.34,
-        "reason": "Meilleur diversifiant mesuré (corr +0.037)",
-        "sell_signal": "Corrélation moyenne >0.30 durable",
         "correlation_alert": {"ref": None, "threshold": 0.30, "persist_weeks": 2},
     },
     {

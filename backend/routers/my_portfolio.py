@@ -28,6 +28,7 @@ from modules.my_portfolio_data import (
     WATCHLIST,
 )
 from modules.my_portfolio_earnings import get_earnings_snapshot
+from modules.my_portfolio_thesis import get_all_theses
 from modules.portfolio_risk import PRICE_HISTORY_PERIODS, get_price_history
 from modules.portfolio_risk import load_snapshot as load_risk_snapshot
 from modules.tracker.market import get_current_price_detailed, get_fx_rate
@@ -51,6 +52,31 @@ _RISK_FIELDS_DEFAULT: dict[str, Any] = {
 
 def _risk_fields(ticker: str, risk_by_ticker: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return risk_by_ticker.get(ticker, _RISK_FIELDS_DEFAULT)
+
+
+# Squelette vide — même forme que modules.my_portfolio_thesis._empty_thesis(),
+# utilisé quand un ticker n'a encore aucune thèse éditée (jamais de KeyError,
+# jamais une valeur inférée : c'est juste "rien n'a été écrit").
+_THESIS_FIELDS_DEFAULT: dict[str, Any] = {
+    "why_bought": {"catalyseurs": [], "valorisation": None, "role_portefeuille": None},
+    "sell_signals": [],
+    "verification": {"derniere_verification": None, "verdict": None, "historique_verifications": []},
+    "thesis_updated_at": None,
+}
+
+
+def _thesis_fields(ticker: str, theses_by_ticker: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Fusionne la thèse structurée (why_bought/sell_signals/verification —
+    éditoriale, voir modules/my_portfolio_thesis.py) dans la ligne."""
+    thesis = theses_by_ticker.get(ticker)
+    if thesis is None:
+        return _THESIS_FIELDS_DEFAULT
+    return {
+        "why_bought": thesis["why_bought"],
+        "sell_signals": thesis["sell_signals"],
+        "verification": thesis["verification"],
+        "thesis_updated_at": thesis.get("updated_at"),
+    }
 
 # Fenêtre d'affichage du badge earnings — voir docs/UPGRADES_MY_PORTFOLIO.md
 # Upgrade 2 : "à venir" jusqu'à 14j avant, "résultats publiés" pendant les 5j
@@ -187,6 +213,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
     earnings_snapshot = get_earnings_snapshot(earnings_symbols)
     risk_state = load_risk_snapshot()
     risk_by_ticker: dict[str, dict[str, Any]] = risk_state.get("tickers", {})
+    theses_by_ticker = get_all_theses()
 
     rows: list[dict[str, Any]] = []
     for p in POSITIONS:
@@ -233,6 +260,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_auth)) -> dict[str,
             "pnl_pct":       round(pnl_pct, 1) if pnl_pct is not None else None,
             **_earnings_fields(p, today, earnings_snapshot),
             **_risk_fields(p["ticker"], risk_by_ticker),
+            **_thesis_fields(p["ticker"], theses_by_ticker),
         })
 
     # Valeur actuelle réelle du book — purement informative (tuile "Valeur
