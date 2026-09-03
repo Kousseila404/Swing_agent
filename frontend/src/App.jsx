@@ -91,7 +91,7 @@ function handleGlobalAction(id, ctx) {
 }
 
 export default function App() {
-  const [activePage, setActivePageRaw] = useHashRoute('briefing', VALID_PAGES);
+  const [activePage, setActivePageRaw, routeParam] = useHashRoute('briefing', VALID_PAGES);
   const { theme, density, toggleTheme, toggleDensity } = usePreferences();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteTicker, setPaletteTicker] = useState(null);
@@ -105,9 +105,11 @@ export default function App() {
 
   // Wrapper navigation : ferme le drawer mobile dans le même tick qu'un
   // changement de page (évite un setState dans un useEffect → cascade render).
-  const setActivePage = (id) => {
+  // `param` : sous-route optionnelle (ex: ticker) portée par le hash, voir
+  // useHashRoute — transparent pour les appelants qui ne passent qu'un id.
+  const setActivePage = (id, param) => {
     setSidebarMobileOpen(false);
-    setActivePageRaw(id);
+    setActivePageRaw(id, param);
   };
 
   // Header sticky : ombre subtile quand on scrolle.
@@ -205,6 +207,7 @@ export default function App() {
             <Suspense fallback={<PageFallback />}>
               <ActivePageComponent
                 onNavigate={setActivePage}
+                routeParam={routeParam}
               />
             </Suspense>
           </ErrorBoundary>

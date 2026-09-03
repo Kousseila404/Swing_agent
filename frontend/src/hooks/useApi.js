@@ -27,6 +27,7 @@ import {
   fetchMacroCalendar,
   fetchMyPortfolio,
   fetchMyPortfolioExecutions,
+  fetchMyPortfolioPriceHistory,
   fetchNotes,
   fetchPerformanceMetrics,
   fetchPortfolio,
@@ -78,6 +79,15 @@ export const useMyPortfolio = (opts = {}) =>
 
 export const useMyPortfolioExecutions = (opts = {}) =>
   useQuery({ queryKey: ['my_portfolio_executions'], queryFn: fetchMyPortfolioExecutions, ...opts })
+
+export const useMyPortfolioPriceHistory = (ticker, period = '1y', opts = {}) =>
+  useQuery({
+    queryKey: ['my_portfolio_price_history', ticker, period],
+    queryFn: () => fetchMyPortfolioPriceHistory(ticker, period),
+    enabled: Boolean(ticker),
+    staleTime: 5 * 60_000,
+    ...opts,
+  })
 
 export const useLogExecution = () => {
   const qc = useQueryClient()

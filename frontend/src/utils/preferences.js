@@ -58,40 +58,48 @@ export function loadProposalDefaults() {
   };
 }
 
-// Sync activePage avec window.location.hash (#/<page>). Permet :
+// Sync activePage avec window.location.hash (#/<page>[/<param>]). Permet :
 //  - rafraîchissement F5 sans perdre l'onglet
 //  - back/forward navigateur entre pages
 //  - URL partageable
 //
 // Liste blanche de pages : refuse tout hash inconnu (fallback DEFAULT_PAGE).
+//
+// Segment optionnel après la page (`#/my_portfolio/BNP.PA`) exposé comme
+// 3e élément du tuple retourné — sous-route générique (pas un nouvel id de
+// page) consommée par la page elle-même pour distinguer liste/détail (ex:
+// page détail ticker de Mon Portefeuille). Rétro-compatible : les call sites
+// qui déstructurent seulement `[activePage, setActivePage]` ignorent le 3e
+// élément, et `setActivePage(id)` sans 2e argument se comporte comme avant.
 export function useHashRoute(defaultPage, validPages) {
   const _readHash = () => {
     const h = (typeof window !== 'undefined' ? window.location.hash : '') || '';
-    const m = h.match(/^#\/([a-z0-9_-]+)/i);
+    const m = h.match(/^#\/([a-z0-9_-]+)(?:\/([^/?#]+))?/i);
     const id = m ? m[1] : null;
-    return validPages.includes(id) ? id : defaultPage;
+    if (!validPages.includes(id)) return { id: defaultPage, param: null };
+    return { id, param: m[2] ? decodeURIComponent(m[2]) : null };
   };
 
-  const [activePage, setActivePageState] = useState(_readHash);
+  const [route, setRouteState] = useState(_readHash);
 
   useEffect(() => {
-    const onHashChange = () => setActivePageState(_readHash());
+    const onHashChange = () => setRouteState(_readHash());
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const setActivePage = (id) => {
+  const setActivePage = (id, param = null) => {
     if (!validPages.includes(id)) return;
     if (typeof window !== 'undefined') {
       // pushState pour conserver l'historique back/forward.
-      const next = `#/${id}`;
+      const next = `#/${id}${param ? `/${encodeURIComponent(param)}` : ''}`;
       if (window.location.hash !== next) {
         window.history.pushState(null, '', next);
       }
     }
-    setActivePageState(id);
+    setRouteState({ id, param: param || null });
   };
 
-  return [activePage, setActivePage];
+  return [route.id, setActivePage, route.param];
 }

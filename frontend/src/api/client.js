@@ -224,6 +224,8 @@ export const fetchAttribution = () => get('/attribution');
 export const fetchMyPortfolio = () => get('/my_portfolio');
 export const fetchMyPortfolioExecutions = () => get('/my_portfolio/executions');
 export const logMyPortfolioExecution = (body) => post('/my_portfolio/executions', body);
+export const fetchMyPortfolioPriceHistory = (ticker, period = '1y') =>
+  get(`/my_portfolio/${encodeURIComponent(ticker)}/price_history?period=${encodeURIComponent(period)}`);
 
 // ─────────────────────────────────────────────────────────────────
 // WATCHLIST + NOTES
