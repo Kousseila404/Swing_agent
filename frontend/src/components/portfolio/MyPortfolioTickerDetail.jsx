@@ -30,10 +30,25 @@ import StaleBadge from './StaleBadge';
 // d'alerte — même seuil que modules/my_portfolio_thesis.py VERIFICATION_STALE_DAYS.
 const VERIFICATION_STALE_DAYS = 90;
 
+// Libellés volontairement distincts de "thèse intacte" (Bloc C) — même mot
+// "intact" utilisé aux deux endroits pour des portées différentes (un signal
+// isolé vs la thèse entière) créait une ambiguïté. Ici chaque libellé décrit
+// directement ce qui se passerait si on lisait juste l'icône + le mot.
+// bg/border repris du même pattern que THESIS_BADGE_PALETTE/LT_DECISION_PALETTE
+// (PortfolioPage.jsx) — cohérence visuelle des badges de statut dans l'app.
 const SIGNAL_STATUS_META = {
-  intact:       { color: 'var(--success)', icon: '🟢', label: 'Intact' },
-  a_surveiller: { color: 'var(--warning)', icon: '🟡', label: 'À surveiller' },
-  declenche:    { color: 'var(--danger)',  icon: '🔴', label: 'Déclenché' },
+  intact: {
+    color: 'var(--success)', bg: 'rgba(34,197,94,0.14)', border: 'rgba(34,197,94,0.35)',
+    icon: '🟢', label: 'Pas de signal', hint: "Ce critère ne montre aucun signe d'alerte.",
+  },
+  a_surveiller: {
+    color: 'var(--warning)', bg: 'rgba(251,191,36,0.16)', border: 'rgba(251,191,36,0.35)',
+    icon: '🟡', label: 'À surveiller', hint: 'Ce critère commence à se dégrader — à suivre de près.',
+  },
+  declenche: {
+    color: 'var(--danger)', bg: 'rgba(239,68,68,0.16)', border: 'rgba(239,68,68,0.35)',
+    icon: '🔴', label: 'Signal déclenché', hint: 'Le critère est atteint : le signal de vente est déclenché, réévaluer la position.',
+  },
 };
 
 function daysSince(dateStr) {
@@ -370,20 +385,32 @@ function SellSignalsSection({ ticker, sellSignals }) {
     >
       {!editing ? (
         sellSignals.length === 0 ? <EmptyDoc>Aucun signal de vente documenté</EmptyDoc> : (
-          <ul className="mp-signal-list">
-            {sellSignals.map((s) => {
-              const meta = SIGNAL_STATUS_META[s.statut] || {};
-              return (
-                <li key={s.id} className="mp-signal-row">
-                  <span className="mp-signal-dot" style={{ background: meta.color }} title={meta.label} />
-                  <span className="mp-signal-libelle">{s.libelle}</span>
-                  <span className="mp-signal-status-label" style={{ color: meta.color }}>{meta.icon} {meta.label}</span>
-                  {s.note && <span className="mp-signal-note">{s.note}</span>}
-                  {s.date_maj && <span className="mp-price-sub mp-signal-date">évalué le {s.date_maj}</span>}
-                </li>
-              );
-            })}
-          </ul>
+          <>
+            <p className="mp-signal-legend">
+              {Object.values(SIGNAL_STATUS_META).map((m) => (
+                <span key={m.label} className="mp-signal-legend-item">{m.icon} {m.label}</span>
+              ))}
+            </p>
+            <ul className="mp-signal-list">
+              {sellSignals.map((s) => {
+                const meta = SIGNAL_STATUS_META[s.statut] || {};
+                return (
+                  <li key={s.id} className="mp-signal-row">
+                    <span
+                      className="mp-signal-status-badge"
+                      style={{ color: meta.color, background: meta.bg, borderColor: meta.border }}
+                      title={meta.hint}
+                    >
+                      {meta.icon} {meta.label}
+                    </span>
+                    <span className="mp-signal-libelle">{s.libelle}</span>
+                    {s.note && <span className="mp-signal-note">— {s.note}</span>}
+                    {s.date_maj && <span className="mp-price-sub mp-signal-date">évalué le {s.date_maj}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )
       ) : (
         <div className="mp-detail-edit-form">
@@ -393,10 +420,13 @@ function SellSignalsSection({ ticker, sellSignals }) {
                 className="mini-input" placeholder="Libellé du critère" value={r.libelle}
                 onChange={(e) => updateRow(i, 'libelle', e.target.value)}
               />
-              <select className="mini-input" value={r.statut} onChange={(e) => updateRow(i, 'statut', e.target.value)}>
-                <option value="intact">🟢 Intact</option>
+              <select
+                className="mini-input" value={r.statut} onChange={(e) => updateRow(i, 'statut', e.target.value)}
+                title={SIGNAL_STATUS_META[r.statut]?.hint}
+              >
+                <option value="intact">🟢 Pas de signal</option>
                 <option value="a_surveiller">🟡 À surveiller</option>
-                <option value="declenche">🔴 Déclenché</option>
+                <option value="declenche">🔴 Signal déclenché</option>
               </select>
               <input
                 className="mini-input" placeholder="Note (optionnel)" value={r.note || ''}
