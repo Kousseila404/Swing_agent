@@ -16,12 +16,21 @@
 //   C. verification    — dernière vérification humaine + historique.
 // Édité via PATCH /api/my_portfolio/{ticker}/thesis (useUpdateThesis) —
 // AUCUN de ces champs n'est jamais calculé depuis une donnée de marché.
+//
+// Révisions suggérées (modules/thesis_review_queue.py) : propositions
+// non validées produites par une routine cloud (ex: revue mensuelle
+// BNP.PA) — affichées ici en lecture, jamais appliquées automatiquement.
+// "Valider" déclenche le PATCH .../thesis réel (action humaine explicite,
+// un clic) ; la routine elle-même n'a jamais accès à ce PATCH.
 
 import { useState } from 'react';
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { useMyPortfolioExecutions, useMyPortfolioPriceHistory, useUpdateThesis } from '../../hooks/useApi';
+import {
+  useMyPortfolioExecutions, useMyPortfolioPriceHistory, useThesisReviewQueue,
+  useUpdateReviewQueueStatus, useUpdateThesis,
+} from '../../hooks/useApi';
 import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../../utils/format';
 import { pushToast } from '../../utils/toastBus';
 import StaleBadge from './StaleBadge';
@@ -470,6 +479,89 @@ function SellSignalsSection({ ticker, sellSignals }) {
   );
 }
 
+// Révisions suggérées — propositions non validées (routine cloud, voir
+// modules/thesis_review_queue.py). N'affiche que les entrées "pending" ;
+// "Valider" enregistre une vraie vérification (PATCH .../thesis, déclenché
+// par ce clic humain) puis marque la proposition validée ; "Ignorer" la
+// marque juste ignorée. Rien ne s'applique automatiquement.
+function ReviewQueueSection({ ticker }) {
+  const q = useThesisReviewQueue(ticker);
+  const updateThesis = useUpdateThesis();
+  const updateStatus = useUpdateReviewQueueStatus();
+
+  const pending = (q.data?.entries || []).filter((e) => e.status === 'pending');
+  if (q.isLoading || pending.length === 0) return null;
+
+  function validate(entry) {
+    const today = new Date().toISOString().slice(0, 10);
+    updateThesis.mutate(
+      {
+        ticker,
+        body: { verification: { derniere_verification: today, verdict: entry.proposed_verdict } },
+      },
+      {
+        onSuccess: () => {
+          updateStatus.mutate({ ticker, entryId: entry.id, status: 'validated' });
+          pushToast({ msg: '✅ Vérification enregistrée depuis la proposition' });
+        },
+        onError: (err) => pushToast({ msg: `❌ ${err?.message || 'Échec de la mise à jour'}`, type: 'error' }),
+      },
+    );
+  }
+
+  function dismiss(entry) {
+    updateStatus.mutate(
+      { ticker, entryId: entry.id, status: 'dismissed' },
+      { onSuccess: () => pushToast({ msg: '🔕 Proposition ignorée' }) },
+    );
+  }
+
+  return (
+    <DetailSection title={`Révisions suggérées (${pending.length})`}>
+      {pending.map((entry) => (
+        <div key={entry.id} className="mp-review-proposal">
+          <div className="mp-review-proposal-header">
+            <span className="mp-review-proposal-badge">Proposition non validée</span>
+            <span className="mp-price-sub" style={{ display: 'inline' }}>
+              {entry.date} · {entry.execution_type === 'complete' ? 'Analyse complète' : 'Veille légère'}
+            </span>
+          </div>
+          {entry.findings.length > 0 ? (
+            <ul className="mp-detail-list">
+              {entry.findings.map((f, i) => (
+                <li key={i}>
+                  {f.topic && <strong>{f.topic} — </strong>}
+                  {f.constat}
+                  {f.source && <span className="mp-price-sub" style={{ display: 'inline' }}> ({f.source})</span>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mp-detail-empty">Aucun constat matériel.</p>
+          )}
+          {entry.proposed_verdict && <p className="mp-review-proposal-verdict">{entry.proposed_verdict}</p>}
+          <div className="mp-detail-edit-actions">
+            {entry.proposed_verdict && (
+              <button
+                type="button" className="btn btn-primary"
+                onClick={() => validate(entry)} disabled={updateThesis.isPending}
+              >
+                ✅ Valider
+              </button>
+            )}
+            <button
+              type="button" className="mp-detail-edit-btn"
+              onClick={() => dismiss(entry)} disabled={updateStatus.isPending}
+            >
+              Ignorer
+            </button>
+          </div>
+        </div>
+      ))}
+    </DetailSection>
+  );
+}
+
 // Bloc C — traçabilité des vérifications. `verification` est 100% éditoriale
 // (voir contrainte non négociable, modules/my_portfolio_thesis.py) : ce
 // composant ne fait qu'afficher/soumettre ce que l'utilisateur écrit, jamais
@@ -644,6 +736,7 @@ export default function MyPortfolioTickerDetail({ position, driftThreshold, onBa
 
       <WhyBoughtSection ticker={p.ticker} whyBought={p.why_bought || {}} />
       <SellSignalsSection ticker={p.ticker} sellSignals={p.sell_signals || []} />
+      <ReviewQueueSection ticker={p.ticker} />
       <VerificationSection ticker={p.ticker} verification={p.verification || {}} />
 
       <DetailSection title="Beta & corrélations (Upgrade 1)">

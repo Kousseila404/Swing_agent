@@ -1427,6 +1427,23 @@
 .mp-detail-history-list li { color: var(--text-muted); }
 .mp-detail-history-list strong { color: var(--text-main); font-family: monospace; }
 
+/* Révisions suggérées — propositions non validées (routine cloud) */
+.mp-review-proposal {
+  border: 1px dashed var(--mp-accent-border); border-radius: 10px;
+  padding: 0.9rem 1rem; margin-bottom: 0.9rem; background: rgba(217, 119, 6, 0.04);
+}
+.mp-review-proposal:last-child { margin-bottom: 0; }
+.mp-review-proposal-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+.mp-review-proposal-badge {
+  font-size: 0.65rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: rgba(217, 119, 6, 0.16); color: var(--mp-accent); border: 1px solid var(--mp-accent-border);
+}
+.mp-review-proposal-verdict {
+  font-size: 0.85rem; color: var(--text-main); font-style: italic;
+  margin: 0.6rem 0 0.8rem; padding-left: 0.6rem; border-left: 2px solid var(--mp-accent-border);
+}
+
 @media (max-width: 720px) {
   .mp-table { font-size: 0.78rem; }
   .mp-reason, .mp-sell { max-width: none; }
