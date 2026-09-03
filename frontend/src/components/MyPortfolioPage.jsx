@@ -28,10 +28,12 @@ import { PageSkeleton } from './common/Skeleton';
 import { useMyPortfolio } from '../hooks/useApi';
 import { ageMinutes, fmtSignedPct, fmtTimeAgo } from '../utils/format';
 
+// Mêmes libellés que portfolio/MyPortfolioTickerDetail.jsx (SIGNAL_STATUS_META)
+// — cohérence entre la colonne résumé de la liste et la vue détail.
 const SIGNAL_STATUS_META = {
-  intact:       { icon: '🟢', label: 'intact' },
-  a_surveiller: { icon: '🟡', label: 'à surveiller' },
-  declenche:    { icon: '🔴', label: 'déclenché' },
+  intact:       { icon: '🟢', label: 'Pas de signal' },
+  a_surveiller: { icon: '🟡', label: 'À surveiller' },
+  declenche:    { icon: '🔴', label: 'Signal déclenché' },
 };
 const SIGNAL_SEVERITY_ORDER = ['declenche', 'a_surveiller', 'intact'];
 
@@ -354,8 +356,13 @@ export default function MyPortfolioPage({ routeParam, onNavigate }) {
                       const worst = mostSevereSignal(p.sell_signals);
                       if (!worst) return 'à documenter';
                       const meta = SIGNAL_STATUS_META[worst.statut] || {};
-                      const extra = p.sell_signals.length > 1 ? ` (+${p.sell_signals.length - 1})` : '';
-                      return `${meta.icon || ''} ${worst.libelle}${extra}`;
+                      const extra = p.sell_signals.length > 1 ? ` (+${p.sell_signals.length - 1} autre${p.sell_signals.length > 2 ? 's' : ''})` : '';
+                      return (
+                        <>
+                          <strong title={meta.label}>{meta.icon} {meta.label}</strong>
+                          <span className="mp-price-sub" style={{ display: 'inline' }}> — {worst.libelle}{extra}</span>
+                        </>
+                      );
                     })()}
                   </td>
                 </tr>
