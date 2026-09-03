@@ -136,8 +136,8 @@ def test_patch_result_visible_via_get_my_portfolio(monkeypatch):
     """Roundtrip live (TestClient bout-en-bout) : le PATCH persiste bien via
     le store réellement lu par GET /api/my_portfolio (routers/my_portfolio.py),
     pas seulement via le module isolé."""
-    from tests.test_my_portfolio_router import _flat_price
     import routers.my_portfolio as my_portfolio_router
+    from tests.test_my_portfolio_router import _flat_price
 
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     client = _client(monkeypatch)

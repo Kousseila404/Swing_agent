@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -187,7 +187,7 @@ def update_thesis(
                 "historique_verifications": history,
             }
 
-        current["updated_at"] = datetime.now(timezone.utc).isoformat()
+        current["updated_at"] = datetime.now(UTC).isoformat()
         store["tickers"][ticker] = current
         store["schema_version"] = SCHEMA_VERSION
         _save_store_unlocked(store)

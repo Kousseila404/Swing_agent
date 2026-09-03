@@ -38,7 +38,7 @@ _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
-from datetime import datetime, timezone  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
 
 from modules import my_portfolio_thesis  # noqa: E402
 
@@ -58,7 +58,7 @@ _MIGRATION: list[tuple[str, str, str]] = [
 
 
 def _build_seed() -> dict[str, dict[str, Any]]:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     seed: dict[str, dict[str, Any]] = {}
     for ticker, catalyseur, sell_signal_libelle in _MIGRATION:
         seed[ticker] = {
