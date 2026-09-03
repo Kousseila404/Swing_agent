@@ -22,13 +22,31 @@ def _isolate_store(tmp_path, monkeypatch):
 
 def test_module_never_imports_my_portfolio_thesis():
     """Garde-fou statique : ce module ne doit même pas pouvoir appeler
-    update_thesis() par erreur future — il ne l'importe pas du tout."""
+    update_thesis() par erreur future — il ne l'importe pas du tout.
+
+    Vérifie les lignes de CODE (import/appel), pas la docstring — celle-ci
+    mentionne légitimement `my_portfolio_thesis` en prose pour documenter
+    la contrainte."""
+    import ast
     import inspect
 
     import modules.thesis_review_queue as mod
-    source = inspect.getsource(mod)
-    assert "my_portfolio_thesis" not in source
-    assert "update_thesis" not in source
+    tree = ast.parse(inspect.getsource(mod))
+
+    imported_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_names.add(node.module)
+
+    assert not any("my_portfolio_thesis" in name for name in imported_names), imported_names
+
+    call_names = {
+        n.func.id for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "update_thesis" not in call_names
 
 
 # ─────────────────────────────────────────────────────────────────

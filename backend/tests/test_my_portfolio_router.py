@@ -35,6 +35,17 @@ def _isolate_thesis_store(tmp_path, monkeypatch):
     monkeypatch.setattr(thesis_mod, "_LOCK_PATH", tmp_path / "my_portfolio_thesis.json.lock")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_earnings_cache(tmp_path, monkeypatch):
+    # Régression 2026-09-03 : le vrai data/.my_portfolio_earnings_cache.json
+    # a été peuplé en prod (job --refresh-my-portfolio-earnings, désormais
+    # schedulé) — sans cette isolation, les tests qui supposaient un cache
+    # vide lisaient le vrai fichier partagé et échouaient de façon non
+    # déterministe selon l'état du serveur. Même précaution que le risk
+    # state / thesis store ci-dessus.
+    monkeypatch.setattr(earnings_mod, "_CACHE_PATH", tmp_path / ".my_portfolio_earnings_cache.json")
+
+
 def _client(monkeypatch) -> TestClient:
     monkeypatch.setattr(api_core, "API_TOKEN", "")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", True)
