@@ -519,7 +519,10 @@ function VerificationSection({ ticker, verification }) {
           <Field label="Verdict">{verification.verdict}</Field>
         </div>
       ) : (
-        <p className="mp-detail-empty">Aucune vérification enregistrée.</p>
+        <p className="mp-detail-empty">
+          <StaleBadge show title="Aucune vérification n'a jamais été enregistrée pour cette position." />
+          {' '}Jamais vérifiée.
+        </p>
       )}
 
       {editing && (
