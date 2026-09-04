@@ -126,6 +126,20 @@ function Field({ label, children }) {
   );
 }
 
+// ProseField — variante de Field pour du texte éditorial de longueur libre
+// (catalyseurs/valorisation/rôle, verdict de vérification) : jamais dans
+// mp-detail-fields-grid (grille pensée pour des valeurs courtes en
+// monospace), toujours pleine largeur avec retour à la ligne naturel — voir
+// .mp-detail-prose-field-value dans index.css.
+function ProseField({ label, children }) {
+  return (
+    <div className="mp-detail-field">
+      <span className="mp-detail-field-label">{label}</span>
+      <div className="mp-detail-prose-field-value">{children}</div>
+    </div>
+  );
+}
+
 function EmptyDoc({ children }) {
   return <em className="mp-detail-empty-doc">{children || 'à documenter'}</em>;
 }
@@ -312,16 +326,16 @@ function WhyBoughtSection({ ticker, whyBought }) {
       )}
     >
       {!editing ? (
-        <div className="mp-detail-fields-grid">
-          <Field label="Catalyseurs">
+        <div className="mp-detail-prose-fields">
+          <ProseField label="Catalyseurs">
             {whyBought.catalyseurs?.length ? (
               <ul className="mp-detail-list">
                 {whyBought.catalyseurs.map((c, i) => <li key={i}>{c}</li>)}
               </ul>
             ) : <EmptyDoc />}
-          </Field>
-          <Field label="Valorisation à l'achat">{whyBought.valorisation || <EmptyDoc />}</Field>
-          <Field label="Rôle dans le portefeuille">{whyBought.role_portefeuille || <EmptyDoc />}</Field>
+          </ProseField>
+          <ProseField label="Valorisation à l'achat">{whyBought.valorisation || <EmptyDoc />}</ProseField>
+          <ProseField label="Rôle dans le portefeuille">{whyBought.role_portefeuille || <EmptyDoc />}</ProseField>
         </div>
       ) : (
         <div className="mp-detail-edit-form">
@@ -600,16 +614,18 @@ function VerificationSection({ ticker, verification }) {
       )}
     >
       {verification.derniere_verification ? (
-        <div className="mp-detail-fields-grid">
-          <Field label="Dernière vérification">
-            {verification.derniere_verification}
-            <StaleBadge
-              show={stale}
-              title={`Non vérifiée depuis ${days} jours (seuil ${VERIFICATION_STALE_DAYS}j)`}
-            />
-          </Field>
-          <Field label="Verdict">{verification.verdict}</Field>
-        </div>
+        <>
+          <div className="mp-detail-fields-grid">
+            <Field label="Dernière vérification">
+              {verification.derniere_verification}
+              <StaleBadge
+                show={stale}
+                title={`Non vérifiée depuis ${days} jours (seuil ${VERIFICATION_STALE_DAYS}j)`}
+              />
+            </Field>
+          </div>
+          <ProseField label="Verdict">{verification.verdict}</ProseField>
+        </>
       ) : (
         <p className="mp-detail-empty">
           <StaleBadge show title="Aucune vérification n'a jamais été enregistrée pour cette position." />

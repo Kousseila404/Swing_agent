@@ -1345,6 +1345,20 @@
 
 .mp-detail-empty { font-size: 0.82rem; color: var(--text-muted); margin: 0; }
 
+/* Champs "prose" (thèse : catalyseurs/valorisation/rôle, verdict de
+   vérification) — texte éditorial de longueur libre (souvent un ou
+   plusieurs paragraphes), jamais dans mp-detail-fields-grid (grille pensée
+   pour des valeurs courtes en monospace, ex: prix/poids/beta) : pleine
+   largeur de la carte, police normale, interligne confortable, retour à la
+   ligne naturel — aucune contrainte de largeur/hauteur qui tronquerait ou
+   compresserait le texte. */
+.mp-detail-prose-fields { display: flex; flex-direction: column; gap: 1rem; }
+.mp-detail-prose-field-value {
+  font-size: 0.88rem; color: var(--text-main); font-family: inherit;
+  line-height: 1.6; white-space: pre-wrap; margin: 0;
+}
+.mp-detail-prose-field-value .mp-detail-list { font-size: inherit; line-height: inherit; }
+
 .mp-detail-period-picker { display: flex; gap: 0.35rem; margin-bottom: 0.75rem; }
 .mp-detail-period-btn {
   background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 6px;
@@ -1409,7 +1423,12 @@
   white-space: nowrap; cursor: help;
 }
 .mp-signal-libelle { color: var(--text-main); }
-.mp-signal-note { color: var(--text-muted); font-size: 0.78rem; font-style: italic; }
+/* `flex-basis: 100%` force le passage à la ligne suivante dans le flex-wrap
+   parent (mp-signal-row) indépendamment de la longueur du badge/libellé —
+   déterministe plutôt que dépendant de l'espace restant. Police normale
+   (pas italique/muted) : ce champ porte désormais souvent une explication
+   éditoriale complète, pas juste une courte annotation. */
+.mp-signal-note { color: var(--text-main); font-size: 0.82rem; line-height: 1.55; flex-basis: 100%; }
 .mp-signal-date { display: inline; }
 
 .mp-signal-edit-row {
