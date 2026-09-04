@@ -309,6 +309,40 @@ def test_my_portfolio_total_pnl_usd_sums_positions_with_known_entry_price(monkey
 # Thèse structurée — fusion dans /api/my_portfolio (modules/my_portfolio_thesis.py)
 # ─────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────
+# Dividendes — dividend_yield_pct (portfolio_risk) -> annual_dividend_usd_estimate
+# ─────────────────────────────────────────────────────────────────
+
+def test_dividend_yield_default_null_when_no_risk_snapshot(monkeypatch):
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["dividend_yield_pct"] is None
+    assert bnp["annual_dividend_usd_estimate"] is None
+
+
+def test_annual_dividend_estimate_derived_from_yield_and_current_value(monkeypatch, tmp_path):
+    monkeypatch.setattr(risk_mod, "_STATE_PATH", tmp_path / "my_portfolio_risk.json")
+    risk_mod._save_state({
+        "schema_version": risk_mod.SCHEMA_VERSION, "risk_snapshot": None,
+        "tickers": {"BNP.PA": {
+            "beta_recalculated": 0.37, "beta_diff_pct": 2.0, "beta_flag": False,
+            "avg_correlation": 0.1, "correlation_vs_ref": None,
+            "correlation_alert_triggered": False, "correlation_streak_weeks": 0,
+            "beta_over_threshold_triggered": False, "beta_over_threshold_streak_weeks": 0,
+            "stabilizer_signal_triggered": False, "dividend_yield_pct": 5.5,
+            "data_quality": "ok",
+        }},
+        "fetched_at": time.time(),
+    })
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
+    assert bnp["dividend_yield_pct"] == 5.5
+    # shares BNP.PA = 2.338323, prix 100 -> current_value = 233.83
+    assert bnp["annual_dividend_usd_estimate"] == round(233.8323 * 5.5 / 100, 2)
+
+
 def test_my_portfolio_thesis_fields_default_empty_skeleton(monkeypatch):
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     r = _client(monkeypatch).get("/api/my_portfolio")

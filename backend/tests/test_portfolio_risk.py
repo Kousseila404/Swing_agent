@@ -85,6 +85,9 @@ def test_happy_path_computes_beta_and_correlation(monkeypatch):
     # beta statique déclaré 1.0 vs recalculé ~1.5 → écart > 30% → flag
     assert aaa["beta_flag"] is True
     assert bbb["beta_recalculated"] == pytest.approx(0.4, abs=0.3)
+    # _ticker_factory ne fournit pas de colonne "Dividends" -> fail-open
+    # (None, jamais 0 — voir _trailing_dividend_yield), pas d'exception.
+    assert aaa["dividend_yield_pct"] is None
 
     snap = result["risk_snapshot"]
     assert snap["n_tickers_ok"] == 2
@@ -96,6 +99,55 @@ def test_happy_path_computes_beta_and_correlation(monkeypatch):
     assert len(snap["most_correlated_pairs"]) == 1
     pair = snap["most_correlated_pairs"][0]
     assert {pair["a"], pair["b"]} == {"AAA", "BBB"}
+
+
+# ─────────────────────────────────────────────────────────────────
+# _trailing_dividend_yield — rendement dividende trailing 12m
+# ─────────────────────────────────────────────────────────────────
+
+class _DividendFakeTicker:
+    def __init__(self, close: pd.Series, dividends: pd.Series | None = None, raise_error: bool = False):
+        self._close = close
+        self._dividends = dividends
+        self._raise = raise_error
+
+    def history(self, **_kw) -> pd.DataFrame:
+        if self._raise:
+            raise RuntimeError("simulated network error")
+        data = {"Close": self._close.to_numpy()}
+        if self._dividends is not None:
+            data["Dividends"] = self._dividends.to_numpy()
+        return pd.DataFrame(data, index=self._close.index)
+
+
+def test_trailing_dividend_yield_sums_dividends_over_last_close(monkeypatch):
+    idx = pd.bdate_range("2025-09-01", periods=200)
+    close = pd.Series(100.0, index=idx)
+    dividends = pd.Series(0.0, index=idx)
+    dividends.iloc[50] = 1.5
+    dividends.iloc[150] = 1.5
+    monkeypatch.setattr(pr.yf, "Ticker", lambda symbol: _DividendFakeTicker(close, dividends))
+    assert pr._trailing_dividend_yield("XYZ") == 3.0  # (1.5+1.5)/100 * 100
+
+
+def test_trailing_dividend_yield_none_when_no_dividend_paid(monkeypatch):
+    idx = pd.bdate_range("2025-09-01", periods=200)
+    close = pd.Series(100.0, index=idx)
+    dividends = pd.Series(0.0, index=idx)  # colonne présente mais tout à zéro
+    monkeypatch.setattr(pr.yf, "Ticker", lambda symbol: _DividendFakeTicker(close, dividends))
+    assert pr._trailing_dividend_yield("XYZ") is None
+
+
+def test_trailing_dividend_yield_none_when_dividends_column_absent(monkeypatch):
+    idx = pd.bdate_range("2025-09-01", periods=200)
+    close = pd.Series(100.0, index=idx)
+    monkeypatch.setattr(pr.yf, "Ticker", lambda symbol: _DividendFakeTicker(close, dividends=None))
+    assert pr._trailing_dividend_yield("XYZ") is None
+
+
+def test_trailing_dividend_yield_none_on_fetch_error(monkeypatch):
+    monkeypatch.setattr(pr.yf, "Ticker", lambda symbol: _DividendFakeTicker(pd.Series(dtype=float), raise_error=True))
+    assert pr._trailing_dividend_yield("XYZ") is None
 
 
 # ─────────────────────────────────────────────────────────────────
