@@ -248,6 +248,9 @@ def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
     assert bnp["pnl_usd"] == round((120.64 - 110.64) * 2.338323, 2)
     assert bnp["pnl_usd"] > 0
     assert bnp["pnl_pct"] > 0
+    # entry_price_usd : ligne de référence du graphique (index.css/PriceHistoryChart)
+    # — fx neutralisé à 1.0 par _client() ici, donc == entry_price natif.
+    assert bnp["entry_price_usd"] == 110.64
 
     # PSX : entrée 246.64 -> prix 200.0 (perte) -> pnl négatif
     psx = by_ticker["PSX"]
@@ -274,6 +277,7 @@ def test_my_portfolio_lnvgy_pnl_uses_hkd_entry_price_converted_to_usd(monkeypatc
     assert lnvgy["entry_price"] == 29.58  # champ brut HKD non modifié dans POSITIONS
     assert lnvgy["pnl_usd"] == round((4.0 - entry_price_usd) * 37.094844, 2)
     assert lnvgy["pnl_pct"] == round((4.0 / entry_price_usd - 1) * 100, 1)
+    assert lnvgy["entry_price_usd"] == round(entry_price_usd, 2)
 
 
 def test_my_portfolio_pnl_none_when_price_fetch_fails(monkeypatch):
