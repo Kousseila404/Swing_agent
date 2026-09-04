@@ -43,6 +43,20 @@ SCHEMA_VERSION = 1
 
 SELL_SIGNAL_STATUSES = ("intact", "a_surveiller", "declenche")
 
+# Un signal de vente reste 100% éditorial PAR DÉFAUT (`auto_metric=None`) —
+# c'est le cas de tous les signaux qui référencent un critère qu'aucune
+# donnée de marché ne peut trancher seule (RevPAR, crack spreads, MLR...).
+# `auto_metric` est un OPT-IN explicite, posé par un humain (via PATCH) sur
+# UN signal précis dont le critère a une définition numérique déjà calculée
+# ailleurs : quand il est renseigné, `routers/my_portfolio.py` recalcule le
+# `statut` affiché à chaque requête depuis les données de risque live
+# (modules/portfolio_risk.py) au lieu d'afficher le `statut` persisté ici
+# tel quel — jamais l'inverse (ce module ne lit toujours aucune donnée de
+# marché, l'override a lieu uniquement côté router de lecture). Le `statut`
+# persisté reste néanmoins écrit/lu normalement : c'est le fallback affiché
+# si la donnée de risque est indisponible (data_quality != "ok").
+AUTO_METRICS = ("stabilizer_beta_correlation",)
+
 # Au-delà de ce nombre de jours depuis `derniere_verification`, la page
 # détail affiche un badge d'alerte de fraîcheur — même logique visuelle que
 # le badge earnings (`earnings_data_stale`, 48h) et le badge prix (3j).
@@ -232,12 +246,16 @@ def _normalize_sell_signals(items: list[dict[str, Any]]) -> list[dict[str, Any]]
         libelle = (item.get("libelle") or "").strip()
         if not libelle:
             raise ValueError("libelle requis pour chaque signal de vente")
+        auto_metric = item.get("auto_metric") or None
+        if auto_metric is not None and auto_metric not in AUTO_METRICS:
+            raise ValueError(f"auto_metric invalide {auto_metric!r} — attendu un de {AUTO_METRICS} ou null")
         out.append({
             "id": item.get("id") or f"sig_{uuid.uuid4().hex[:8]}",
             "libelle": libelle,
             "statut": statut,
             "note": item.get("note") or None,
             "date_maj": item.get("date_maj") or None,
+            "auto_metric": auto_metric,
         })
     return out
 

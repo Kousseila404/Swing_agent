@@ -46,6 +46,9 @@ _RISK_FIELDS_DEFAULT: dict[str, Any] = {
     "correlation_vs_ref": None,
     "correlation_alert_triggered": False,
     "correlation_streak_weeks": 0,
+    "beta_over_threshold_triggered": False,
+    "beta_over_threshold_streak_weeks": 0,
+    "stabilizer_signal_triggered": None,
     "data_quality": None,
 }
 
@@ -77,6 +80,31 @@ def _thesis_fields(ticker: str, theses_by_ticker: dict[str, dict[str, Any]]) -> 
         "verification": thesis["verification"],
         "thesis_updated_at": thesis.get("updated_at"),
     }
+
+
+def _with_computed_statut(signal: dict[str, Any], risk: dict[str, Any]) -> dict[str, Any]:
+    """Un sell_signal marqué `auto_metric` a son `statut` d'AFFICHAGE
+    recalculé à chaque requête depuis les données de risque live, plutôt que
+    le `statut` éditorial persisté dans my_portfolio_thesis.json (voir
+    AUTO_METRICS dans ce module — opt-in explicite, un seul par signal).
+
+    Ne modifie JAMAIS le store (aucune écriture ici, pure fonction de
+    lecture) — si l'humain édite `statut` manuellement dans l'UI pendant
+    qu'un `auto_metric` est actif, sa saisie est persistée mais restera
+    masquée par la valeur calculée tant que `auto_metric` n'est pas retiré
+    (fallback visible uniquement si la donnée de risque est indisponible).
+
+    Fail-open : `stabilizer_signal_triggered` à `None` (donnée de risque
+    absente/pas encore calculée, jamais halluciné) → le `statut` éditorial
+    est affiché tel quel, `statut_computed` reste `False`.
+    """
+    auto_metric = signal.get("auto_metric")
+    if auto_metric != "stabilizer_beta_correlation":
+        return {**signal, "statut_computed": False}
+    triggered = risk.get("stabilizer_signal_triggered")
+    if triggered is None:
+        return {**signal, "statut_computed": False}
+    return {**signal, "statut": "declenche" if triggered else "intact", "statut_computed": True}
 
 # Fenêtre d'affichage du badge earnings — voir docs/UPGRADES_MY_PORTFOLIO.md
 # Upgrade 2 : "à venir" jusqu'à 14j avant, "résultats publiés" pendant les 5j
@@ -265,7 +293,7 @@ def get_my_portfolio(_auth: None = Security(api_core.require_review_or_full_auth
             "pnl_pct":       round(pnl_pct, 1) if pnl_pct is not None else None,
             **_earnings_fields(p, today, earnings_snapshot),
             **_risk_fields(p["ticker"], risk_by_ticker),
-            **_thesis_fields(p["ticker"], theses_by_ticker),
+            **_thesis_with_computed_signals(p["ticker"], theses_by_ticker, risk_by_ticker),
         })
 
     # Valeur actuelle réelle du book — purement informative (tuile "Valeur

@@ -41,6 +41,7 @@ class SellSignalPatch(BaseModel):
     statut: str
     note: str | None = None
     date_maj: str | None = None
+    auto_metric: str | None = None
 
 
 class VerificationPatch(BaseModel):

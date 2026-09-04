@@ -476,6 +476,9 @@ def refresh_portfolio_risk(
     prev_streaks = {
         t: v.get("correlation_streak_weeks", 0) for t, v in previous.get("tickers", {}).items()
     }
+    prev_beta_streaks = {
+        t: v.get("beta_over_threshold_streak_weeks", 0) for t, v in previous.get("tickers", {}).items()
+    }
 
     result = compute_portfolio_risk(
         positions,
@@ -483,6 +486,7 @@ def refresh_portfolio_risk(
         benchmark=benchmark,
         history_period=history_period,
         prev_streaks=prev_streaks,
+        prev_beta_streaks=prev_beta_streaks,
     )
 
     if result["risk_snapshot"]["n_tickers_ok"] == 0 and previous:
