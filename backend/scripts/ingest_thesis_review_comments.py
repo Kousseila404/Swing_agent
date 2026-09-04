@@ -1,5 +1,7 @@
 """Ingère les commentaires de l'issue GitHub #14 (propositions de la routine
-cloud mensuelle de revue de thèse BNP.PA) dans `data/thesis_review_queue.json`.
+cloud mensuelle de revue de thèse — les 10 positions de Mon Portefeuille)
+dans `data/thesis_review_queue.json`, routées par le champ `ticker` de
+chaque commentaire.
 
 Voir `scripts/publish_thesis_review_context.py` pour le contexte du pont
 GitHub (le sandbox cloud ne peut pas atteindre swing.webcatalyste.fr
@@ -12,6 +14,12 @@ la même garantie structurelle que `routers/thesis_review_queue.py`. Un
 commentaire malveillant/mal formé sur l'issue ne peut au pire que produire
 une entrée invalide dans la file de propositions (que l'humain ignore dans
 l'UI) — jamais écrire dans verification.*.
+
+Un `ticker` absent ou hors de `my_portfolio_data.POSITIONS` est ignoré
+(comme un commentaire malformé) — garde-fou contre une proposition postée
+sur un ticker qui n'existe pas dans le book (import direct de `POSITIONS`,
+pas une simple liste recopiée à la main : reste synchronisé automatiquement
+si le book change).
 
 Idempotent : suit le dernier id de commentaire ingéré dans un state local
 (`data/.thesis_review_ingest_state.json`, gitignored) — jamais ré-ingéré
@@ -37,11 +45,13 @@ import requests  # noqa: E402
 
 from modules import thesis_review_queue  # noqa: E402
 from modules.log import logger  # noqa: E402
+from modules.my_portfolio_data import POSITIONS  # noqa: E402
 
 REPO = "Kousseila404/Swing_agent"
 ISSUE_NUMBER = 14
-TICKER = "BNP.PA"
 STATE_PATH = _BACKEND_ROOT / "data" / ".thesis_review_ingest_state.json"
+
+_VALID_TICKERS = {p["ticker"].upper(): p["ticker"] for p in POSITIONS}
 
 _JSON_BLOCK_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 
@@ -82,9 +92,11 @@ def fetch_comments() -> list[dict[str, Any]]:
 def parse_submission(comment_body: str) -> dict[str, Any] | None:
     """Extrait le bloc JSON d'une proposition depuis un commentaire.
 
-    Fail-open : `None` si absent/invalide — un commentaire humain sur cette
-    issue (ou un commentaire malformé) ne doit jamais planter l'ingestion,
-    juste être ignoré.
+    Fail-open : `None` si absent/invalide, ou si `ticker` est absent/hors du
+    book — un commentaire humain sur cette issue (ou un commentaire malformé
+    ou mal ciblé) ne doit jamais planter l'ingestion, juste être ignoré.
+    Le `ticker` résolu (casse canonique du book) est injecté dans le payload
+    retourné sous la clé `ticker`.
     """
     m = _JSON_BLOCK_RE.search(comment_body)
     if not m:
@@ -95,12 +107,19 @@ def parse_submission(comment_body: str) -> dict[str, Any] | None:
         return None
     if not isinstance(payload, dict) or "execution_type" not in payload:
         return None
+    raw_ticker = payload.get("ticker")
+    if not isinstance(raw_ticker, str):
+        return None
+    resolved = _VALID_TICKERS.get(raw_ticker.strip().upper())
+    if resolved is None:
+        return None
+    payload["ticker"] = resolved
     return payload
 
 
 def ingest() -> int:
     """Ingère les nouveaux commentaires depuis le dernier run. Retourne le
-    nombre d'entrées effectivement ajoutées à la file."""
+    nombre d'entrées effectivement ajoutées à la file (tous tickers confondus)."""
     state = _load_state()
     last_id = state.get("last_comment_id", 0)
     comments = fetch_comments()
@@ -110,17 +129,17 @@ def ingest() -> int:
     for c in new_comments:
         payload = parse_submission(c.get("body", ""))
         if payload is None:
-            logger.info(f"[thesis_review_bridge] commentaire #{c['id']} ignoré (pas de bloc JSON valide)")
+            logger.info(f"[thesis_review_bridge] commentaire #{c['id']} ignoré (pas de bloc JSON valide/ticker reconnu)")
         else:
             try:
                 thesis_review_queue.add_entry(
-                    TICKER,
+                    payload["ticker"],
                     execution_type=payload["execution_type"],
                     findings=payload.get("findings", []),
                     proposed_verdict=payload.get("proposed_verdict"),
                 )
                 ingested += 1
-                logger.info(f"[thesis_review_bridge] commentaire #{c['id']} ingéré ({payload['execution_type']})")
+                logger.info(f"[thesis_review_bridge] commentaire #{c['id']} ingéré ({payload['ticker']}, {payload['execution_type']})")
             except ValueError as e:
                 logger.warning(f"[thesis_review_bridge] commentaire #{c['id']} invalide, ignoré: {e}")
         state["last_comment_id"] = c["id"]

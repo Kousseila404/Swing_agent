@@ -1,13 +1,20 @@
-"""Publie le contexte de revue de thèse (BNP.PA) sur une issue GitHub —
-le seul canal réseau atteignable par la routine cloud mensuelle.
+"""Publie le contexte de revue de thèse (les 10 positions de Mon Portefeuille)
+sur une issue GitHub — le seul canal réseau atteignable par la routine cloud
+mensuelle.
 
-Contexte (audit 2026-09-03) : le sandbox CCR qui exécute la routine cloud
-bloque tout accès sortant vers un domaine personnalisé (swing.webcatalyste.fr
-n'est pas sur la liste blanche du proxy de sortie de l'environnement) — seul
-github.com/api.github.com est atteignable (déjà utilisé par d'autres
-routines via `gh`). Ce script + `scripts/ingest_thesis_review_comments.py`
-forment un pont : le corps de l'issue #14 porte le contexte (lu par la
-routine), les commentaires portent ses propositions (ingérés côté VPS).
+Contexte (audit 2026-09-03, généralisé 2026-09-04) : le sandbox CCR qui
+exécute la routine cloud bloque tout accès sortant vers un domaine
+personnalisé (swing.webcatalyste.fr n'est pas sur la liste blanche du proxy
+de sortie de l'environnement) — seul github.com/api.github.com est
+atteignable (déjà utilisé par d'autres routines via `gh`). Ce script +
+`scripts/ingest_thesis_review_comments.py` forment un pont : le corps de
+l'issue #14 porte le contexte de TOUS les tickers (lu par la routine), les
+commentaires portent ses propositions par ticker (ingérées côté VPS).
+
+Un seul pont (une issue, un couple de scripts) pour tout le book — pas un
+par ticker : `TICKERS`/`REFERENCE_METRICS` viennent de `my_portfolio_data`/
+`my_portfolio_thesis`, donc toute position ajoutée à `POSITIONS` est
+automatiquement incluse au prochain run sans toucher ce fichier.
 
 CONTRAINTE : lecture seule côté backend (`my_portfolio_thesis.get_thesis`,
 `thesis_review_queue.list_entries`) — n'écrit jamais dans
@@ -33,10 +40,11 @@ import requests  # noqa: E402
 
 from modules import my_portfolio_thesis, thesis_review_queue  # noqa: E402
 from modules.log import logger  # noqa: E402
+from modules.my_portfolio_data import POSITIONS  # noqa: E402
 
 REPO = "Kousseila404/Swing_agent"
 ISSUE_NUMBER = 14
-TICKER = "BNP.PA"
+TICKERS = [p["ticker"] for p in POSITIONS]
 
 _MARKER_START = "<!-- thesis-review-context:start -->"
 _MARKER_END = "<!-- thesis-review-context:end -->"
@@ -49,14 +57,20 @@ def _github_token() -> str:
     return token
 
 
-def build_context() -> dict[str, Any]:
-    """Snapshot pur (aucun accès réseau) — testable sans mock GitHub."""
-    thesis = my_portfolio_thesis.get_thesis(TICKER)
-    recent = thesis_review_queue.list_entries(TICKER)[-3:]
+def _ticker_context(ticker: str) -> dict[str, Any]:
+    thesis = my_portfolio_thesis.get_thesis(ticker)
+    recent = thesis_review_queue.list_entries(ticker)[-3:]
     return {
-        "ticker": TICKER,
         "verification": thesis["verification"],
         "recent_review_queue": recent,
+        "reference_metrics": my_portfolio_thesis.REFERENCE_METRICS.get(ticker, []),
+    }
+
+
+def build_context() -> dict[str, Any]:
+    """Snapshot pur (aucun accès réseau) — testable sans mock GitHub."""
+    return {
+        "tickers": {ticker: _ticker_context(ticker) for ticker in TICKERS},
         "published_at": datetime.now(UTC).isoformat(),
     }
 
@@ -65,12 +79,12 @@ def render_body(context: dict[str, Any]) -> str:
     block = json.dumps(context, indent=2, ensure_ascii=False)
     return (
         "Canal de communication entre la routine cloud mensuelle de revue de "
-        f"thèse ({context['ticker']}) et le backend SwingQuant.\n\n"
+        "thèse (Mon Portefeuille — 10 positions long terme) et le backend SwingQuant.\n\n"
         "- Ce corps est régénéré automatiquement (`scripts/publish_thesis_review_context.py`) "
         "— ne l'éditez pas à la main.\n"
-        "- Les commentaires postés ici par la routine cloud sont ingérés automatiquement "
-        "dans `data/thesis_review_queue.json` (`scripts/ingest_thesis_review_comments.py`), "
-        "jamais dans `data/my_portfolio_thesis.json`.\n\n"
+        "- Un commentaire posté ici par la routine cloud DOIT porter un champ `ticker` — il est "
+        "ingéré automatiquement dans `data/thesis_review_queue.json` sous ce ticker "
+        "(`scripts/ingest_thesis_review_comments.py`), jamais dans `data/my_portfolio_thesis.json`.\n\n"
         f"{_MARKER_START}\n```json\n{block}\n```\n{_MARKER_END}"
     )
 
@@ -85,7 +99,7 @@ def publish() -> dict[str, Any]:
         timeout=15,
     )
     r.raise_for_status()
-    logger.info(f"[thesis_review_bridge] contexte {context['ticker']} publié sur issue #{ISSUE_NUMBER}")
+    logger.info(f"[thesis_review_bridge] contexte {len(context['tickers'])} ticker(s) publié sur issue #{ISSUE_NUMBER}")
     return context
 
 

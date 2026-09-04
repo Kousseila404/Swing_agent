@@ -53,6 +53,124 @@ _EMPTY_VERIFICATION: dict[str, Any] = {
     "derniere_verification": None, "verdict": None, "historique_verifications": [],
 }
 
+# Checklist de départ par ticker pour la routine cloud de revue de thèse
+# (voir scripts/publish_thesis_review_context.py) — chaque item : le
+# critère (`label`), sa valeur/cible de référence connue (`reference`) et
+# ce qui constituerait un signal à surveiller (`watch_for`). Sert de guide
+# pour l'analyse COMPLÈTE (nouveaux résultats trimestriels) ; la veille
+# LÉGÈRE ne vérifie que si un événement matériel touche l'un de ces
+# critères, sans deep-dive.
+#
+# 100% éditorial et 100% lecture seule côté routine cloud (même contrainte
+# que `verification` — voir docstring de module) : un item qui devient
+# obsolète (nouvelle guidance, changement de business model) se corrige ici
+# à la main, jamais réécrit automatiquement. Absent pour un ticker = liste
+# vide, la routine se rabat sur la checklist "veille légère" générique.
+REFERENCE_METRICS: dict[str, list[dict[str, str]]] = {
+    "BNP.PA": [
+        {"label": "Ratio CET1", "reference": "13,0% (objectif atteint en avance)",
+         "watch_for": "Baisse durable sous 12,5%"},
+        {"label": "Coût du risque", "reference": "39 bps (guidance <40 bps)",
+         "watch_for": "Dépassement durable de la guidance"},
+        {"label": "Croissance du revenu / effet jaws", "reference": "T2 2026 : +12% revenu, jaws +3,7 pts à périmètre constant",
+         "watch_for": "Dégradation notable de l'un ou l'autre"},
+        {"label": "Trajectoire 2028", "reference": "ROTE cible >13%, coûts/revenus cible <56%",
+         "watch_for": "Tout langage de guidance qui recule"},
+        {"label": "Valeurs résiduelles Arval (leasing véhicules)", "reference": "Pression persistante mais contenue",
+         "watch_for": "Dégradation marquée (au lieu de stabilisation)"},
+    ],
+    "FMX": [
+        {"label": "Croissance same-store sales OXXO", "reference": "Historiquement mid-to-high single digit %",
+         "watch_for": "Ralentissement net ou négatif sur plusieurs trimestres"},
+        {"label": "Marge EBITDA consolidée", "reference": "Stable à en amélioration lente",
+         "watch_for": "Compression durable (coûts logistique/change)"},
+        {"label": "Exposition FX (MXN/BRL)", "reference": "Couverture partielle habituelle",
+         "watch_for": "Dévaluation forte non couverte impactant les résultats"},
+        {"label": "Rythme d'ouverture de magasins OXXO", "reference": "Expansion nette continue",
+         "watch_for": "Ralentissement significatif du rythme d'ouverture"},
+    ],
+    "PSX": [
+        {"label": "Marges de raffinage (crack spreads)", "reference": "Cycliques, dépendent du marché produits raffinés",
+         "watch_for": "Compression durable sur plusieurs trimestres"},
+        {"label": "Taux d'utilisation des raffineries", "reference": "Proche de la capacité nominale hors maintenance",
+         "watch_for": "Baisse structurelle (hors arrêts planifiés)"},
+        {"label": "Cash-flow distribuable / couverture du dividende", "reference": "Dividende couvert par le cash-flow opérationnel",
+         "watch_for": "Couverture qui se dégrade"},
+        {"label": "Discipline capex / transition énergétique", "reference": "Investissements ciblés, retour sur capital prioritaire",
+         "watch_for": "Sur-investissement non rentable annoncé"},
+    ],
+    "DRH": [
+        {"label": "RevPAR (revenu par chambre disponible)", "reference": "Tendance du secteur hôtelier haut de gamme US",
+         "watch_for": "Baisse durable sur plusieurs trimestres"},
+        {"label": "FFO/AFFO par action", "reference": "Doit couvrir le dividende versé",
+         "watch_for": "Dégradation qui menace la couverture du dividende"},
+        {"label": "Taux d'occupation", "reference": "Proche des niveaux pré-pandémie/pairs du secteur",
+         "watch_for": "Recul structurel vs pairs"},
+        {"label": "Politique de dividende", "reference": "Maintenu",
+         "watch_for": "Coupe ou gel annoncé"},
+    ],
+    "CNC": [
+        {"label": "Medical Loss Ratio (MLR)", "reference": "Dans la fourchette de guidance annuelle",
+         "watch_for": "Dépassement durable au-dessus de la guidance"},
+        {"label": "Guidance BPA", "reference": "Confirmée aux publications trimestrielles",
+         "watch_for": "Révision à la baisse répétée"},
+        {"label": "Évolution des membres Medicaid", "reference": "Stabilisation post-redéterminations",
+         "watch_for": "Attrition plus forte que prévu"},
+        {"label": "Risque réglementaire (taux Medicaid négociés, politique fédérale santé)", "reference": "Pas de décision défavorable majeure en cours",
+         "watch_for": "Décision réglementaire ou législative défavorable majeure"},
+    ],
+    "HRTG": [
+        {"label": "Combined ratio", "reference": "Sous 100% (rentabilité technique)",
+         "watch_for": "Passage durable au-dessus de 100%"},
+        {"label": "Coût de la réassurance (renouvellements)", "reference": "Répercuté dans les primes",
+         "watch_for": "Hausse forte non répercutée dans les primes"},
+        {"label": "Sinistralité catastrophes (saison ouragans)", "reference": "Dans les limites de la couverture réassurance",
+         "watch_for": "Saison catastrophique impactant significativement les fonds propres"},
+        {"label": "Valeur comptable par action", "reference": "Croissance régulière",
+         "watch_for": "Érosion durable"},
+    ],
+    "LNVGY": [
+        {"label": "Part de marché PC mondiale", "reference": "Position n°1 ou n°2 mondiale",
+         "watch_for": "Perte de parts durable face à HP/Dell"},
+        {"label": "Rentabilité ISG (serveurs/infrastructure IA)", "reference": "Trajectoire vers la rentabilité",
+         "watch_for": "Pertes qui ne se résorbent pas"},
+        {"label": "Marge brute groupe", "reference": "Stable à en amélioration lente",
+         "watch_for": "Compression durable"},
+        {"label": "Risque géopolitique (contrôle export puces, relations Chine/US)", "reference": "Pas de nouvelle restriction majeure",
+         "watch_for": "Nouvelle restriction affectant directement l'activité"},
+    ],
+    "MU": [
+        {"label": "Prix mémoire DRAM/NAND (cycle du secteur)", "reference": "Cycle haussier porté par la demande IA/serveurs",
+         "watch_for": "Retournement baissier confirmé du cycle"},
+        {"label": "Marge brute", "reference": "En expansion avec le cycle",
+         "watch_for": "Compression durable en dehors du cycle normal"},
+        {"label": "Demande HBM (mémoire haute bande passante, IA/datacenters)", "reference": "Croissance forte, carnet de commandes",
+         "watch_for": "Ralentissement net de la demande IA"},
+        {"label": "Discipline capacité (Micron + concurrents Samsung/SK Hynix)", "reference": "Discipline relative de l'offre",
+         "watch_for": "Annonce de sur-capacité menaçant les prix"},
+    ],
+    "NUTX": [
+        {"label": "Croissance du nombre d'établissements/lits", "reference": "Expansion continue",
+         "watch_for": "Ralentissement net de l'expansion"},
+        {"label": "Marge EBITDA par établissement", "reference": "Élevée (modèle facturation hors réseau)",
+         "watch_for": "Compression durable"},
+        {"label": "Risque réglementaire (No Surprises Act, arbitrage de facturation hors réseau)", "reference": "Modèle actuel toléré par le cadre réglementaire",
+         "watch_for": "Décision réglementaire ou judiciaire défavorable majeure sur le modèle de facturation"},
+        {"label": "Mix payeurs / taux de recouvrement", "reference": "Stable",
+         "watch_for": "Dégradation notable du taux de recouvrement effectif"},
+    ],
+    "ERO": [
+        {"label": "Production de cuivre (guidance vs réalisé)", "reference": "Dans la fourchette de guidance annuelle",
+         "watch_for": "Manqué de guidance de production répété"},
+        {"label": "AISC (coût total maintenu de production)", "reference": "Compétitif vs pairs du secteur",
+         "watch_for": "Hausse durable des coûts"},
+        {"label": "Teneur du minerai (grade)", "reference": "Stable sur les gisements en production",
+         "watch_for": "Baisse structurelle de la teneur"},
+        {"label": "Endettement / capex de développement (nouvelles mines)", "reference": "Levier maîtrisé",
+         "watch_for": "Dérapage de capex ou hausse forte du levier"},
+    ],
+}
+
 
 def _empty_thesis() -> dict[str, Any]:
     return {
