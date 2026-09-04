@@ -1,8 +1,12 @@
 """Tests — scripts/ingest_thesis_review_comments.py.
 
-Le test le plus important : garde-fou structurel — ce script ne peut
-techniquement pas écrire dans data/my_portfolio_thesis.json (même garantie
-que routers/thesis_review_queue.py, voir test_thesis_review_queue.py).
+Deux gardes-fous structurels testés :
+  1. ce script ne peut techniquement pas écrire dans
+     data/my_portfolio_thesis.json (même garantie que
+     routers/thesis_review_queue.py, voir test_thesis_review_queue.py) ;
+  2. un `ticker` absent ou hors du book (`my_portfolio_data.POSITIONS`) est
+     ignoré comme un commentaire malformé — jamais une entrée fantôme dans
+     la file de revue (généralisé multi-ticker, 2026-09-04).
 """
 from __future__ import annotations
 
@@ -30,17 +34,18 @@ def _comment(id_, body):
     return {"id": id_, "body": body}
 
 
-_VALID_BODY = """Voici mon analyse.
+def _body(ticker, execution_type="complete", findings=None, proposed_verdict="Proposition : thèse intacte."):
+    import json as _json
+    payload = {
+        "ticker": ticker, "execution_type": execution_type,
+        "findings": findings if findings is not None else [{"topic": "CET1", "constat": "13.1%", "source": "communiqué"}],
+        "proposed_verdict": proposed_verdict,
+    }
+    return f"Voici mon analyse.\n\n```json\n{_json.dumps(payload)}\n```\n"
 
-```json
-{"execution_type": "complete", "findings": [{"topic": "CET1", "constat": "13.1%", "source": "communiqué"}], "proposed_verdict": "Proposition : thèse intacte."}
-```
-"""
 
-_LIGHT_EMPTY_BODY = """```json
-{"execution_type": "light", "findings": [], "proposed_verdict": null}
-```
-"""
+_VALID_BODY = _body("BNP.PA")
+_LIGHT_EMPTY_BODY = '```json\n{"ticker": "BNP.PA", "execution_type": "light", "findings": [], "proposed_verdict": null}\n```\n'
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -68,6 +73,7 @@ def test_module_never_imports_my_portfolio_thesis():
 
 def test_parse_submission_valid_block():
     payload = ingest_mod.parse_submission(_VALID_BODY)
+    assert payload["ticker"] == "BNP.PA"
     assert payload["execution_type"] == "complete"
     assert payload["findings"][0]["topic"] == "CET1"
 
@@ -81,7 +87,22 @@ def test_parse_submission_invalid_json_returns_none():
 
 
 def test_parse_submission_missing_execution_type_returns_none():
-    assert ingest_mod.parse_submission('```json\n{"findings": []}\n```') is None
+    assert ingest_mod.parse_submission('```json\n{"ticker": "BNP.PA", "findings": []}\n```') is None
+
+
+def test_parse_submission_missing_ticker_returns_none():
+    assert ingest_mod.parse_submission('```json\n{"execution_type": "light", "findings": []}\n```') is None
+
+
+def test_parse_submission_unknown_ticker_returns_none():
+    body = _body("TSLA")
+    assert ingest_mod.parse_submission(body) is None
+
+
+def test_parse_submission_ticker_case_insensitive():
+    body = '```json\n{"ticker": "bnp.pa", "execution_type": "light", "findings": []}\n```'
+    payload = ingest_mod.parse_submission(body)
+    assert payload["ticker"] == "BNP.PA"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -96,6 +117,18 @@ def test_ingest_happy_path(monkeypatch):
     assert len(entries) == 1
     assert entries[0]["execution_type"] == "complete"
     assert entries[0]["findings"][0]["topic"] == "CET1"
+
+
+def test_ingest_routes_to_correct_ticker(monkeypatch):
+    monkeypatch.setattr(
+        ingest_mod, "fetch_comments",
+        lambda: [_comment(1, _body("BNP.PA")), _comment(2, _body("FMX", findings=[]))],
+    )
+    n = ingest_mod.ingest()
+    assert n == 2
+    assert len(trq.list_entries("BNP.PA")) == 1
+    assert len(trq.list_entries("FMX")) == 1
+    assert trq.list_entries("PSX") == []
 
 
 def test_ingest_idempotent_does_not_reingest(monkeypatch):
@@ -131,18 +164,24 @@ def test_ingest_malformed_comment_skipped_without_crashing(monkeypatch):
     assert state["last_comment_id"] == 2
 
 
+def test_ingest_unknown_ticker_skipped_without_crashing(monkeypatch):
+    monkeypatch.setattr(
+        ingest_mod, "fetch_comments",
+        lambda: [_comment(1, _body("TSLA")), _comment(2, _VALID_BODY)],
+    )
+    n = ingest_mod.ingest()
+    assert n == 1
+    assert len(trq.list_entries("BNP.PA")) == 1
+
+
 def test_ingest_invalid_execution_type_skipped(monkeypatch):
-    bad = '```json\n{"execution_type": "yearly", "findings": []}\n```'
+    bad = '```json\n{"ticker": "BNP.PA", "execution_type": "yearly", "findings": []}\n```'
     monkeypatch.setattr(ingest_mod, "fetch_comments", lambda: [_comment(1, bad)])
     n = ingest_mod.ingest()
     assert n == 0
     assert trq.list_entries("BNP.PA") == []
     # State avance quand même — pas de boucle infinie sur un commentaire invalide.
     assert ingest_mod._load_state()["last_comment_id"] == 1
-
-
-def test_ingest_empty_light_run():
-    pass  # couvert par test_ingest_only_processes_new_comments (comment #2)
 
 
 def test_fetch_comments_no_token_raises(monkeypatch):
