@@ -121,6 +121,26 @@ def test_sell_signals_missing_libelle_raises():
         mpt.update_thesis("MU", sell_signals=[{"libelle": "  ", "statut": "intact"}])
 
 
+def test_sell_signals_auto_metric_defaults_to_none():
+    mpt.update_thesis("MU", sell_signals=[{"libelle": "A", "statut": "intact"}])
+    assert mpt.get_thesis("MU")["sell_signals"][0]["auto_metric"] is None
+
+
+def test_sell_signals_auto_metric_valid_value_persists():
+    mpt.update_thesis("BNP.PA", sell_signals=[
+        {"libelle": "Beta >0.8 durable ou corrélation >0.40", "statut": "a_surveiller",
+         "auto_metric": "stabilizer_beta_correlation"},
+    ])
+    assert mpt.get_thesis("BNP.PA")["sell_signals"][0]["auto_metric"] == "stabilizer_beta_correlation"
+
+
+def test_sell_signals_auto_metric_invalid_value_raises():
+    with pytest.raises(ValueError, match="auto_metric invalide"):
+        mpt.update_thesis("MU", sell_signals=[
+            {"libelle": "A", "statut": "intact", "auto_metric": "not_a_real_metric"},
+        ])
+
+
 # ─────────────────────────────────────────────────────────────────
 # update_thesis — bloc C (verification) — auto-push vers l'historique
 # ─────────────────────────────────────────────────────────────────

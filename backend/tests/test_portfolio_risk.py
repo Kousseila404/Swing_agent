@@ -120,6 +120,9 @@ def test_insufficient_history_flags_data_quality(monkeypatch):
     assert result["risk_snapshot"]["n_tickers_missing"] == 1
     # jamais de beta halluciné
     assert result["risk_snapshot"]["portfolio_beta"] is None
+    # jamais de statut stabilisateur fabriqué sans donnée exploitable
+    # (None, pas False — voir routers/my_portfolio.py::_with_computed_statut)
+    assert row["stabilizer_signal_triggered"] is None
 
 
 def test_history_fetch_failure_is_fetch_failed(monkeypatch):
@@ -272,10 +275,69 @@ def test_bnp_style_composite_signal_beta_and_correlation_independent(monkeypatch
          "correlation_alert": {"ref": None, "threshold": 0.40, "persist_weeks": 2}},
         {"ticker": "OTH", "beta": 1.0, "target_weight_pct": 50.0},
     ]
-    result = pr.compute_portfolio_risk(positions, prev_streaks={"BNP": 5})
+    result = pr.compute_portfolio_risk(positions, prev_streaks={"BNP": 5}, prev_beta_streaks={"BNP": 1})
     bnp = result["tickers"]["BNP"]
     assert bnp["beta_flag"] is True
     assert bnp["correlation_alert_triggered"] is False
+    # beta_over_threshold est un critère DIFFÉRENT de beta_flag (écart au
+    # beta déclaré vs seuil absolu STABILIZER_BETA_THRESHOLD) — les deux se
+    # déclenchent ici, mais pour des raisons distinctes.
+    assert bnp["beta_over_threshold_triggered"] is True
+    # Composite OR (rôle "stabilisateur") : le seul volet beta suffit.
+    assert bnp["stabilizer_signal_triggered"] is True
+
+
+def test_stabilizer_beta_streak_persists_across_runs(monkeypatch):
+    """Même mécanisme "durable" que la corrélation (persist_weeks réutilisé
+    depuis correlation_alert) appliqué au seuil absolu STABILIZER_BETA_THRESHOLD."""
+    bench_price, bench_rets = _price_series(seed=1, n=300)
+    target_price, _ = _price_series(seed=20, n=300, k=1.4, base_rets=bench_rets)
+    other_price, _ = _price_series(seed=21, n=300)
+
+    series_map = {"^GSPC": bench_price, "TGT": target_price, "OTH": other_price}
+    monkeypatch.setattr(pr.yf, "Ticker", _ticker_factory(series_map))
+
+    positions = [
+        {"ticker": "TGT", "beta": 0.36, "target_weight_pct": 50.0,
+         "correlation_alert": {"ref": None, "threshold": 0.40, "persist_weeks": 2}},
+        {"ticker": "OTH", "beta": 1.0, "target_weight_pct": 50.0},
+    ]
+
+    run1 = pr.compute_portfolio_risk(positions, prev_streaks={}, prev_beta_streaks={})
+    tgt1 = run1["tickers"]["TGT"]
+    assert tgt1["beta_recalculated"] > pr.STABILIZER_BETA_THRESHOLD
+    assert tgt1["beta_over_threshold_streak_weeks"] == 1
+    assert tgt1["beta_over_threshold_triggered"] is False  # persist_weeks=2, 1er run
+    assert tgt1["stabilizer_signal_triggered"] is False
+
+    run2 = pr.compute_portfolio_risk(positions, prev_streaks={}, prev_beta_streaks={"TGT": 1})
+    tgt2 = run2["tickers"]["TGT"]
+    assert tgt2["beta_over_threshold_streak_weeks"] == 2
+    assert tgt2["beta_over_threshold_triggered"] is True
+    assert tgt2["stabilizer_signal_triggered"] is True
+
+
+def test_refresh_portfolio_risk_persists_beta_streak_independently_of_correlation(monkeypatch):
+    """`prev_beta_streaks` est extrait de `beta_over_threshold_streak_weeks`
+    (pas de `correlation_streak_weeks`) au run suivant — les deux compteurs
+    ne doivent jamais se mélanger."""
+    bench_price, bench_rets = _price_series(seed=1, n=300)
+    target_price, _ = _price_series(seed=20, n=300, k=1.4, base_rets=bench_rets)
+    other_price, _ = _price_series(seed=21, n=300)
+    series_map = {"^GSPC": bench_price, "TGT": target_price, "OTH": other_price}
+    monkeypatch.setattr(pr.yf, "Ticker", _ticker_factory(series_map))
+
+    positions = [
+        {"ticker": "TGT", "beta": 0.36, "target_weight_pct": 50.0},
+        {"ticker": "OTH", "beta": 1.0, "target_weight_pct": 50.0},
+    ]
+
+    pr.refresh_portfolio_risk(positions)
+    on_disk = pr._load_state()
+    assert on_disk["tickers"]["TGT"]["beta_over_threshold_streak_weeks"] == 1
+
+    result2 = pr.refresh_portfolio_risk(positions)
+    assert result2["tickers"]["TGT"]["beta_over_threshold_streak_weeks"] == 2
 
 
 # ─────────────────────────────────────────────────────────────────
