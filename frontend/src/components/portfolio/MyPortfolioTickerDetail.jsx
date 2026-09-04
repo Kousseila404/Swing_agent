@@ -435,6 +435,14 @@ function SellSignalsSection({ ticker, sellSignals }) {
                     >
                       {meta.icon} {meta.label}
                     </span>
+                    {s.statut_computed && (
+                      <span
+                        className="mp-price-sub mp-signal-auto"
+                        title="Statut recalculé à chaque chargement depuis le beta/corrélation live (modules/portfolio_risk.py) — pas une saisie manuelle. Si la donnée de risque devient indisponible, le dernier statut saisi à la main reprend le relais."
+                      >
+                        🔄 calculé (beta/corrélation live)
+                      </span>
+                    )}
                     <span className="mp-signal-libelle">{s.libelle}</span>
                     {s.note && <span className="mp-signal-note">— {s.note}</span>}
                     {s.date_maj && <span className="mp-price-sub mp-signal-date">évalué le {s.date_maj}</span>}
