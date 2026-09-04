@@ -106,6 +106,18 @@ def _with_computed_statut(signal: dict[str, Any], risk: dict[str, Any]) -> dict[
         return {**signal, "statut_computed": False}
     return {**signal, "statut": "declenche" if triggered else "intact", "statut_computed": True}
 
+
+def _thesis_with_computed_signals(
+    ticker: str, theses_by_ticker: dict[str, dict[str, Any]], risk_by_ticker: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    thesis = _thesis_fields(ticker, theses_by_ticker)
+    risk = _risk_fields(ticker, risk_by_ticker)
+    # `**thesis` copie avant override — `_thesis_fields` peut retourner
+    # `_THESIS_FIELDS_DEFAULT` PAR RÉFÉRENCE (ticker sans thèse éditée) :
+    # muter `thesis["sell_signals"]` en place corromprait ce dict partagé
+    # entre requêtes/tickers.
+    return {**thesis, "sell_signals": [_with_computed_statut(s, risk) for s in thesis["sell_signals"]]}
+
 # Fenêtre d'affichage du badge earnings — voir docs/UPGRADES_MY_PORTFOLIO.md
 # Upgrade 2 : "à venir" jusqu'à 14j avant, "résultats publiés" pendant les 5j
 # qui suivent (état transitoire, évite la disparition instantanée du badge
