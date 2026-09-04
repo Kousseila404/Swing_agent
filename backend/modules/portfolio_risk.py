@@ -80,6 +80,16 @@ _MIN_RETURNS_FOR_ANALYSIS = 60
 # Écart beta recalculé vs beta déclaré au-delà duquel on affiche le badge ⚠.
 BETA_FLAG_THRESHOLD_PCT = 30.0
 
+# Seuil absolu au-delà duquel un ticker cesse de jouer un rôle de
+# "stabilisateur" bas-beta dans le book (ex: critère éditorial BNP.PA "Beta
+# >0.8 durable ou corrélation >0.40", modules/my_portfolio_thesis.py
+# REFERENCE_METRICS / sell_signals `auto_metric`). Calculé pour tous les
+# tickers (pas seulement ceux avec `correlation_alert` configuré) — c'est un
+# bloc générique, réutilisable par n'importe quel sell_signal qui s'y
+# rattache via `auto_metric`, pas une notion propre à BNP.PA.
+STABILIZER_BETA_THRESHOLD = 0.8
+_DEFAULT_STABILIZER_PERSIST_WEEKS = 2
+
 # Paire yfinance par devise native + sens d'application (même convention
 # que `routers/my_portfolio.py::_usd_multiplier`, dupliquée ici en version
 # "série historique" plutôt qu'importée — besoin différent, un historique
@@ -275,6 +285,7 @@ def compute_portfolio_risk(
     benchmark: str = BENCHMARK_TICKER,
     history_period: str = HISTORY_PERIOD,
     prev_streaks: dict[str, int] | None = None,
+    prev_beta_streaks: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Calcule le snapshot de risque complet pour `positions`.
 
@@ -283,8 +294,14 @@ def compute_portfolio_risk(
     price_ticker` optionnel, `correlation_alert` optionnel).
     Fonction pure (aucun accès disque) — la persistance est gérée par
     `refresh_portfolio_risk`.
+
+    `prev_streaks`/`prev_beta_streaks` : deux compteurs indépendants
+    (corrélation vs beta absolu, voir STABILIZER_BETA_THRESHOLD) — séparés
+    plutôt que nichés dans un seul dict pour ne pas casser la signature
+    existante de `prev_streaks` (déjà testée/appelée telle quelle).
     """
     prev_streaks = prev_streaks or {}
+    prev_beta_streaks = prev_beta_streaks or {}
     bench_returns_all = _fetch_close_series(benchmark, history_period)
     bench_returns = _to_returns(bench_returns_all) if bench_returns_all is not None else pd.Series(dtype=float)
 
@@ -325,6 +342,22 @@ def compute_portfolio_risk(
 
         avg_corr = _per_ticker_avg_correlation(corr, ticker) if not corr.empty else None
 
+        # Streak "beta stabilisateur" — générique, calculé pour tous les
+        # tickers (pas seulement ceux avec `correlation_alert`), réutilise
+        # `_correlation_streak` telle quelle malgré son nom (générique :
+        # ref_value/threshold/persist_weeks/prev_streak, rien de spécifique
+        # à la corrélation). `persist_weeks` vient de `correlation_alert` si
+        # configuré (même fenêtre "durable" que le volet corrélation),
+        # sinon la valeur par défaut.
+        beta_alert_cfg = p.get("correlation_alert") or {}
+        beta_persist_weeks = beta_alert_cfg.get("persist_weeks", _DEFAULT_STABILIZER_PERSIST_WEEKS)
+        beta_over_threshold_streak, beta_over_threshold_triggered = _correlation_streak(
+            ref_value=beta_recalc,
+            threshold=STABILIZER_BETA_THRESHOLD,
+            persist_weeks=beta_persist_weeks,
+            prev_streak=prev_beta_streaks.get(ticker, 0),
+        )
+
         alert_cfg = p.get("correlation_alert")
         correlation_vs_ref: float | None = None
         correlation_alert_triggered = False
@@ -355,6 +388,17 @@ def compute_portfolio_risk(
             "correlation_vs_ref": round(correlation_vs_ref, 3) if correlation_vs_ref is not None else None,
             "correlation_alert_triggered": correlation_alert_triggered,
             "correlation_streak_weeks": correlation_streak_weeks,
+            "beta_over_threshold_triggered": beta_over_threshold_triggered,
+            "beta_over_threshold_streak_weeks": beta_over_threshold_streak,
+            # Rôle "stabilisateur bas-beta/faible corrélation" toujours
+            # rempli : combine les deux volets. `None` (pas juste False) si
+            # la donnée n'est pas exploitable ce run — un sell_signal qui
+            # s'y rattache (`auto_metric`) ne doit jamais fabriquer un
+            # statut à partir d'une donnée absente (voir routers/my_portfolio.py).
+            "stabilizer_signal_triggered": (
+                (beta_over_threshold_triggered or correlation_alert_triggered)
+                if tr.data_quality == "ok" else None
+            ),
             "data_quality": tr.data_quality,
         }
 
