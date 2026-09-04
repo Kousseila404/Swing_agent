@@ -25,7 +25,7 @@
 
 import { useState } from 'react';
 import {
-  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
   useMyPortfolioExecutions, useMyPortfolioPriceHistory, useThesisReviewQueue,
@@ -144,10 +144,11 @@ function EmptyDoc({ children }) {
   return <em className="mp-detail-empty-doc">{children || 'à documenter'}</em>;
 }
 
-function PriceHistoryChart({ ticker }) {
+function PriceHistoryChart({ ticker, entryPriceUsd }) {
   const [period, setPeriod] = useState('1y');
   const q = useMyPortfolioPriceHistory(ticker, period);
   const history = q.data?.history || null;
+  const hasEntry = Number.isFinite(entryPriceUsd);
 
   return (
     <div>
@@ -176,7 +177,13 @@ function PriceHistoryChart({ ticker }) {
             <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} />
             <YAxis
               tick={{ fontSize: 10 }}
-              domain={['auto', 'auto']}
+              // Étend le domaine auto pour toujours inclure le prix d'entrée
+              // — sinon la ligne de référence sortirait du cadre sur les
+              // périodes courtes (3M/6M) si l'entrée est plus ancienne.
+              domain={[
+                (dataMin) => (hasEntry ? Math.min(dataMin, entryPriceUsd) : dataMin),
+                (dataMax) => (hasEntry ? Math.max(dataMax, entryPriceUsd) : dataMax),
+              ]}
               tickFormatter={(v) => `$${v.toFixed(0)}`}
               width={56}
             />
@@ -184,6 +191,20 @@ function PriceHistoryChart({ ticker }) {
               contentStyle={{ background: 'rgba(13,13,26,0.95)', border: '1px solid var(--border)', fontSize: '0.78rem' }}
               formatter={(v) => [`$${Number(v).toFixed(2)}`, 'Prix (USD)']}
             />
+            {hasEntry && (
+              <ReferenceLine
+                y={entryPriceUsd}
+                stroke="var(--text-muted)"
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                label={{
+                  value: `Entrée $${entryPriceUsd.toFixed(2)}`,
+                  position: 'insideTopLeft',
+                  fill: 'var(--text-muted)',
+                  fontSize: 10,
+                }}
+              />
+            )}
             <Line type="monotone" dataKey="price" stroke="var(--mp-accent)" dot={false} strokeWidth={2} />
           </LineChart>
         </ResponsiveContainer>
@@ -840,7 +861,7 @@ export default function MyPortfolioTickerDetail({ position, driftThreshold, onBa
       </DetailSection>
 
       <DetailSection title="Historique de prix">
-        <PriceHistoryChart ticker={p.ticker} />
+        <PriceHistoryChart ticker={p.ticker} entryPriceUsd={p.entry_price_usd} />
       </DetailSection>
 
       <DetailSection title="Journal de qualité d'exécution (Upgrade 4)">

@@ -313,6 +313,12 @@ def get_my_portfolio(_auth: None = Security(api_core.require_review_or_full_auth
             "is_pending":    shares <= 0,
             "pnl_usd":       round(pnl_usd, 2) if pnl_usd is not None else None,
             "pnl_pct":       round(pnl_pct, 1) if pnl_pct is not None else None,
+            # Prix d'entrée converti USD — `p["entry_price"]` (repris tel
+            # quel par `**p`) reste natif à `currency` ; ce champ séparé sert
+            # de ligne de référence sur le graphique d'historique de prix
+            # (lui-même en USD, voir portfolio_risk.get_price_history) sans
+            # dupliquer/écraser le champ natif utilisé ailleurs (P&L, tableau).
+            "entry_price_usd": round(entry_price, 2) if entry_price else None,
             **_earnings_fields(p, today, earnings_snapshot),
             **_risk_fields(p["ticker"], risk_by_ticker),
             **_thesis_with_computed_signals(p["ticker"], theses_by_ticker, risk_by_ticker),
