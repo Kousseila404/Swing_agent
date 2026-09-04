@@ -313,7 +313,8 @@ def test_my_portfolio_total_pnl_usd_sums_positions_with_known_entry_price(monkey
 # Dividendes — dividend_yield_pct (portfolio_risk) -> annual_dividend_usd_estimate
 # ─────────────────────────────────────────────────────────────────
 
-def test_dividend_yield_default_null_when_no_risk_snapshot(monkeypatch):
+def test_dividend_yield_default_null_when_no_risk_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(risk_mod, "_STATE_PATH", tmp_path / "my_portfolio_risk.json")
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
     r = _client(monkeypatch).get("/api/my_portfolio")
     bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
