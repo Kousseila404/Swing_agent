@@ -99,12 +99,22 @@ def _with_computed_statut(signal: dict[str, Any], risk: dict[str, Any]) -> dict[
     est affiché tel quel, `statut_computed` reste `False`.
     """
     auto_metric = signal.get("auto_metric")
-    if auto_metric != "stabilizer_beta_correlation":
-        return {**signal, "statut_computed": False}
-    triggered = risk.get("stabilizer_signal_triggered")
-    if triggered is None:
-        return {**signal, "statut_computed": False}
-    return {**signal, "statut": "declenche" if triggered else "intact", "statut_computed": True}
+    if auto_metric == "stabilizer_beta_correlation":
+        triggered = risk.get("stabilizer_signal_triggered")
+        if triggered is None:
+            return {**signal, "statut_computed": False}
+        return {**signal, "statut": "declenche" if triggered else "intact", "statut_computed": True}
+    if auto_metric == "correlation_only":
+        # Contrairement à stabilizer_signal_triggered (composite beta OU
+        # corrélation), un critère purement corrélation (HRTG/ERO) ne doit
+        # jamais réagir à un écart de beta seul — voir AUTO_METRICS dans
+        # modules/my_portfolio_thesis.py pour le piège évité (ERO beta 1.63
+        # normal pour un mineur, pas un signal pour SON critère).
+        if risk.get("data_quality") != "ok":
+            return {**signal, "statut_computed": False}
+        triggered = bool(risk.get("correlation_alert_triggered"))
+        return {**signal, "statut": "declenche" if triggered else "intact", "statut_computed": True}
+    return {**signal, "statut_computed": False}
 
 
 def _thesis_with_computed_signals(

@@ -401,6 +401,73 @@ def test_sell_signal_auto_metric_falls_back_to_editorial_statut_when_risk_unavai
     assert sig["statut_computed"] is False
 
 
+def _save_risk_for(tmp_path, monkeypatch, ticker, **fields):
+    monkeypatch.setattr(risk_mod, "_STATE_PATH", tmp_path / "my_portfolio_risk.json")
+    base = {
+        "beta_recalculated": 1.0, "beta_diff_pct": 0.0, "beta_flag": False,
+        "avg_correlation": 0.1, "correlation_vs_ref": None,
+        "correlation_alert_triggered": False, "correlation_streak_weeks": 0,
+        "beta_over_threshold_triggered": True, "beta_over_threshold_streak_weeks": 2,
+        "stabilizer_signal_triggered": True, "data_quality": "ok",
+    }
+    base.update(fields)
+    risk_mod._save_state({
+        "schema_version": risk_mod.SCHEMA_VERSION, "risk_snapshot": None,
+        "tickers": {ticker: base}, "fetched_at": time.time(),
+    })
+
+
+def test_sell_signal_correlation_only_ignores_beta_breach(monkeypatch, tmp_path):
+    """ERO-style : beta déclaré élevé (mineur de cuivre) ne doit jamais
+    déclencher un critère qui ne porte QUE sur la corrélation — même si
+    beta_over_threshold_triggered/stabilizer_signal_triggered valent True
+    ce run (piège évité, voir AUTO_METRICS dans my_portfolio_thesis.py)."""
+    thesis_mod.update_thesis("ERO", sell_signals=[{
+        "libelle": "Corrélation MU >0.50", "statut": "a_surveiller",
+        "auto_metric": "correlation_only",
+    }])
+    _save_risk_for(tmp_path, monkeypatch, "ERO",
+                    correlation_alert_triggered=False, stabilizer_signal_triggered=True,
+                    beta_over_threshold_triggered=True)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    ero = next(p for p in r.json()["positions"] if p["ticker"] == "ERO")
+    sig = ero["sell_signals"][0]
+    assert sig["statut"] == "intact"
+    assert sig["statut_computed"] is True
+
+
+def test_sell_signal_correlation_only_triggers_on_correlation_breach(monkeypatch, tmp_path):
+    thesis_mod.update_thesis("HRTG", sell_signals=[{
+        "libelle": "Corrélation moyenne >0.30 durable", "statut": "intact",
+        "auto_metric": "correlation_only",
+    }])
+    _save_risk_for(tmp_path, monkeypatch, "HRTG", correlation_alert_triggered=True)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    hrtg = next(p for p in r.json()["positions"] if p["ticker"] == "HRTG")
+    sig = hrtg["sell_signals"][0]
+    assert sig["statut"] == "declenche"
+    assert sig["statut_computed"] is True
+
+
+def test_sell_signal_correlation_only_falls_back_when_data_quality_not_ok(monkeypatch, tmp_path):
+    thesis_mod.update_thesis("HRTG", sell_signals=[{
+        "libelle": "Corrélation moyenne >0.30 durable", "statut": "a_surveiller",
+        "auto_metric": "correlation_only",
+    }])
+    _save_risk_for(tmp_path, monkeypatch, "HRTG", data_quality="insufficient_history")
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    hrtg = next(p for p in r.json()["positions"] if p["ticker"] == "HRTG")
+    sig = hrtg["sell_signals"][0]
+    assert sig["statut"] == "a_surveiller"
+    assert sig["statut_computed"] is False
+
+
 def test_sell_signal_without_auto_metric_never_overridden(monkeypatch, tmp_path):
     """Signal purement éditorial (auto_metric=None, cas par défaut/majoritaire
     — RevPAR, crack spreads, MLR... ne peuvent pas être tranchés par une

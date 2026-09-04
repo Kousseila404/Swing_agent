@@ -55,7 +55,18 @@ SELL_SIGNAL_STATUSES = ("intact", "a_surveiller", "declenche")
 # marché, l'override a lieu uniquement côté router de lecture). Le `statut`
 # persisté reste néanmoins écrit/lu normalement : c'est le fallback affiché
 # si la donnée de risque est indisponible (data_quality != "ok").
-AUTO_METRICS = ("stabilizer_beta_correlation",)
+#
+# Deux valeurs distinctes plutôt qu'une seule "générique" : le libellé exact
+# du signal détermine ce qui doit être vérifié, jamais l'inverse.
+#   - "stabilizer_beta_correlation" : critère composite (BNP.PA — "Beta
+#     >0.8 durable OU corrélation >0.40") -> beta ET corrélation comptent.
+#   - "correlation_only" : critère qui ne porte QUE sur la corrélation
+#     (HRTG — "Corrélation moyenne >0.30" ; ERO — "Corrélation MU >0.50").
+#     Piège évité (audit 2026-09-04) : ERO a un beta déclaré 1.63 (normal
+#     pour un mineur de cuivre, pas un signal) — utiliser le composite ici
+#     aurait déclenché une fausse alerte sur le seul beta, hors du critère
+#     réellement écrit dans le signal.
+AUTO_METRICS = ("stabilizer_beta_correlation", "correlation_only")
 
 # Au-delà de ce nombre de jours depuis `derniere_verification`, la page
 # détail affiche un badge d'alerte de fraîcheur — même logique visuelle que
