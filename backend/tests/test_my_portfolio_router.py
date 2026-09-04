@@ -329,6 +329,96 @@ def test_my_portfolio_thesis_fields_merged_when_edited(monkeypatch):
     assert bnp["sell_signals"][0]["libelle"] == "Corrélation > 0.40"
 
 
+# ─────────────────────────────────────────────────────────────────
+# Signal de vente "auto_metric" — statut d'affichage recalculé depuis le
+# risque live (jamais persisté ainsi, voir _with_computed_statut).
+# ─────────────────────────────────────────────────────────────────
+
+def _save_bnp_risk(tmp_path, monkeypatch, *, stabilizer_signal_triggered):
+    monkeypatch.setattr(risk_mod, "_STATE_PATH", tmp_path / "my_portfolio_risk.json")
+    risk_mod._save_state({
+        "schema_version": risk_mod.SCHEMA_VERSION,
+        "risk_snapshot": None,
+        "tickers": {
+            "BNP.PA": {
+                "beta_recalculated": 0.37, "beta_diff_pct": 2.8, "beta_flag": False,
+                "avg_correlation": 0.11, "correlation_vs_ref": None,
+                "correlation_alert_triggered": False, "correlation_streak_weeks": 0,
+                "beta_over_threshold_triggered": False, "beta_over_threshold_streak_weeks": 0,
+                "stabilizer_signal_triggered": stabilizer_signal_triggered,
+                "data_quality": "ok",
+            },
+        },
+        "fetched_at": time.time(),
+    })
+
+
+def test_sell_signal_auto_metric_computed_intact_when_not_triggered(monkeypatch, tmp_path):
+    thesis_mod.update_thesis("BNP.PA", sell_signals=[{
+        "libelle": "Beta >0.8 durable ou corrélation >0.40", "statut": "a_surveiller",
+        "auto_metric": "stabilizer_beta_correlation",
+    }])
+    _save_bnp_risk(tmp_path, monkeypatch, stabilizer_signal_triggered=False)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
+    sig = bnp["sell_signals"][0]
+    assert sig["statut"] == "intact"
+    assert sig["statut_computed"] is True
+
+
+def test_sell_signal_auto_metric_computed_declenche_when_triggered(monkeypatch, tmp_path):
+    thesis_mod.update_thesis("BNP.PA", sell_signals=[{
+        "libelle": "Beta >0.8 durable ou corrélation >0.40", "statut": "intact",
+        "auto_metric": "stabilizer_beta_correlation",
+    }])
+    _save_bnp_risk(tmp_path, monkeypatch, stabilizer_signal_triggered=True)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
+    sig = bnp["sell_signals"][0]
+    assert sig["statut"] == "declenche"
+    assert sig["statut_computed"] is True
+
+
+def test_sell_signal_auto_metric_falls_back_to_editorial_statut_when_risk_unavailable(monkeypatch, tmp_path):
+    """Aucun snapshot de risque calculé pour ce ticker (data_quality absent
+    -> stabilizer_signal_triggered=None, jamais halluciné) : le statut
+    éditorial persisté reste affiché tel quel, statut_computed=False."""
+    thesis_mod.update_thesis("BNP.PA", sell_signals=[{
+        "libelle": "Beta >0.8 durable ou corrélation >0.40", "statut": "a_surveiller",
+        "auto_metric": "stabilizer_beta_correlation",
+    }])
+    monkeypatch.setattr(risk_mod, "_STATE_PATH", tmp_path / "my_portfolio_risk.json")
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
+    sig = bnp["sell_signals"][0]
+    assert sig["statut"] == "a_surveiller"
+    assert sig["statut_computed"] is False
+
+
+def test_sell_signal_without_auto_metric_never_overridden(monkeypatch, tmp_path):
+    """Signal purement éditorial (auto_metric=None, cas par défaut/majoritaire
+    — RevPAR, crack spreads, MLR... ne peuvent pas être tranchés par une
+    donnée de marché) : jamais recalculé, même si un snapshot de risque
+    "déclenché" existe pour ce ticker."""
+    thesis_mod.update_thesis("BNP.PA", sell_signals=[{
+        "libelle": "Dégradation notation crédit", "statut": "intact",
+    }])
+    _save_bnp_risk(tmp_path, monkeypatch, stabilizer_signal_triggered=True)
+    monkeypatch.setattr(my_portfolio_router, "_safe_price", _flat_price(100.0))
+
+    r = _client(monkeypatch).get("/api/my_portfolio")
+    bnp = next(p for p in r.json()["positions"] if p["ticker"] == "BNP.PA")
+    sig = bnp["sell_signals"][0]
+    assert sig["statut"] == "intact"
+    assert sig["statut_computed"] is False
+
+
 def test_my_portfolio_requires_auth_when_configured(monkeypatch):
     monkeypatch.setattr(api_core, "API_TOKEN", "secret-token")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
@@ -688,6 +778,9 @@ def test_my_portfolio_risk_fields_default_when_no_snapshot_computed(monkeypatch,
     assert bnp["avg_correlation"] is None
     assert bnp["correlation_alert_triggered"] is False
     assert bnp["correlation_streak_weeks"] == 0
+    assert bnp["beta_over_threshold_triggered"] is False
+    assert bnp["beta_over_threshold_streak_weeks"] == 0
+    assert bnp["stabilizer_signal_triggered"] is None
     assert bnp["data_quality"] is None
 
 
