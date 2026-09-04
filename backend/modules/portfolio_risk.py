@@ -124,6 +124,39 @@ def _fetch_close_series(symbol: str, period: str) -> pd.Series | None:
     return s[~s.index.duplicated(keep="last")].sort_index()
 
 
+def _trailing_dividend_yield(price_ticker: str) -> float | None:
+    """Rendement du dividende trailing 12 mois (%) — somme des dividendes
+    versés sur 1 an / dernier cours de clôture, tous deux dans la devise
+    native du ticker (le ratio est indépendant de la devise, pas besoin de
+    conversion FX). Calculé depuis l'historique yfinance (`actions=True`
+    ajoute la colonne "Dividends" au même fetch, pas un appel réseau
+    séparé) plutôt que `.info["dividendYield"]` — plus lent et moins fiable
+    (souvent absent/périmé sur les tickers moins suivis de ce book).
+
+    `None` (jamais 0) si aucun dividende versé sur la période OU historique
+    indisponible — un ticker qui ne verse pas de dividende (aucun du book
+    actuellement) doit rester distinguable d'un ticker dont la donnée a
+    échoué à charger, même si l'affichage final peut les traiter pareil.
+    """
+    try:
+        hist = yf.Ticker(price_ticker).history(period="1y", actions=True)
+    except Exception as e:
+        logger.warning(f"[portfolio_risk] Dividendes {price_ticker} indisponibles: {e}")
+        return None
+    if hist is None or hist.empty or "Dividends" not in hist.columns or "Close" not in hist.columns:
+        return None
+    total_dividends = float(hist["Dividends"].fillna(0).sum())
+    if total_dividends <= 0:
+        return None
+    closes = hist["Close"].dropna()
+    if closes.empty:
+        return None
+    last_close = float(closes.iloc[-1])
+    if last_close <= 0:
+        return None
+    return round(total_dividends / last_close * 100, 2)
+
+
 def _usd_close_series(price_ticker: str, currency: str, period: str) -> pd.Series | None:
     native = _fetch_close_series(price_ticker, period)
     if native is None or native.empty:
@@ -358,6 +391,8 @@ def compute_portfolio_risk(
             prev_streak=prev_beta_streaks.get(ticker, 0),
         )
 
+        dividend_yield_pct = _trailing_dividend_yield(p.get("price_ticker", ticker))
+
         alert_cfg = p.get("correlation_alert")
         correlation_vs_ref: float | None = None
         correlation_alert_triggered = False
@@ -390,6 +425,7 @@ def compute_portfolio_risk(
             "correlation_streak_weeks": correlation_streak_weeks,
             "beta_over_threshold_triggered": beta_over_threshold_triggered,
             "beta_over_threshold_streak_weeks": beta_over_threshold_streak,
+            "dividend_yield_pct": dividend_yield_pct,
             # Rôle "stabilisateur bas-beta/faible corrélation" toujours
             # rempli : combine les deux volets. `None` (pas juste False) si
             # la donnée n'est pas exploitable ce run — un sell_signal qui

@@ -49,6 +49,7 @@ _RISK_FIELDS_DEFAULT: dict[str, Any] = {
     "beta_over_threshold_triggered": False,
     "beta_over_threshold_streak_weeks": 0,
     "stabilizer_signal_triggered": None,
+    "dividend_yield_pct": None,
     "data_quality": None,
 }
 
@@ -304,6 +305,19 @@ def get_my_portfolio(_auth: None = Security(api_core.require_review_or_full_auth
         else:
             pnl_usd, pnl_pct = None, None
 
+        risk_row = _risk_fields(p["ticker"], risk_by_ticker)
+        dividend_yield_pct = risk_row.get("dividend_yield_pct")
+        # Estimation informative — rendement trailing 12m (devise-neutre,
+        # voir portfolio_risk._trailing_dividend_yield) appliqué à la valeur
+        # actuelle USD de la ligne. Pas un montant réellement perçu (pas de
+        # date d'entrée trackée pour calculer les dividendes encaissés
+        # depuis l'achat) : une projection "si je détiens 1 an au rendement
+        # actuel", pas un historique.
+        annual_dividend_usd_estimate = (
+            round(current_value * dividend_yield_pct / 100, 2)
+            if dividend_yield_pct is not None else None
+        )
+
         rows.append({
             **p,
             "current_price": price,
@@ -319,8 +333,9 @@ def get_my_portfolio(_auth: None = Security(api_core.require_review_or_full_auth
             # (lui-même en USD, voir portfolio_risk.get_price_history) sans
             # dupliquer/écraser le champ natif utilisé ailleurs (P&L, tableau).
             "entry_price_usd": round(entry_price, 2) if entry_price else None,
+            "annual_dividend_usd_estimate": annual_dividend_usd_estimate,
             **_earnings_fields(p, today, earnings_snapshot),
-            **_risk_fields(p["ticker"], risk_by_ticker),
+            **risk_row,
             **_thesis_with_computed_signals(p["ticker"], theses_by_ticker, risk_by_ticker),
         })
 

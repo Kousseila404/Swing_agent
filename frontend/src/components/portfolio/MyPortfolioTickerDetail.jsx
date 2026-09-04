@@ -759,6 +759,20 @@ export default function MyPortfolioTickerDetail({ position, driftThreshold, onBa
               </>
             )}
           </Field>
+          <Field label="Rendement dividende (12m glissants)">
+            {p.dividend_yield_pct == null ? (
+              <span style={{ color: 'var(--text-muted)' }}>— (pas de dividende ou donnée indisponible)</span>
+            ) : (
+              <>
+                {p.dividend_yield_pct.toFixed(2)}%
+                {p.annual_dividend_usd_estimate != null && (
+                  <span className="mp-price-sub" style={{ display: 'inline' }}>
+                    {' '}≈ {fmtUsd(p.annual_dividend_usd_estimate)}/an sur la valeur actuelle
+                  </span>
+                )}
+              </>
+            )}
+          </Field>
           <Field label="Poids cible vs réel">
             {p.target_weight_pct}% cible → <span className="mp-weight-real">{p.real_weight_pct}%</span> réel
           </Field>
