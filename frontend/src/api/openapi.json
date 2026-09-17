@@ -309,6 +309,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Post Backfill Entry Scores Api Portfolio Backfill Entry Scores Post"
                 }
               }
@@ -793,7 +794,7 @@
               "anyOf": [
                 {
                   "type": "number",
-                  "minimum": 0.0
+                  "minimum": 0
                 },
                 {
                   "type": "null"
@@ -1410,6 +1411,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Audit Full Api Audit Full Get"
                 }
               }
@@ -1442,6 +1444,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Delisted Api Delisted Get"
                 }
@@ -1465,6 +1468,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Wfo Weights Api Wfo Get"
                 }
@@ -1505,6 +1509,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Wfo History Api Wfo History Get"
                 }
               }
@@ -1554,6 +1559,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Ticker Analysis Api Ticker Analysis  Ticker  Get"
                 }
               }
@@ -1609,6 +1615,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Peers Api Peers  Ticker  Get"
                 }
               }
@@ -1654,6 +1661,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Compare Api Compare Get"
                 }
               }
@@ -1685,6 +1693,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Watchlist Api Watchlist Get"
                 }
@@ -1715,6 +1724,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Post Watchlist Api Watchlist Post"
                 }
@@ -1769,6 +1779,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Delete Watchlist Api Watchlist  Ticker  Delete"
                 }
               }
@@ -1812,6 +1823,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Notes Api Notes  Ticker  Get"
                 }
               }
@@ -1868,6 +1880,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Post Note Api Notes  Ticker  Post"
                 }
               }
@@ -1926,6 +1939,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Put Note Api Notes  Note Id  Put"
                 }
               }
@@ -1972,6 +1986,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Delete Note Endpoint Api Notes  Note Id  Delete"
                 }
               }
@@ -2003,6 +2018,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Titan Alerts Api Titan Alerts Get"
                 }
@@ -2033,6 +2049,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Post Titan Alert Api Titan Alerts Post"
                 }
@@ -2087,6 +2104,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Delete Titan Alert Api Titan Alerts  Alert Id  Delete"
                 }
               }
@@ -2137,6 +2155,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Price Alerts Api Price Alerts Get"
                 }
               }
@@ -2182,6 +2201,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Post Price Alert Api Price Alerts Post"
                 }
               }
@@ -2214,6 +2234,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Price Alerts Stats Api Price Alerts Stats Get"
                 }
@@ -2253,6 +2274,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Delete Price Alert Api Price Alerts  Alert Id  Delete"
                 }
               }
@@ -2300,6 +2322,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Calendar Api Calendar Get"
                 }
               }
@@ -2355,6 +2378,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get News Api News  Ticker  Get"
                 }
               }
@@ -2414,6 +2438,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Portfolio News Firehose Api News Portfolio Firehose Get"
                 }
               }
@@ -2469,6 +2494,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Sec Filings Api Sec Filings  Ticker  Get"
                 }
               }
@@ -2501,6 +2527,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Preview Alerts Api Monitor Preview Get"
                 }
@@ -2529,6 +2556,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Run Alerts Api Monitor Run Post"
                 }
@@ -2557,6 +2585,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Thesis Status All Api Thesis Status Get"
                 }
@@ -2585,6 +2614,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Lt Decision All Api Lt Decision Get"
                 }
@@ -2630,6 +2660,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Lt Decision One Api Lt Decision  Ticker  Get"
                 }
               }
@@ -2662,6 +2693,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Benchmark Portfolio Endpoint Api Sector Benchmark Portfolio Get"
                 }
@@ -2723,6 +2755,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Benchmark Ticker Endpoint Api Sector Benchmark  Ticker  Get"
                 }
               }
@@ -2754,6 +2787,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Attribution Api Attribution Get"
                 }
@@ -2781,6 +2815,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get My Portfolio Api My Portfolio Get"
                 }
@@ -2836,6 +2871,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get My Portfolio Price History Api My Portfolio  Ticker  Price History Get"
                 }
               }
@@ -2867,6 +2903,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Executions Api My Portfolio Executions Get"
                 }
@@ -2902,6 +2939,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Post Execution Api My Portfolio Executions Post"
                 }
@@ -2966,6 +3004,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Patch Thesis Api My Portfolio  Ticker  Thesis Patch"
                 }
               }
@@ -3024,6 +3063,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Post Review Entry Api My Portfolio  Ticker  Thesis Review Queue Post"
                 }
               }
@@ -3070,6 +3110,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Review Queue Api My Portfolio  Ticker  Thesis Review Queue Get"
                 }
               }
@@ -3137,6 +3178,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Patch Review Entry Status Api My Portfolio  Ticker  Thesis Review Queue  Entry Id  Patch"
                 }
               }
@@ -3153,6 +3195,139 @@
             }
           }
         }
+      }
+    },
+    "/api/performance/benchmark": {
+      "get": {
+        "tags": [
+          "cockpit"
+        ],
+        "summary": "Get Performance Benchmark",
+        "description": "Compte réel (Alpaca) vs SPY vs panier TITAN top-N théorique, rebasés à 100.\n\nLe panier est calculé sur la fenêtre live uniquement (snapshots ≥ 2026-04-22,\nsans look-ahead) et mis en cache 12 h (`data/.perf_benchmark_cache.json`).",
+        "operationId": "get_performance_benchmark_api_performance_benchmark_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "months",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 12,
+              "minimum": 1,
+              "default": 6,
+              "title": "Months"
+            }
+          },
+          {
+            "name": "top_n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 5,
+              "default": 20,
+              "title": "Top N"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolio/protection": {
+      "get": {
+        "tags": [
+          "cockpit"
+        ],
+        "summary": "Get Portfolio Protection",
+        "description": "État de protection (stop broker) de chaque position OPEN. Cache 60 s.",
+        "operationId": "get_portfolio_protection_api_portfolio_protection_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Refresh"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/health": {
+      "get": {
+        "tags": [
+          "cockpit"
+        ],
+        "summary": "Get System Health",
+        "description": "Vue « tout va bien ? » : tracker (heartbeat), killswitch, circuit breaker,\ndernière exécution des crons (mtime des logs), broker, données.",
+        "operationId": "get_system_health_api_system_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     }
   },
@@ -3512,6 +3687,7 @@
           },
           "open_positions": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -4084,6 +4260,7 @@
           },
           "per_ticker_pnl": {
             "additionalProperties": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "object",
@@ -4111,6 +4288,7 @@
           },
           "journal": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -4118,6 +4296,7 @@
           },
           "open_positions": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -4125,6 +4304,7 @@
           },
           "closed_trades": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -4969,18 +5149,22 @@
             "title": "Source Indices"
           },
           "filter": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Filter"
           },
           "stats": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Stats"
           },
           "sectors": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Sectors"
           },
           "tickers": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Tickers"
           },

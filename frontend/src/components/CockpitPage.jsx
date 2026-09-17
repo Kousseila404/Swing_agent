@@ -137,7 +137,7 @@ export default function CockpitPage({ onNavigate }) {
   const ltQ         = useQuery({ queryKey: ['lt_decision'], queryFn: fetchLtDecision, staleTime: 5 * 60_000 });
 
   const equity    = portfolioQ.data?.equity || {};
-  const positions = equity.open_positions || [];
+  const positions = useMemo(() => portfolioQ.data?.equity?.open_positions || [], [portfolioQ.data]);
   const bench     = benchQ.data;
   const summary   = bench?.summary || {};
   const protect   = protectQ.data;
@@ -318,7 +318,7 @@ export default function CockpitPage({ onNavigate }) {
             ))}
           </ul>
         ) : <div className="cockpit-note">Aucune alerte système.</div>}
-        <div className="health-strip" style={undefined}>
+        <div className="health-strip">
           {Object.entries(health?.crons || {}).map(([name, c]) => {
             const age = c.log_age_sec;
             const cls = age == null ? 'health-item--dead' : age > 86400 * 2 ? 'health-item--stale' : '';
