@@ -144,6 +144,7 @@ def _build_decisions_for_open_positions() -> tuple[list[dict[str, Any]], dict[st
         return [], {}
 
     universe = get_scored_universe() or {}
+    _ranks = lt_exit_policy.compute_ranks(universe)
 
     # Sector drift baseline (entry → now) sur l'ensemble des positions OPEN.
     positions_for_drift: list[dict[str, Any]] = []
