@@ -79,8 +79,8 @@ Rapport : [`docs/AUDIT_INTEGRAL_2026-09-17.md`](./docs/AUDIT_INTEGRAL_2026-09-17
 
 #### Tests
 
-- +27 tests (protection broker, sync, fusion journal, auto-approve gates,
-  killswitch freeze, cockpit). Suite : 1427.
+- +24 tests (protection broker, sync, fusion journal, auto-approve gates,
+  killswitch freeze, cockpit). Suite : 1410, garde-fou data prod actif.
 
 ---
 

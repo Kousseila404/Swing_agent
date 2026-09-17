@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, TypedDict
@@ -238,6 +239,7 @@ def _compute_period(
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
     active_filter: set[str] | None = None,
+    rank_fn: Callable[..., list[tuple[str, float]]] | None = None,
     book_size_usd: float = 100_000.0,
     impact_coef: float = 0.0,
     fallback_turnover_ratio: float = 0.005,
@@ -263,7 +265,9 @@ def _compute_period(
         (cash drag). Phase 3 audit — avant, la fraction uninvested rapportait
         0% → Sharpe surestimé. Maintenant on crédite (1 - Σw) × rf × period.
     """
-    top = _rank_top_n(snapshot_t, top_n, active_filter=active_filter)
+    # `rank_fn` (scoring_lab) : classement alternatif (profil de poids, pilier
+    # seul, bottom-N…) sans toucher au composite prod.
+    top = (rank_fn or _rank_top_n)(snapshot_t, top_n, active_filter=active_filter)
     top_tickers = [t for t, _ in top]
 
     px_t  = _extract_prices(snapshot_t,  top_tickers)
@@ -656,6 +660,7 @@ def run_titan_top_n(
     fallback_turnover_ratio: float = 0.005,
     restrict_to: list[str] | None = None,
     min_period_days: float = 7.0,
+    rank_fn: Callable[..., list[tuple[str, float]]] | None = None,
 ) -> BacktestResult:
     """Backtest complet du pipeline TITAN sur l'historique disponible.
 
@@ -815,6 +820,7 @@ def run_titan_top_n(
             impact_coef=impact_coef,
             fallback_turnover_ratio=fallback_turnover_ratio,
             period_days=actual_days,
+            rank_fn=rank_fn,
         )
         # Override les dates : signal_date doit refléter d0, pas la date
         # du snapshot ranking (sinon l'equity curve est désalignée).
