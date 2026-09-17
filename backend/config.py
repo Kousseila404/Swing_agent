@@ -104,12 +104,17 @@ MAX_HOLDING_DAYS = 60
 # JAMAIS et les gains se rendaient en retournement. 8 % active le TS plus
 # tôt et 40 % du gain locké donne un buffer raisonnable (vs 25 %
 # qui équivalait à un quasi-breakeven au moment de l'activation).
-TRAILING_STOP_ACTIVATION_PCT = 8.0   # plafond du seuil d'activation (sera utilisé
-                                      # si TP_distance × RATIO > 8 %)
+# Audit 2026-09-17 — activation 8 → 15 %, lock 40 → 30 %, ATR 2.5/3.0 → 4.0/4.0.
+# Sur les 9 trades clos système : WIN moyen +3,1 % (CF/INCY/NEM/EOG coupés à
+# +2,4…+4,5 % par le TS à 8 %/40 %) puis rachetés 2–3 semaines plus tard,
+# LOSS moyen −16 %. Avec des TP à +100 % et un plancher −35 %, verrouiller
+# 40 % d'un gain de 8 % (= +3 %) contredit la thèse LT : le TS ne doit
+# protéger que des gains substantiels (≥ 15 %) et laisser respirer (30 %).
+TRAILING_STOP_ACTIVATION_PCT = 15.0  # plafond du seuil d'activation (sera utilisé
+                                      # si TP_distance × RATIO > 15 %)
 TRAILING_STOP_ACTIVATION_RATIO = 0.5  # ratio du TP à partir duquel activer le trailing.
-                                      # Avec RATIO=0.5, un TP +16 % active le TS à +8 %.
-                                      # TP +30 % → TS activé à +15 % (cap 8 %=floor).
-TRAILING_STOP_LOCK_PCT       = 0.40  # verrouille 40 % du gain sous le SL
+                                      # TP +100 % → 50 % → capé à 15 %.
+TRAILING_STOP_LOCK_PCT       = 0.30  # verrouille 30 % du gain sous le SL
 #
 # Mode ATR-adaptatif (prioritaire si OHLCV dispo) :
 # ATR calculé sur 14 j → court terme ; on compense par un multiplicateur large
@@ -117,9 +122,8 @@ TRAILING_STOP_LOCK_PCT       = 0.40  # verrouille 40 % du gain sous le SL
 # Audit 2026-05-12 — ATR_ACTIVATION_MULT 3.5 → 2.5. Sur σ-30 %, ATR≈$2 →
 # 3.5×ATR=$7=+6 % → quasi équivalent à l'ancien plancher 15 %, donc TS ATR
 # rarement actif. 2.5×ATR cohérent avec activation_pct=8 %.
-TRAILING_STOP_ATR_ACTIVATION_MULT = 2.5   # active si profit $ ≥ 2.5 × ATR
-TRAILING_STOP_ATR_TRAIL_MULT      = 3.0   # SL = plus-haut − 3.0 × ATR (inchangé,
-                                            # buffer LT vs noise intraday)
+TRAILING_STOP_ATR_ACTIVATION_MULT = 4.0   # active si profit $ ≥ 4 × ATR (ET ≥ 15 %)
+TRAILING_STOP_ATR_TRAIL_MULT      = 4.0   # SL = prix − 4 × ATR (buffer LT vs bruit)
 
 # ─────────────────────────────────────────────────────────────────
 # 5ter. BEAR HEDGE (modules/bear_hedge.py) — audit 2026-05-12

@@ -41,12 +41,18 @@ import config  # noqa: E402
 from modules.utils import CSV_PATH, CSV_SCHEMA  # noqa: E402
 
 PROPOSALS_PATH = _BACKEND / "data" / "proposals.json"
-SINCE = datetime(2026, 4, 1, tzinfo=UTC)
+# Premier trade TITAN réel : NEM 2026-04-24. Avant : ordres de test (GOOGL/AAPL).
+SINCE = datetime(2026, 4, 24, tzinfo=UTC)
 
 _TRACKER_META_COLS = [
     "Last_Alert_Pct", "Last_TS_Update", "Last_TS_Mode", "Signal", "Sector",
-    "Reco_Entry", "Slippage_Bps", "Close_Reason", "Last_LT_Action",
-    "Last_LT_Date", "Last_LT_Severity",
+    "Reco_Entry", "Slippage_Bps", "Last_LT_Action", "Last_LT_Date",
+    "Last_LT_Severity",
+    # Scores d'entrée : les propositions d'avant août ont été purgées de
+    # proposals.json — l'ancien CSV (backfill_entry_scores) est la seule source.
+    "Titan_Score_Entry", "Quality_Entry", "Value_Entry", "Risk_Entry",
+    "Momentum_Entry", "Piotroski_Entry", "Growth_Entry", "F_Score_Entry",
+    "Tilt_Flags_Entry", "Confidence_Entry",
 ]
 _SCORE_COLS = {
     "Titan_Score_Entry": "titan_score", "Quality_Entry": "quality_score",
@@ -204,18 +210,16 @@ def build_rows(orders: list, positions: dict[str, float]) -> tuple[list[dict], l
                     row["RR"] = _fmt((t - e) / (e - s_), 2)
             except (TypeError, ValueError, ZeroDivisionError):
                 pass
-            # Métadonnées tracker préservées depuis l'ancien CSV
+            # Métadonnées tracker préservées depuis l'ancien CSV (par Order_ID).
+            # Le SL courant n'est PAS repris : le trailing stop est recalculé
+            # par le tracker avec les paramètres LT en vigueur (le SL bracket
+            # d'origine = plancher catastrophe).
             o_row = old.get(str(o.id))
             if o_row:
                 for c in _TRACKER_META_COLS:
                     if o_row.get(c) and not row.get(c):
                         row[c] = o_row[c]
-                # Un SL journal plus haut que l'initial = trailing stop appliqué → conserver
-                try:
-                    if o_row.get("Stop_Loss") and float(o_row["Stop_Loss"]) > float(row["Stop_Loss"] or 0):
-                        row["Stop_Loss"] = o_row["Stop_Loss"]
-                except (TypeError, ValueError):
-                    pass
+                row["_old_close_reason"] = o_row.get("Close_Reason") or ""
             rows.append(row)
             open_by_sym.setdefault(sym, []).append(row)
         else:  # sell fillé → clôture FIFO
@@ -237,7 +241,7 @@ def build_rows(orders: list, positions: dict[str, float]) -> tuple[list[dict], l
             elif t == "limit":
                 reason = "TP_HIT"
             else:
-                reason = row.get("Close_Reason") or "BROKER_SYNC"
+                reason = row.get("_old_close_reason") or "BROKER_SYNC"
                 if reason in ("", "BROKER_SYNC") and row.get("Last_TS_Mode"):
                     reason = "TRAILING_STOP"
             row["Close_Reason"] = reason
@@ -254,6 +258,8 @@ def build_rows(orders: list, positions: dict[str, float]) -> tuple[list[dict], l
     for sym in open_rows:
         if sym not in positions:
             notes.append(f"MISMATCH: {sym} OPEN dans le journal mais absent chez Alpaca")
+    for r in rows:
+        r.pop("_old_close_reason", None)
     rows.sort(key=lambda r: r["Date"])
     return rows, notes
 

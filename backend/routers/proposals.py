@@ -1005,6 +1005,8 @@ def _notify_new_proposals(items: list[dict[str, Any]]) -> None:
     except Exception:
         return
 
+    from html import escape as _esc
+
     from modules.signal_qualification import CONVICTION_BADGES
 
     n = len(items)
@@ -1017,14 +1019,17 @@ def _notify_new_proposals(items: list[dict[str, Any]]) -> None:
         badge = CONVICTION_BADGES.get(conviction) if isinstance(conviction, str) else None
         narrative = qualification.get("narrative")
 
-        detail = f" — {narrative}" if narrative else ""
+        # Audit 2026-09-17 (P2-1) — parse_mode=HTML : « TITAN 69 < 70 » dans le
+        # narratif était interprété comme une balise → HTTP 400 Telegram sur
+        # chaque refresh (6 échecs/7 j). Tout texte libre est échappé.
+        detail = f" — {_esc(str(narrative))}" if narrative else ""
         if not detail:
             score = ctx.get("titan_score")
             detail = f" — score {score:.1f}" if isinstance(score, (int, float)) else ""
 
         prefix = f"{badge} " if badge else ""
         lines.append(
-            f"• {prefix}<b>{p['ticker']}</b> ({p.get('sector') or '?'}) "
+            f"• {prefix}<b>{_esc(str(p['ticker']))}</b> ({_esc(str(p.get('sector') or '?'))}) "
             f"{p['size']} @ ${p['entry']:.2f}{detail}"
         )
     if n > 10:
