@@ -159,9 +159,9 @@ class PortfolioManager:
         # Validation : "hrp" → on délègue à compute_hrp_weights qui fallback
         # automatiquement sur risk_parity si scipy/data manquent.
         wm = (weighting_method or DEFAULT_WEIGHTING_METHOD).lower().strip()
-        if wm not in ("risk_parity", "hrp"):
+        if wm not in ("risk_parity", "hrp", "equal"):
             raise ValueError(
-                f"weighting_method must be 'risk_parity' or 'hrp', got {weighting_method!r}"
+                f"weighting_method must be 'risk_parity', 'hrp' or 'equal', got {weighting_method!r}"
             )
         self._weighting_method = wm
 
@@ -308,6 +308,14 @@ class PortfolioManager:
                 scored=scored_view,
                 market_provider=self._market_provider,
             )
+        elif self._weighting_method == "equal":
+            # Mode panier (audit 2026-09-17) : 1/N, fidèle au backtest qui a
+            # de l'edge. Les caps secteur/nom/corrélation s'appliquent ensuite.
+            n = max(1, len(priced))
+            weights = {t: 1.0 / n for t in priced}
+            vol_diag = {}
+            eq_fallback = True
+            hrp_diag = {"applied": False, "reason": "weighting_method=equal"}
         else:
             weights, vol_diag, eq_fallback = compute_weights(priced, scored=scored_view)
             hrp_diag = {"applied": False, "reason": "weighting_method=risk_parity"}

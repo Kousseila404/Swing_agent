@@ -265,8 +265,45 @@ def _ndx100_fallback() -> list[str]:
     return []
 
 
+_NASDAQ_API_NDX100 = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+
+
+def _fetch_ndx100_from_nasdaq_api() -> list[str]:
+    """Source primaire (2026-09-17) : API JSON officielle Nasdaq. [] si échec."""
+    try:
+        import httpx
+        r = httpx.get(
+            _NASDAQ_API_NDX100, timeout=20,
+            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) SwingQuant/1.0", "Accept": "application/json"},
+        )
+        r.raise_for_status()
+        rows = ((r.json().get("data") or {}).get("data") or {}).get("rows") or []
+        tickers = sorted({_normalize_ticker(str(x.get("symbol") or "")) for x in rows})
+        tickers = [t for t in tickers if t]
+        if 80 <= len(tickers) <= 120:
+            return tickers
+        logger.warning(f"[UniverseEngine] NDX100 API Nasdaq : {len(tickers)} tickers (hors plage) — ignoré")
+    except Exception as exc:
+        logger.warning(f"[UniverseEngine] NDX100 API Nasdaq indisponible : {exc}")
+    return []
+
+
+def _persist_ndx100_cache(tickers: list[str]) -> None:
+    try:
+        _NDX100_CACHE_PATH.write_text(json.dumps({
+            "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "tickers": tickers,
+        }), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def fetch_nasdaq100_tickers() -> list[str]:
-    """Scrape la table officielle Nasdaq-100 sur Wikipedia ; fallback cache/univers."""
+    """Nasdaq-100 : API Nasdaq (primaire) → table Wikipedia → cache/univers."""
+    api_tickers = _fetch_ndx100_from_nasdaq_api()
+    if api_tickers:
+        _persist_ndx100_cache(api_tickers)
+        return api_tickers
     html = _fetch_html(_WIKI_NDX100)
     tables = []
     if html is not None:
@@ -284,13 +321,7 @@ def fetch_nasdaq100_tickers() -> list[str]:
                 kept = sorted({t for t in tickers if t})
                 # Sanity check : Nasdaq-100 ≈ 100 tickers, tolère ±15
                 if 80 <= len(kept) <= 120:
-                    try:
-                        _NDX100_CACHE_PATH.write_text(json.dumps({
-                            "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                            "tickers": kept,
-                        }), encoding="utf-8")
-                    except Exception:
-                        pass
+                    _persist_ndx100_cache(kept)
                     return kept
     logger.warning("[UniverseEngine] NDX100 table Components introuvable sur Wikipedia — fallback")
     return _ndx100_fallback()

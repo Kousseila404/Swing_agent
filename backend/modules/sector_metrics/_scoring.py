@@ -149,15 +149,48 @@ _NEUTRAL_SCORE = 50.0
 # Signal fondamental académique robuste (Piotroski 2000, répliqué 20+ ans).
 # 9 % → 13 % (+4 % récupérés de Insider).
 # Composite IC ≈ 0 (20j) / −0.010 (30j) → Insider le diluait autant que Sentiment.
-_W_TITAN_QUALITY    = 0.18
-_W_TITAN_VALUE      = 0.13
-_W_TITAN_RISK       = 0.10
-_W_TITAN_SENTIMENT  = 0.00   # neutralisé — IC −0.108 (Lot 18)
-_W_TITAN_MOMENTUM   = 0.17   # +0.02 (Lot 18, IC +0.119)
-_W_TITAN_PIOTROSKI  = 0.13   # +0.04 (Lot 19, IC +0.038, 98 % fenêtres+)
-_W_TITAN_GROWTH     = 0.13
-_W_TITAN_REVISIONS  = 0.12   # +0.01 (Lot 18, IC +0.075 stable)
-_W_TITAN_INSIDER    = 0.04   # −0.04 (Lot 19, IC −0.040, 4 % fenêtres+)
+# ── Profils de pondération (audit 2026-09-17, Scoring Lab) ──────────────
+# Sélection par env `TITAN_WEIGHT_PROFILE` (défaut : "v14_1", inchangé).
+# Le Scoring Lab (`python -m modules.scoring_lab`) mesure chaque profil sur
+# la fenêtre live ; la prod ne change que via ce env, jamais en dur ici.
+WEIGHT_PROFILES: dict[str, dict[str, float]] = {
+    # V14.1 (Lots 18-19) : IC-driven, sentiment/insider quasi neutralisés.
+    "v14_1": {"quality": 0.18, "value": 0.13, "risk": 0.10, "sentiment": 0.00,
+              "momentum": 0.17, "piotroski": 0.13, "growth": 0.13,
+              "revisions": 0.12, "insider": 0.04},
+    # Équipondéré sur les 7 piliers à IC ≥ 0 (sentiment/insider exclus) :
+    # aucun paramètre ajusté sur la fenêtre → le moins « fitté » des profils.
+    "equal_7": {"quality": 1, "value": 1, "risk": 1, "sentiment": 0,
+                "momentum": 1, "piotroski": 1, "growth": 1, "revisions": 1, "insider": 0},
+    "equal_8": {"quality": 1, "value": 1, "risk": 1, "sentiment": 0,
+                "momentum": 1, "piotroski": 1, "growth": 1, "revisions": 1, "insider": 1},
+    "momentum_tilt": {"quality": 0.14, "value": 0.10, "risk": 0.08, "sentiment": 0.0,
+                      "momentum": 0.30, "piotroski": 0.13, "growth": 0.10,
+                      "revisions": 0.15, "insider": 0.0},
+}
+
+
+def _load_weight_profile() -> tuple[str, dict[str, float]]:
+    import os
+    name = (os.getenv("TITAN_WEIGHT_PROFILE") or "v14_1").strip()
+    raw = WEIGHT_PROFILES.get(name)
+    if raw is None:
+        logger.warning(f"[Scoring] TITAN_WEIGHT_PROFILE={name!r} inconnu — fallback v14_1")
+        name, raw = "v14_1", WEIGHT_PROFILES["v14_1"]
+    total = sum(raw.values()) or 1.0
+    return name, {k: v / total for k, v in raw.items()}
+
+
+ACTIVE_WEIGHT_PROFILE, _W = _load_weight_profile()
+_W_TITAN_QUALITY    = _W["quality"]
+_W_TITAN_VALUE      = _W["value"]
+_W_TITAN_RISK       = _W["risk"]
+_W_TITAN_SENTIMENT  = _W["sentiment"]
+_W_TITAN_MOMENTUM   = _W["momentum"]
+_W_TITAN_PIOTROSKI  = _W["piotroski"]
+_W_TITAN_GROWTH     = _W["growth"]
+_W_TITAN_REVISIONS  = _W["revisions"]
+_W_TITAN_INSIDER    = _W["insider"]
 
 # Pansement Sentiment — si reco+upside tous deux absents (FMP stable), on
 # renormalise Q/V/R/M/P/G/Revisions/Insider en préservant leur ratio relatif.

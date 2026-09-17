@@ -444,11 +444,13 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
     # échoue, le cycle continue sans ce signal.
     # Throttle : 1 check/heure suffit (le tracker fait 30 cycles/h en marché).
     scored_universe: dict[str, dict] = {}
+    _ranks: dict[str, int] = {}
     sector_drifts: dict[str, float] = {}
     if should_run_thesis_check():
         try:
             from modules.sector_metrics import get_scored_universe
             scored_universe = get_scored_universe() or {}
+            _ranks = lt_exit_policy.compute_ranks(scored_universe)
             if scored_universe:
                 positions_for_drift = []
                 for _, _r in open_trades.iterrows():
@@ -599,6 +601,8 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
                     confidence_score=_confidence.get("score"),
                     entry_confidence=_entry_conf,
                     insider_score=_current.get("insider_score") if _current else None,
+                    current_rank=_ranks.get(ticker),
+                    current_risk_pillar=_current.get("risk_score") if _current else None,
                 )
 
                 # Audit 2026-05-12 — persistance LT décision dans le CSV

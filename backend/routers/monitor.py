@@ -288,6 +288,8 @@ def _build_decisions_for_open_positions() -> tuple[list[dict[str, Any]], dict[st
                               if r.get("Confidence_Entry") not in (None, "", "nan") else None),
             # Insider signal Buffett — net sells persistents = TRIM.
             insider_score=info.get("insider_score") if info else None,
+            current_rank=_ranks.get(t),
+            current_risk_pillar=info.get("risk_score") if info else None,
         )
 
         # Niveaux théoriques σ-scaled (catastrophe_floor) — informatif.

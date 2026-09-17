@@ -78,6 +78,20 @@ ADD_ON_DRAWDOWN_FLOOR = -25.0
 # stop-out probable. On exige une marge minimale au-dessus du SL pour renforcer.
 # Mesuré comme (current − SL) / current × 100, cohérent avec `pct_to_sl` ailleurs.
 ADD_ON_MIN_BUFFER_TO_SL_PCT = 5.0
+# Audit 2026-09-17 — gates de classement relatif et de risque pour ADD_ON.
+ADD_ON_MAX_RANK = 40
+ADD_ON_MIN_RISK_PILLAR = 40.0
+
+
+def compute_ranks(scored_universe: dict[str, dict[str, Any]]) -> dict[str, int]:
+    """{ticker: rang} par `titan_composite_score` décroissant (1 = meilleur)."""
+    rows = []
+    for t, r in (scored_universe or {}).items():
+        v = (r or {}).get("titan_composite_score")
+        if isinstance(v, (int, float)) and math.isfinite(float(v)):
+            rows.append((t, float(v)))
+    rows.sort(key=lambda x: -x[1])
+    return {t: i + 1 for i, (t, _) in enumerate(rows)}
 
 # Drawdown depuis entrée déclenchant EXIT_CATASTROPHE même si SL pas
 # touché (clamp gap overnight + conviction perdue). Aligné sur _MAX_SL_PCT.
@@ -216,6 +230,8 @@ def decide(
     confidence_score: int | None = None,      # 0-100 (data_confidence courant)
     entry_confidence: int | None = None,      # 0-100 capturé à l'entrée
     insider_score: float | None = None,       # 0-100 (SEC EDGAR Form 4)
+    current_rank: int | None = None,          # rang TITAN courant dans l'univers (1 = meilleur)
+    current_risk_pillar: float | None = None, # pilier Risk courant (0-100)
 ) -> LTDecision:
     """Agrège les 4 couches en une recommandation LT unique.
 
@@ -442,6 +458,33 @@ def decide(
         )
 
     # ── 5. ADD_ON (« Be greedy when others are fearful ») ─────────
+    # Audit 2026-09-17 : jamais de renfort sur un name sorti du top-40 ou dont
+    # le pilier Risk s'est effondré (EIX : −23 %, rang #30, Risk 27 → ADD_ON
+    # suggéré). Un drift TITAN < 12 pts n'est pas une thèse « intacte » si le
+    # classement relatif et le risque disent le contraire.
+    rank_ok = current_rank is None or current_rank <= ADD_ON_MAX_RANK
+    risk_ok = current_risk_pillar is None or current_risk_pillar >= ADD_ON_MIN_RISK_PILLAR
+    if (
+        thesis_status == "INTACT"
+        and ADD_ON_DRAWDOWN_FLOOR <= drawdown <= ADD_ON_DRAWDOWN_THRESHOLD
+        and not (rank_ok and risk_ok)
+    ):
+        why = []
+        if not rank_ok:
+            why.append(f"rang TITAN #{current_rank} > {ADD_ON_MAX_RANK}")
+        if not risk_ok:
+            why.append(f"pilier Risk {current_risk_pillar:.0f} < {ADD_ON_MIN_RISK_PILLAR:.0f}")
+        return LTDecision(
+            ticker=ticker, action="HOLD", severity=1,
+            reasons=[
+                f"Drawdown {drawdown:+.1f}% sans cassure fondamentale, mais pas de renfort : "
+                + ", ".join(why),
+            ],
+            pct_gain=round(pct_gain, 2),
+            drawdown_from_entry_pct=round(drawdown, 2),
+            thesis_status=thesis_status, valuation_drift=valuation_drift,
+            peg_ratio=current_peg_ratio, catastrophe_hit=False,
+        )
     # Thèse INTACT + correction modérée + Support ON/NEAR → renfort.
     add_on_zone = (
         thesis_status == "INTACT"
