@@ -167,7 +167,7 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
                 top_n=top_n, benchmark=None, slippage_bps=BASKET_SLIPPAGE_BPS,
                 publication_lag_days=5,
             )
-            d: dict[str, Any] = res.to_dict() if hasattr(res, "to_dict") else dict(res)  # type: ignore[arg-type]
+            d: dict[str, Any] = res.to_dict()
             periods = [p for p in (d.get("periods") or []) if str(p.get("signal_date", "")) >= LIVE_START.isoformat()]
         except Exception as exc:
             logger.warning(f"[PerfBenchmark] backtest panier échoué : {exc}")
@@ -261,12 +261,14 @@ def build_benchmark(months: int = 6, top_n: int = BASKET_TOP_N, start: date | No
 
     candidates = [d for d, _ in acct] + [d for d, _ in basket_pts]
     if start is None:
+        # Même point de départ pour les trois séries : le plus tardif des
+        # débuts disponibles (compte financé / premier signal live).
+        starts = [LIVE_START]
         if acct:
-            start = max(date.fromisoformat(acct[0][0]), LIVE_START)
-        elif basket_pts:
-            start = date.fromisoformat(basket_pts[0][0])
-        else:
-            start = LIVE_START
+            starts.append(date.fromisoformat(acct[0][0]))
+        if basket_pts:
+            starts.append(date.fromisoformat(basket_pts[0][0]))
+        start = max(starts)
     end = date.today()
     spy = spy_series(start, end)
 
