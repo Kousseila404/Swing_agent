@@ -368,6 +368,34 @@ def save_equity_snapshot(df: pd.DataFrame) -> None:
     )
 
 
+def freeze_new_entries(df: pd.DataFrame) -> None:
+    """Killswitch mode « freeze » (audit 2026-09-17) — gèle les nouvelles
+    entrées sans liquider. Pose TRADING_BLOCKED=True (avec peak pour
+    l'hysteresis de relevage) et alerte Telegram CRITICAL ; les positions
+    OPEN restent gérées par leurs stops individuels."""
+    try:
+        peak = estimate_portfolio_equity(df)
+    except Exception:
+        peak = None
+    _set_trading_blocked(True, peak_equity=peak)
+    n_open = int((df["Status"] == "OPEN").sum())
+    logger.critical(
+        f"[KILLSWITCH] Drawdown journalier ≥ seuil — nouvelles entrées GELÉES "
+        f"({n_open} position(s) conservée(s), stops individuels actifs). "
+        "Relevage automatique après récupération ≥ 96 % du peak."
+    )
+    try:
+        from modules.alerter import _send_telegram_message
+        _send_telegram_message(
+            "🧊 <b>KILLSWITCH — entrées gelées</b>\n"
+            f"Drawdown journalier ≥ {float(getattr(config, 'MAX_DAILY_DRAWDOWN_PCT', 6.0)):.1f} %. "
+            f"{n_open} position(s) conservée(s), stops broker actifs. "
+            "Aucune nouvelle entrée tant que l'equity n'a pas récupéré."
+        )
+    except Exception as exc:
+        logger.debug(f"[KILLSWITCH] Telegram : {exc}")
+
+
 def emergency_liquidate_all(df: pd.DataFrame) -> pd.DataFrame:
     """NUCLEAR STOP — ferme toutes les positions OPEN + pose TRADING_BLOCKED=True.
 

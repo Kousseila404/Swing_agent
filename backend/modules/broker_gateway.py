@@ -196,6 +196,10 @@ class PaperBroker(BrokerGateway):
     def name(self) -> str:
         return "PaperBroker (CSV)"
 
+    def ensure_protective_stops(self, open_rows: list[dict]) -> list[dict]:
+        """Paper : aucun ordre broker → rien à ré-armer (parité d'interface)."""
+        return []
+
     def submit_order(self, scan) -> OrderResult:
         """
         Journalise le trade dans trade_journal.csv.

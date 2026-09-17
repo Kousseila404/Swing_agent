@@ -193,12 +193,35 @@ def test_check_daily_drawdown_below_threshold(monkeypatch, _isolate_paths: Path)
 
 
 def test_check_daily_drawdown_exceeds_threshold(monkeypatch, _isolate_paths: Path):
-    """DD -5% ≥ seuil -4% → True (killswitch!)."""
+    """DD -7% ≥ seuil -6% (LT, audit 2026-09-17) → True (killswitch!)."""
+    (_isolate_paths / "equity_state.json").write_text(json.dumps({
+        "starting_equity": 100_000, "date": date.today().isoformat(),
+    }))
+    monkeypatch.setattr(killswitch, "estimate_portfolio_equity", lambda df: 93_000)
+    assert killswitch.check_daily_drawdown(_df()) is True
+
+
+def test_check_daily_drawdown_minus_five_is_not_enough_for_lt(monkeypatch, _isolate_paths: Path):
+    """DD -5% < seuil -6% → False : une séance S&P à -4/-5 % ne doit plus
+    déclencher le killswitch sur un book long terme."""
     (_isolate_paths / "equity_state.json").write_text(json.dumps({
         "starting_equity": 100_000, "date": date.today().isoformat(),
     }))
     monkeypatch.setattr(killswitch, "estimate_portfolio_equity", lambda df: 95_000)
-    assert killswitch.check_daily_drawdown(_df()) is True
+    assert killswitch.check_daily_drawdown(_df()) is False
+
+
+def test_freeze_new_entries_blocks_without_closing(monkeypatch, _isolate_paths: Path):
+    """Mode freeze : trading_state.blocked=True, positions OPEN intactes."""
+    monkeypatch.setattr(killswitch, "estimate_portfolio_equity", lambda df: 94_000)
+    import modules.alerter as _al
+    monkeypatch.setattr(_al, "_send_telegram_message", lambda *a, **k: None)
+    df = _df()
+    killswitch.freeze_new_entries(df)
+    assert (df["Status"] == "OPEN").sum() == 1
+    assert killswitch.is_trading_allowed() is False
+    state = json.loads((_isolate_paths / "trading_state.json").read_text())
+    assert state["blocked"] is True and state["peak_equity"] == 94_000
 
 
 # ─────────────────────────────────────────────────────────────────
