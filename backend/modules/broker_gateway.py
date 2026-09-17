@@ -811,15 +811,30 @@ class AlpacaBroker(BrokerGateway):
         return "sell" if str(direction or "LONG").upper() == "LONG" else "buy"
 
     def _open_orders_for(self, client, ticker: str) -> list:
-        """Ordres ouverts (accepted/new/held…) pour un symbole. Fail-open → []."""
+        """Ordres ouverts (accepted/new/held…) pour un symbole, **jambes
+        incluses** (nested=True puis aplatissement des `legs`). Fail-open → [].
+
+        Sans l'aplatissement, la jambe STOP d'un OCO (enfant du LIMIT parent)
+        était invisible → ré-armement à chaque cycle (bug vu en prod le
+        17/09 : MU/EIX OCO annulé/recréé toutes les 2 min).
+        """
         try:
             from alpaca.trading.enums import QueryOrderStatus
             from alpaca.trading.requests import GetOrdersRequest
-            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[ticker], limit=50)
-            return list(client.get_orders(filter=req) or [])
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[ticker], limit=50, nested=True)
+            top = list(client.get_orders(filter=req) or [])
         except Exception as exc:
             logger.warning(f"[AlpacaBroker] get_orders(OPEN) {ticker} : {exc}")
             return []
+        flat: list = []
+        for o in top:
+            flat.append(o)
+            for leg in (getattr(o, "legs", None) or []):
+                st = str(getattr(leg, "status", "") or "").lower()
+                if any(x in st for x in ("canceled", "expired", "filled", "rejected", "replaced")):
+                    continue
+                flat.append(leg)
+        return flat
 
     @staticmethod
     def _order_side(order) -> str:

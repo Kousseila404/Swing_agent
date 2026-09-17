@@ -76,14 +76,19 @@ logger.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
 # Idempotence : si le module est ré-importé (ex. tests, reload uvicorn), on
 # évite la duplication des handlers (sinon chaque log s'affiche N fois).
 if not logger.handlers:
-    fh = logging.handlers.RotatingFileHandler(
-        config.LOG_FILE,
-        maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=3,
-        encoding="utf-8",
-    )
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
+    # Audit 2026-09-17 (P2-2) — sous pytest, pas de handler fichier : la suite
+    # polluait logs/agent.log de centaines de lignes CRITICAL factices
+    # (breaker yfinance simulé, « disk full »…) qui faussaient les audits.
+    import sys as _sys
+    if "pytest" not in _sys.modules:
+        fh = logging.handlers.RotatingFileHandler(
+            config.LOG_FILE,
+            maxBytes=10 * 1024 * 1024,  # 10 MB
+            backupCount=3,
+            encoding="utf-8",
+        )
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
 
     ch = logging.StreamHandler()
     ch.setFormatter(formatter)
