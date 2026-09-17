@@ -267,15 +267,25 @@ def test_evaluate_long_trailing_stop_NOT_triggered_at_5pct_default(monkeypatch):
 
 
 def test_evaluate_long_trailing_stop_triggered_at_20pct_default(monkeypatch):
-    """Audit 2026-05-12 — defaults (activation 8 %, lock 40 %).
-    À +20 %, le TS active et lock 40 % du gain : new_sl = 100 + 20×0.40 = 108.
+    """Audit 2026-09-17 — defaults LT (activation 15 %, lock 30 %).
+    À +20 %, le TS active et lock 30 % du gain : new_sl = 100 + 20×0.30 = 106.
     """
     monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 120.0)
     df = _df(_open_trade(Entry=100, Stop_Loss=95, Take_Profit=140))
     out, closed, modified = evaluation.evaluate_trades(df)
     assert closed == 0
     assert modified == 1
-    assert out.iloc[0]["Stop_Loss"] == pytest.approx(108.0)
+    assert out.iloc[0]["Stop_Loss"] == pytest.approx(106.0)
+
+
+def test_evaluate_long_trailing_stop_not_active_at_12pct(monkeypatch):
+    """Audit 2026-09-17 — à +12 % (sous le seuil 15 %), le TS ne bouge pas :
+    les gagnants ne doivent plus être coupés à +3 %."""
+    monkeypatch.setattr(evaluation, "get_current_price", lambda _t: 112.0)
+    df = _df(_open_trade(Entry=100, Stop_Loss=65, Take_Profit=200))
+    out, closed, modified = evaluation.evaluate_trades(df)
+    assert closed == 0 and modified == 0
+    assert out.iloc[0]["Stop_Loss"] == pytest.approx(65.0)
 
 
 # ─────────────────────────────────────────────────────────────────
