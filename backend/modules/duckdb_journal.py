@@ -84,9 +84,13 @@ _LOCK = threading.Lock()
 # ─────────────────────────────────────────────────────────────────
 
 @contextmanager
-def get_conn(db_path: Path | str = DUCKDB_PATH, read_only: bool = False):
-    """Context manager sur connexion DuckDB. Crée le parent dir si besoin."""
-    path = Path(db_path)
+def get_conn(db_path: Path | str | None = None, read_only: bool = False):
+    """Context manager sur connexion DuckDB. Crée le parent dir si besoin.
+
+    `db_path=None` → `DUCKDB_PATH` résolu à l'appel (pas à l'import) : les
+    tests qui monkeypatchent `DUCKDB_PATH` sont respectés (audit 2026-09-17,
+    P2-2 — pytest écrivait dans la DB prod via les defaults liés à l'import)."""
+    path = Path(DUCKDB_PATH if db_path is None else db_path)
     if not read_only:
         path.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(str(path), read_only=read_only)
@@ -96,7 +100,8 @@ def get_conn(db_path: Path | str = DUCKDB_PATH, read_only: bool = False):
         conn.close()
 
 
-def ensure_schema(db_path: Path | str = DUCKDB_PATH) -> None:
+def ensure_schema(db_path: Path | str | None = None) -> None:
+    db_path = DUCKDB_PATH if db_path is None else db_path
     """Crée la table trade_journal si absente, avec schéma canonique."""
     cols_def = ", ".join(f'"{col}" {_COLUMN_TYPES[col]}' for col in CSV_SCHEMA)
     with get_conn(db_path) as conn:
@@ -143,7 +148,8 @@ def _coerce(col: str, raw: Any) -> Any:
 # casser le pipeline de trading qui repose sur le CSV)
 # ─────────────────────────────────────────────────────────────────
 
-def shadow_insert(row: dict[str, Any], db_path: Path | str = DUCKDB_PATH) -> bool:
+def shadow_insert(row: dict[str, Any], db_path: Path | str | None = None) -> bool:
+    db_path = DUCKDB_PATH if db_path is None else db_path
     """Insère un trade dans DuckDB. Retourne True si OK, False sinon (fail-open).
 
     Phase 7 audit (2026-05-06) — BEGIN/COMMIT explicites pour garantir
@@ -176,8 +182,9 @@ def shadow_update_status(
     status: str,
     exit_price: float,
     exit_date: str,
-    db_path: Path | str = DUCKDB_PATH,
+    db_path: Path | str | None = None,
 ) -> bool:
+    db_path = DUCKDB_PATH if db_path is None else db_path
     """Met à jour la dernière position OPEN d'un ticker. Fail-open.
 
     Phase 7 audit — BEGIN/COMMIT explicites (cf. shadow_insert).
@@ -214,9 +221,11 @@ def shadow_update_status(
 # ─────────────────────────────────────────────────────────────────
 
 def sync_from_csv(
-    csv_path: Path | str = CSV_PATH,
-    db_path: Path | str = DUCKDB_PATH,
+    csv_path: Path | str | None = None,
+    db_path: Path | str | None = None,
 ) -> dict[str, int]:
+    db_path = DUCKDB_PATH if db_path is None else db_path
+    csv_path = CSV_PATH if csv_path is None else csv_path
     """Reconstruit entièrement trade_journal.duckdb depuis la CSV source de vérité.
 
     Stratégie : écrire dans un fichier `.tmp` puis `rename()` atomique.
@@ -287,7 +296,8 @@ def sync_from_csv(
 # READ-ONLY ANALYTICS HELPER
 # ─────────────────────────────────────────────────────────────────
 
-def query(sql: str, db_path: Path | str = DUCKDB_PATH) -> list[dict]:
+def query(sql: str, db_path: Path | str | None = None) -> list[dict]:
+    db_path = DUCKDB_PATH if db_path is None else db_path
     """Exécute une requête SQL en lecture seule, retourne list[dict]."""
     ensure_schema(db_path)
     with get_conn(db_path, read_only=True) as conn:
@@ -311,7 +321,8 @@ _DF_CACHE: dict[str, Any] = {"mtime": None, "csv_key": None, "df": None}
 _DF_CACHE_LOCK = threading.Lock()
 
 
-def journal_mtime(csv_path: Path | str = CSV_PATH) -> float | None:
+def journal_mtime(csv_path: Path | str | None = None) -> float | None:
+    csv_path = CSV_PATH if csv_path is None else csv_path
     """Renvoie la mtime de la CSV source — utilisée comme ETag côté API.
     None si le fichier n'existe pas."""
     p = Path(csv_path)
@@ -322,9 +333,11 @@ def journal_mtime(csv_path: Path | str = CSV_PATH) -> float | None:
 
 
 def _ensure_fresh(
-    csv_path: Path | str = CSV_PATH,
-    db_path: Path | str = DUCKDB_PATH,
+    csv_path: Path | str | None = None,
+    db_path: Path | str | None = None,
 ) -> None:
+    db_path = DUCKDB_PATH if db_path is None else db_path
+    csv_path = CSV_PATH if csv_path is None else csv_path
     """Synchronise DuckDB depuis la CSV si celle-ci est plus récente.
 
     Fail-open : toute exception est silencieuse — le caller fallbackera
@@ -346,9 +359,11 @@ def _ensure_fresh(
 
 
 def read_journal_df(
-    csv_path: Path | str = CSV_PATH,
-    db_path: Path | str = DUCKDB_PATH,
+    csv_path: Path | str | None = None,
+    db_path: Path | str | None = None,
 ) -> pd.DataFrame:
+    db_path = DUCKDB_PATH if db_path is None else db_path
+    csv_path = CSV_PATH if csv_path is None else csv_path
     """Retourne le trade_journal complet en DataFrame de strings.
 
     Drop-in replacement pour `pd.read_csv(CSV_PATH, dtype=str)`.
