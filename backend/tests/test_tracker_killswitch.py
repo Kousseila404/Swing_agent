@@ -216,7 +216,8 @@ def test_freeze_new_entries_blocks_without_closing(monkeypatch, _isolate_paths: 
     monkeypatch.setattr(killswitch, "estimate_portfolio_equity", lambda df: 94_000)
     import modules.alerter as _al
     monkeypatch.setattr(_al, "_send_telegram_message", lambda *a, **k: None)
-    df = _df()
+    df = _df({"Ticker": "AAPL", "Direction": "LONG", "Entry": 100, "Size": 10,
+              "Exit_Price": "", "Status": "OPEN"})
     killswitch.freeze_new_entries(df)
     assert (df["Status"] == "OPEN").sum() == 1
     assert killswitch.is_trading_allowed() is False
