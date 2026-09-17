@@ -461,27 +461,47 @@ class AlpacaBroker(BrokerGateway):
 
             side = OrderSide.BUY if scan.direction == "LONG" else OrderSide.SELL
 
-            # Lot 14 — Fix bracket DAY expiry :
-            # AVANT : LimitOrderRequest(TIF=DAY) → si limit_price jamais touché
-            # avant market close, ordre expire sans fill → CSV = OPEN fantôme.
-            # (Exactement ce qui est arrivé aux 6 ordres du 14-15/04.)
-            # MAINTENANT : MarketOrderRequest(TIF=DAY) + bracket → fill au market
-            # open ou immédiat en heures de marché. Si soumis weekend → queue
-            # pour la prochaine ouverture (pas d'expiry silencieux).
+            # Audit 2026-09-17 (P0-1) — bracket **GTC**, pas DAY.
+            # AVANT : TimeInForce.DAY → le parent market fillait à l'ouverture,
+            # puis les jambes SL/TP (elles aussi DAY) étaient annulées/expirées
+            # par Alpaca à 16:00 NY le jour même. Preuve : 100 % des jambes
+            # STOP depuis juillet ont `canceled_at = 20:0x UTC` ; aucun ordre
+            # stop n'existait chez le broker sur 6 positions ouvertes.
+            # Pour une détention de 60 j+, la protection doit survivre à la
+            # clôture : GTC. Le parent market GTC hors séance reste en queue
+            # jusqu'à l'ouverture (le gate horaire ci-dessus empêche ce cas).
+            # `client_order_id` déterministe : permet à la réconciliation de
+            # relier parent/enfants sans dépendre d'une recherche par symbole.
+            client_order_id = _make_client_order_id(scan.ticker)
             order_data = MarketOrderRequest(
-                symbol        = scan.ticker,
-                qty           = scan.position_size,
-                side          = side,
-                time_in_force = TimeInForce.DAY,
-                order_class   = "bracket",
-                take_profit   = TakeProfitRequest(limit_price=round(scan.take_profit, 2)),
-                stop_loss     = StopLossRequest(stop_price=round(scan.stop_loss, 2)),
+                symbol          = scan.ticker,
+                qty             = scan.position_size,
+                side            = side,
+                time_in_force   = TimeInForce.GTC,
+                order_class     = "bracket",
+                client_order_id = client_order_id,
+                take_profit     = TakeProfitRequest(limit_price=round(scan.take_profit, 2)),
+                stop_loss       = StopLossRequest(stop_price=round(scan.stop_loss, 2)),
             )
 
             order = client.submit_order(order_data=order_data)
             order_id  = str(order.id)
             filled_at = float(order.filled_avg_price or 0)
             order_status = str(getattr(order, "status", "")).lower()
+
+            # Vérification des jambes : un bracket sans jambe STOP est une
+            # position nue. On log en ERROR (le tracker ré-armera via
+            # ensure_protective_stops au cycle suivant, cf. cycle.py).
+            try:
+                legs = list(getattr(order, "legs", None) or [])
+                leg_types = {str(getattr(leg, "type", "")).lower() for leg in legs}
+                if legs and not any("stop" in t for t in leg_types):
+                    logger.error(
+                        f"[AlpacaBroker] {scan.ticker} bracket {order_id} sans jambe STOP "
+                        f"(legs={sorted(leg_types)}) — ré-armement attendu au prochain cycle."
+                    )
+            except Exception as _leg_exc:
+                logger.debug(f"[AlpacaBroker] legs check {scan.ticker} : {_leg_exc}")
 
             logger.info(
                 f"[AlpacaBroker] Ordre soumis {scan.ticker} {scan.direction} "
