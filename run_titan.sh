@@ -235,6 +235,18 @@ fi
 #     Évalue les gates (killswitch, CB, régime macro, slots libres, cash)
 #     et enqueue jusqu'à N propositions à valider manuellement dans l'UI.
 #     Skipped silencieusement si API_TOKEN absent (auth fail-closed côté API).
+echo "── Step 3e/4 : warm /api/performance/benchmark (panier TITAN théorique, cache 12h)"
+WARM_TOKEN="${API_TOKEN:-}"
+if [[ -z "$WARM_TOKEN" && -f "$BACKEND/.env" ]]; then
+    WARM_TOKEN=$(grep -E '^API_TOKEN=' "$BACKEND/.env" | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+fi
+if [[ -n "$WARM_TOKEN" ]]; then
+    curl --silent --show-error --fail --max-time 180 \
+        -H "Authorization: Bearer ${WARM_TOKEN}" \
+        "$API_URL/api/performance/benchmark?months=6&top_n=20" \
+        -o /dev/null -w "benchmark http=%{http_code} time=%{time_total}s\n" || echo "WARN: warm benchmark failed (non bloquant)"
+fi
+
 echo "── Step 4/4 : POST /api/proposals/refresh"
 rc_props=0
 if [[ -z "${API_TOKEN:-}" ]]; then
