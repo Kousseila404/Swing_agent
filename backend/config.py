@@ -184,6 +184,26 @@ BASKET_EXIT_RANK         = int(os.getenv("BASKET_EXIT_RANK", "40"))
 BASKET_EXIT_CONFIRM_DAYS = int(os.getenv("BASKET_EXIT_CONFIRM_DAYS", "5"))
 BASKET_MAX_EXITS_PER_RUN = 3
 
+# Exécution (2026-09-17) : entrée en limite marketable (ask × 1,003), gate de
+# spread 0,5 %, remplacement par un market bracket après 60 min sans fill.
+EXEC_ENTRY_TYPE          = os.getenv("EXEC_ENTRY_TYPE", "limit")     # "limit" | "market"
+EXEC_LIMIT_OFFSET_PCT    = float(os.getenv("EXEC_LIMIT_OFFSET_PCT", "0.3"))
+EXEC_MAX_SPREAD_PCT      = float(os.getenv("EXEC_MAX_SPREAD_PCT", "0.5"))
+EXEC_LIMIT_MAX_AGE_MIN   = int(os.getenv("EXEC_LIMIT_MAX_AGE_MIN", "60"))
+
+# Rebalance des poids vers 1/N (mensuel, premier jour de bourse) si l'écart
+# d'une ligne dépasse REBALANCE_BAND_PTS points de poids.
+REBALANCE_BAND_PTS       = float(os.getenv("REBALANCE_BAND_PTS", "2.0"))
+REBALANCE_MIN_TRADE_USD  = float(os.getenv("REBALANCE_MIN_TRADE_USD", "300"))
+
+# Stop de portefeuille : drawdown 60 séances de l'equity ≤ −15 % → gel des entrées.
+PORTFOLIO_STOP_DD_PCT    = float(os.getenv("PORTFOLIO_STOP_DD_PCT", "-15"))
+PORTFOLIO_STOP_WINDOW_D  = 60
+
+# Passage progressif en réel : fraction du capital déployée quand le broker est
+# en URL live (1.0 = tout). Sans effet en paper.
+LIVE_CAPITAL_FRACTION    = float(os.getenv("LIVE_CAPITAL_FRACTION", "0.10"))
+
 # ─────────────────────────────────────────────────────────────────
 # 6. LOGGING
 # ─────────────────────────────────────────────────────────────────

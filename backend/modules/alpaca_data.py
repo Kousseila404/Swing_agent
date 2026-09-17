@@ -295,3 +295,26 @@ def _yfinance_batch_prices(tickers: list[str]) -> dict[str, float]:
     except Exception as exc:
         logger.warning(f"[AlpacaData] _yfinance_batch_prices erreur : {exc}")
     return result
+
+
+def get_latest_quote(ticker: str) -> dict | None:
+    """{bid, ask, mid, spread_pct} — cotation NBBO Alpaca (IEX en plan gratuit).
+    None si client absent ou quote incomplète. Utilisé par le gate de spread."""
+    client = _get_alpaca_client()
+    if client is None:
+        return None
+    try:
+        from alpaca.data.requests import StockLatestQuoteRequest
+        quotes = client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=[ticker]))
+        q = quotes.get(ticker)
+        if q is None:
+            return None
+        bid = float(q.bid_price or 0)
+        ask = float(q.ask_price or 0)
+        if bid <= 0 or ask <= 0:
+            return None
+        mid = (bid + ask) / 2.0
+        return {"bid": bid, "ask": ask, "mid": mid, "spread_pct": round((ask - bid) / mid * 100.0, 3)}
+    except Exception as exc:
+        logger.debug(f"[AlpacaData] get_latest_quote({ticker}) : {exc}")
+        return None

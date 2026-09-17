@@ -483,7 +483,12 @@ class AlpacaBroker(BrokerGateway):
         """
         try:
             from alpaca.trading.enums import OrderSide, TimeInForce
-            from alpaca.trading.requests import MarketOrderRequest, StopLossRequest, TakeProfitRequest
+            from alpaca.trading.requests import (
+                LimitOrderRequest,
+                MarketOrderRequest,
+                StopLossRequest,
+                TakeProfitRequest,
+            )
 
             client = self._get_client()
 
@@ -510,6 +515,14 @@ class AlpacaBroker(BrokerGateway):
 
             side = OrderSide.BUY if scan.direction == "LONG" else OrderSide.SELL
 
+            # Exécution intelligente (2026-09-17) — gate de spread + entrée limite.
+            quote = self.get_quote(scan.ticker)
+            max_spread = float(getattr(config, "EXEC_MAX_SPREAD_PCT", 0.5))
+            if quote and quote.get("spread_pct") is not None and quote["spread_pct"] > max_spread:
+                msg = f"spread {quote['spread_pct']:.2f}% > {max_spread:.2f}% — entrée différée"
+                logger.warning(f"[AlpacaBroker] {scan.ticker} refusé : {msg}")
+                return OrderResult(success=False, ticker=scan.ticker, order_id="", message=msg)
+
             # Audit 2026-09-17 (P0-1) — bracket **GTC**, pas DAY.
             # AVANT : TimeInForce.DAY → le parent market fillait à l'ouverture,
             # puis les jambes SL/TP (elles aussi DAY) étaient annulées/expirées
@@ -522,16 +535,38 @@ class AlpacaBroker(BrokerGateway):
             # `client_order_id` déterministe : permet à la réconciliation de
             # relier parent/enfants sans dépendre d'une recherche par symbole.
             client_order_id = _make_client_order_id(scan.ticker)
-            order_data = MarketOrderRequest(
-                symbol          = scan.ticker,
-                qty             = scan.position_size,
-                side            = side,
-                time_in_force   = TimeInForce.GTC,
-                order_class     = "bracket",
-                client_order_id = client_order_id,
-                take_profit     = TakeProfitRequest(limit_price=round(scan.take_profit, 2)),
-                stop_loss       = StopLossRequest(stop_price=round(scan.stop_loss, 2)),
-            )
+            entry_type = str(getattr(config, "EXEC_ENTRY_TYPE", "limit")).lower()
+            ref_px = float((quote or {}).get("ask" if side == OrderSide.BUY else "bid") or 0) or float(scan.price or 0)
+            order_data: Any
+            if entry_type == "limit" and ref_px > 0:
+                # Limite « marketable » : ask × (1 + offset) à l'achat — fill
+                # immédiat en conditions normales, protège d'un pic à l'ouverture.
+                # Non fillée après EXEC_LIMIT_MAX_AGE_MIN → sweep_unfilled_entries
+                # la remplace par un market bracket.
+                offset = float(getattr(config, "EXEC_LIMIT_OFFSET_PCT", 0.3)) / 100.0
+                limit_px = round(ref_px * (1 + offset), 2) if side == OrderSide.BUY else round(ref_px * (1 - offset), 2)
+                order_data = LimitOrderRequest(
+                    symbol          = scan.ticker,
+                    qty             = scan.position_size,
+                    side            = side,
+                    time_in_force   = TimeInForce.GTC,
+                    order_class     = "bracket",
+                    limit_price     = limit_px,
+                    client_order_id = client_order_id,
+                    take_profit     = TakeProfitRequest(limit_price=round(scan.take_profit, 2)),
+                    stop_loss       = StopLossRequest(stop_price=round(scan.stop_loss, 2)),
+                )
+            else:
+                order_data = MarketOrderRequest(
+                    symbol          = scan.ticker,
+                    qty             = scan.position_size,
+                    side            = side,
+                    time_in_force   = TimeInForce.GTC,
+                    order_class     = "bracket",
+                    client_order_id = client_order_id,
+                    take_profit     = TakeProfitRequest(limit_price=round(scan.take_profit, 2)),
+                    stop_loss       = StopLossRequest(stop_price=round(scan.stop_loss, 2)),
+                )
 
             order = client.submit_order(order_data=order_data)
             order_id  = str(order.id)
@@ -989,6 +1024,24 @@ class AlpacaBroker(BrokerGateway):
             orders = self._open_orders_for(client, ticker)
             existing = self._find_open_stop(orders, direction)
             if existing is not None:
+                # Dérive de quantité (rebalance / partial fill) : la jambe doit
+                # couvrir toute la position → on la ré-arme à la bonne qty.
+                try:
+                    bq = float(getattr(existing, "qty", 0) or 0)
+                    pq = abs(float(positions[ticker].qty))
+                except (TypeError, ValueError):
+                    bq, pq = 0.0, 0.0
+                if bq > 0 and pq > 0 and abs(bq - pq) >= 1:
+                    try:
+                        client.cancel_order_by_id(str(existing.id))
+                        oid = self._arm_stop(client, ticker, sl or float(getattr(existing, "stop_price", 0) or 0),
+                                             direction, take_profit=tp, qty=pq)
+                        actions.append({"ticker": ticker, "stop_price": sl, "take_profit": tp, "order_id": oid,
+                                        "fallback": False, "ok": oid is not None, "realigned": True, "qty": pq})
+                        logger.info(f"[AlpacaBroker] 🛡️ {ticker} stop qty {bq:g} → {pq:g} (rebalance)")
+                    except Exception as exc:
+                        logger.warning(f"[AlpacaBroker] réarmement qty {ticker} : {exc}")
+                    continue
                 # Dérive niveau journal ↔ broker (> 1 %) : après une
                 # reconstruction du journal ou un édit manuel, le stop broker
                 # doit suivre le journal (source de vérité du tracker).
@@ -1028,6 +1081,212 @@ class AlpacaBroker(BrokerGateway):
                 "order_id": oid, "fallback": fallback, "ok": oid is not None,
             })
         return actions
+
+    # ─────────────────────────────────────────────────────────────
+    # Exécution intelligente (2026-09-17, améliorations post-audit)
+    # ─────────────────────────────────────────────────────────────
+
+    def get_quote(self, ticker: str) -> dict | None:
+        """{bid, ask, mid, spread_pct} via Alpaca Data ; None si indisponible."""
+        try:
+            from modules.alpaca_data import get_latest_quote
+            return get_latest_quote(ticker)
+        except Exception as exc:
+            logger.debug(f"[AlpacaBroker] quote {ticker} : {exc}")
+            return None
+
+    def sweep_unfilled_entries(self, max_age_min: int | None = None) -> dict:
+        """Réconcilie les entrées : corrige `Entry` avec le fill réel, remplace
+        les ordres limites non fillés après `max_age_min` par un market bracket.
+
+        Appelé à chaque cycle tracker. Le journal écrit `Entry=prix proposé` au
+        moment du submit (fill inconnu) : sans ce sweep, le PnL du journal
+        partait d'un prix faux (MU : 1003,58 journal vs 1007,74 réel).
+        """
+        import pandas as pd
+        from filelock import FileLock
+
+        max_age = int(max_age_min if max_age_min is not None else getattr(config, "EXEC_LIMIT_MAX_AGE_MIN", 60))
+        result: dict = {"entry_fixed": [], "replaced": [], "canceled": []}
+        try:
+            client = self._get_client()
+            try:
+                market_open = bool(client.get_clock().is_open)
+            except Exception:
+                market_open = False
+            with FileLock(str(CSV_LOCK_PATH), timeout=10):
+                ensure_csv_schema(CSV_PATH)
+                df = pd.read_csv(CSV_PATH, dtype=str).fillna("")
+                changed = False
+                for idx in df.index[df["Status"] == "OPEN"]:
+                    row = df.loc[idx]
+                    oid = _cell(row.get("Order_ID"))
+                    if not (len(oid) == 36 and oid.count("-") == 4):
+                        continue
+                    try:
+                        parent = client.get_order_by_id(oid)
+                    except Exception:
+                        continue
+                    status = str(getattr(parent, "status", "")).lower()
+                    filled_qty = float(getattr(parent, "filled_qty", 0) or 0)
+                    fill_px = float(getattr(parent, "filled_avg_price", 0) or 0)
+                    ticker = _cell(row.get("Ticker")).upper()
+                    if filled_qty > 0 and fill_px > 0:
+                        try:
+                            j_entry = float(_cell(row.get("Entry")) or 0)
+                        except ValueError:
+                            j_entry = 0.0
+                        if abs(j_entry - fill_px) > 0.005:
+                            df.at[idx, "Entry"] = f"{round(fill_px, 4):g}"
+                            reco = _cell(row.get("Reco_Entry")) or (f"{j_entry:g}" if j_entry else "")
+                            if reco and not _cell(row.get("Reco_Entry")):
+                                df.at[idx, "Reco_Entry"] = reco
+                            try:
+                                r = float(reco) if reco else 0.0
+                                if r > 0:
+                                    df.at[idx, "Slippage_Bps"] = f"{(fill_px - r) / r * 10000:.1f}"
+                            except ValueError:
+                                pass
+                            changed = True
+                            result["entry_fixed"].append({"ticker": ticker, "journal": j_entry, "fill": fill_px})
+                            logger.info(f"[AlpacaBroker][Sweep] {ticker} Entry {j_entry:g} → fill réel {fill_px:g}")
+                        if "partially" in status and abs(filled_qty - float(_cell(row.get("Size")) or 0)) >= 1:
+                            df.at[idx, "Size"] = str(int(filled_qty))
+                            changed = True
+                        continue
+                    # Non fillé : ordre limite en attente ?
+                    if not any(s in status for s in ("new", "accepted", "pending", "held")):
+                        continue
+                    submitted = getattr(parent, "submitted_at", None)
+                    age_min = None
+                    if submitted is not None:
+                        from datetime import UTC as _UTC
+                        sub = submitted if submitted.tzinfo else submitted.replace(tzinfo=_UTC)
+                        age_min = (datetime.now(_UTC) - sub).total_seconds() / 60.0
+                    if age_min is None or age_min < max_age or not market_open:
+                        continue
+                    # Remplacement par un market bracket (même SL/TP, même qty).
+                    try:
+                        from alpaca.trading.enums import OrderSide, TimeInForce
+                        from alpaca.trading.requests import MarketOrderRequest, StopLossRequest, TakeProfitRequest
+                        client.cancel_order_by_id(oid)
+                        qty = int(float(_cell(row.get("Size")) or 0))
+                        sl = float(_cell(row.get("Stop_Loss")) or 0)
+                        tp = float(_cell(row.get("Take_Profit")) or 0)
+                        direction = _cell(row.get("Direction"), "LONG").upper()
+                        if qty <= 0 or sl <= 0:
+                            result["canceled"].append({"ticker": ticker, "reason": "qty/SL invalides"})
+                            df.at[idx, "Status"] = "CANCELED"
+                            df.at[idx, "Close_Reason"] = "ENTRY_EXPIRED"
+                            changed = True
+                            continue
+                        req = MarketOrderRequest(
+                            symbol=ticker, qty=qty,
+                            side=OrderSide.BUY if direction == "LONG" else OrderSide.SELL,
+                            time_in_force=TimeInForce.GTC, order_class="bracket",
+                            client_order_id=_make_client_order_id(f"{ticker}-MKT"),
+                            take_profit=TakeProfitRequest(limit_price=round(tp, 2)) if tp > 0 else None,
+                            stop_loss=StopLossRequest(stop_price=round(sl, 2)),
+                        )
+                        new_order = client.submit_order(order_data=req)
+                        df.at[idx, "Order_ID"] = str(new_order.id)
+                        df.at[idx, "Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        changed = True
+                        result["replaced"].append({"ticker": ticker, "old": oid, "new": str(new_order.id), "age_min": round(age_min, 1)})
+                        logger.warning(f"[AlpacaBroker][Sweep] {ticker} limite non fillée après {age_min:.0f} min → market bracket {new_order.id}")
+                    except Exception as exc:
+                        logger.error(f"[AlpacaBroker][Sweep] remplacement {ticker} : {exc}")
+                if changed:
+                    df.to_csv(CSV_PATH, index=False)
+            if changed:
+                try:
+                    from modules.duckdb_journal import sync_from_csv
+                    sync_from_csv(csv_path=CSV_PATH, db_path=CSV_PATH.with_name("trade_journal.duckdb"))
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning(f"[AlpacaBroker] sweep_unfilled_entries : {exc}")
+        return result
+
+    def adjust_position(self, ticker: str, delta_qty: int, direction: str = "LONG") -> dict:
+        """Rebalance de poids : achète (delta>0) ou vend (delta<0) `|delta|` actions
+        au marché, puis met à jour la ligne OPEN du journal (Size, Entry moyen
+        pondéré pour un ajout) et journalise dans `data/rebalance_log.jsonl`.
+
+        Les jambes stop existantes sont ré-ajustées en quantité par
+        `ensure_protective_stops` au cycle suivant (drift de qty). Pour une
+        réduction, on annule d'abord la jambe stop (elle bloque la quantité).
+        """
+        import json as _json
+
+        import pandas as pd
+        from filelock import FileLock
+
+        out: dict = {"ticker": ticker, "delta": delta_qty, "ok": False}
+        if delta_qty == 0:
+            out["ok"] = True
+            return out
+        try:
+            from alpaca.trading.enums import OrderSide, TimeInForce
+            from alpaca.trading.requests import MarketOrderRequest
+            client = self._get_client()
+            is_long = str(direction).upper() == "LONG"
+            selling = (delta_qty < 0) == is_long
+            if selling:
+                for o in self._open_orders_for(client, ticker):
+                    if self._order_side(o) == self._exit_side_name(direction):
+                        try:
+                            client.cancel_order_by_id(str(o.id))
+                        except Exception as exc:
+                            logger.debug(f"[AlpacaBroker] cancel {o.id} : {exc}")
+            req = MarketOrderRequest(
+                symbol=ticker, qty=abs(int(delta_qty)),
+                side=OrderSide.SELL if selling else OrderSide.BUY,
+                time_in_force=TimeInForce.DAY,
+                client_order_id=_make_client_order_id(f"{ticker}-REB"),
+            )
+            order = client.submit_order(order_data=req)
+            fill_px = 0.0
+            for _ in range(self._CLOSE_CONFIRM_ATTEMPTS):
+                import time as _t
+                _t.sleep(self._CLOSE_CONFIRM_DELAY_SEC)
+                try:
+                    o = client.get_order_by_id(str(order.id))
+                    fill_px = float(getattr(o, "filled_avg_price", 0) or 0)
+                    if fill_px > 0:
+                        break
+                except Exception:
+                    continue
+            out.update({"order_id": str(order.id), "fill": fill_px})
+            with FileLock(str(CSV_LOCK_PATH), timeout=10):
+                ensure_csv_schema(CSV_PATH)
+                df = pd.read_csv(CSV_PATH, dtype=str).fillna("")
+                mask = (df["Ticker"].str.upper() == ticker.upper()) & (df["Status"] == "OPEN")
+                if mask.any():
+                    idx = df[mask].index[0]
+                    old_qty = int(float(_cell(df.at[idx, "Size"]) or 0))
+                    old_entry = float(_cell(df.at[idx, "Entry"]) or 0)
+                    new_qty = old_qty + int(delta_qty)
+                    if delta_qty > 0 and fill_px > 0 and old_qty > 0:
+                        df.at[idx, "Entry"] = f"{round((old_entry * old_qty + fill_px * delta_qty) / new_qty, 4):g}"
+                    df.at[idx, "Size"] = str(max(0, new_qty))
+                    df.to_csv(CSV_PATH, index=False)
+                    realized = (fill_px - old_entry) * abs(delta_qty) if (delta_qty < 0 and fill_px > 0) else 0.0
+                    out.update({"old_qty": old_qty, "new_qty": new_qty, "realized_pnl": round(realized, 2)})
+            try:
+                log_path = CSV_PATH.with_name("rebalance_log.jsonl")
+                with log_path.open("a", encoding="utf-8") as fh:
+                    fh.write(_json.dumps({"ts": datetime.now().isoformat(timespec="seconds"), **out}) + "\n")
+                from modules.duckdb_journal import sync_from_csv
+                sync_from_csv(csv_path=CSV_PATH, db_path=CSV_PATH.with_name("trade_journal.duckdb"))
+            except Exception:
+                pass
+            out["ok"] = fill_px > 0
+            logger.info(f"[AlpacaBroker] rebalance {ticker} {delta_qty:+d} @ {fill_px:.2f} → qty {out.get('new_qty')}")
+        except Exception as exc:
+            logger.error(f"[AlpacaBroker] adjust_position {ticker} {delta_qty:+d} : {exc}")
+            out["error"] = str(exc)
+        return out
 
     def update_stop_loss(
         self,
