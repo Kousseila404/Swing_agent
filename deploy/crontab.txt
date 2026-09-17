@@ -1,0 +1,55 @@
+# ═══════════════════════════════════════════════════════════════════
+# SwingQuant TITAN — crontab de référence (réécrit le 2026-09-17, audit P1-1)
+# Installer :  crontab /home/swing/swingquant/deploy/crontab.txt
+#
+# ⚠️  Le cron Debian/Ubuntu (3.0pl1) NE SUPPORTE PAS CRON_TZ : l'ancien
+#     fichier croyait tourner en heure New York / Paris, tout tournait en
+#     UTC (système). Preuve : auto-approve exécuté à 13:30:05 UTC = 9:30:00
+#     ET (enchère d'ouverture), sync arrêtée à 12:45 ET, monitor à 12:30 ET.
+#     TOUS les horaires ci-dessous sont en UTC, choisis pour rester valides
+#     en heure d'été (EDT = UTC−4) ET en heure d'hiver (EST = UTC−5).
+#     NYSE : 09:30–16:00 ET = 13:30–20:00 UTC (été) / 14:30–21:00 UTC (hiver).
+# ═══════════════════════════════════════════════════════════════════
+MAILTO=""
+
+# Tracker positions (SL/TS/time-exit + ré-armement stops broker) — toutes les
+# 2 min, 12:00→22:59 UTC lun-ven (couvre pré-ouverture → post-clôture, été/hiver).
+*/2 12-22 * * 1-5 /home/swing/swingquant/backend/venv/bin/python /home/swing/swingquant/backend/tracker.py >> /home/swing/swingquant/backend/logs/tracker.log 2>&1
+
+# Rotation des logs — quotidienne 03:00 UTC (avant : hebdo, 5 Mo ≈ 4 j de preuves)
+0 3 * * * logrotate -s /home/swing/swingquant/backend/logs/.logrotate.state /home/swing/swingquant/backend/logs/logrotate.conf
+
+# Health check Telegram — 13:00 UTC lun-ven (09:00 EDT / 08:00 EST)
+0 13 * * 1-5 /home/swing/swingquant/backend/venv/bin/python /home/swing/swingquant/backend/main.py --health-check >> /home/swing/swingquant/backend/logs/cron_health.log 2>&1
+
+# TITAN daily (refresh univers + warm cache API + propositions) — 06:00 UTC
+0 6 * * * /home/swing/swingquant/run_titan.sh
+
+# Alpaca sync (fills bracket, partial fills, expiries) — toutes les 15 min
+# 13:00→21:59 UTC lun-ven (toute la séance, été/hiver, + post-clôture).
+*/15 13-21 * * 1-5 /home/swing/swingquant/backend/venv/bin/python /home/swing/swingquant/backend/main.py --alpaca-sync >> /home/swing/swingquant/backend/logs/alpaca_sync.log 2>&1
+
+# Monitor positions LT — 21:35 UTC lun-ven (17:35 EDT / 16:35 EST : toujours post-clôture)
+35 21 * * 1-5 cd /home/swing/swingquant/backend && ./venv/bin/python -m scripts.run_monitor_alerts >> logs/monitor.log 2>&1
+
+# Backup journal — 06:30 UTC
+30 6 * * * /home/swing/swingquant/scripts/backup_journal.sh >> /home/swing/swingquant/logs/backup_journal.log 2>&1
+
+# Git auto-sync main toutes les minutes (ff-only, jamais destructif)
+* * * * * /home/swing/swingquant/scripts/git_auto_sync.sh
+
+# Auto-approbation propositions — toutes les 30 min, 15:00→19:59 UTC lun-ven
+# (11:00–15:30 EDT / 10:00–14:30 EST) : jamais dans l'enchère d'ouverture.
+*/30 15-19 * * 1-5 cd /home/swing/swingquant/backend && ./venv/bin/python main.py --auto-approve-proposals >> logs/auto_approve.log 2>&1
+
+# Digest Telegram quotidien — 07:30 UTC lun-ven (09:30 Paris été / 08:30 hiver)
+30 7 * * 1-5 cd /home/swing/swingquant/backend && ./venv/bin/python main.py --daily-digest >> logs/daily_digest.log 2>&1
+
+# Mon Portefeuille — earnings (quotidien 05:00 UTC) + risque (lundi 05:30 UTC)
+0 5 * * * cd /home/swing/swingquant/backend && ./venv/bin/python main.py --refresh-my-portfolio-earnings >> logs/my_portfolio_earnings.log 2>&1
+30 5 * * 1 cd /home/swing/swingquant/backend && ./venv/bin/python main.py --recompute-portfolio-risk >> logs/my_portfolio_risk.log 2>&1
+
+# Pont GitHub — revue thèse mensuelle Mon Portefeuille (publie le contexte,
+# ingère les propositions postées) — 05:05 / 05:10 UTC
+5 5 * * * cd /home/swing/swingquant/backend && ./venv/bin/python -m scripts.publish_thesis_review_context >> logs/thesis_review_bridge.log 2>&1
+10 5 * * * cd /home/swing/swingquant/backend && ./venv/bin/python -m scripts.ingest_thesis_review_comments >> logs/thesis_review_bridge.log 2>&1
