@@ -50,6 +50,7 @@ export const NAV_SECTIONS = [
       { id: 'risk',        label: 'Risk Monitor',  icon: '⚠️' },
       { id: 'datahealth',  label: 'Data Health',   icon: '🩺' },
       { id: 'audit',       label: 'Audit',         icon: '🔍' },
+      { id: 'scoring_lab', label: 'Scoring Lab',   icon: '🧪' },
     ],
   },
   {
@@ -78,6 +79,7 @@ export const PAGE_META = {
   calendar:    { title: 'Catalyst Calendar',             subtitle: 'Earnings (positions + watchlist) + Macro consolidés' },
   news:        { title: 'News firehose',                 subtitle: 'Flux consolidé positions + watchlist · Finnhub' },
   macro:       { title: 'Calendrier Macro',              subtitle: 'FOMC · CPI · NFP — zones de blackout J-1' },
+  scoring_lab: { title: 'Scoring Lab · edge sur la fenêtre live', subtitle: 'Paniers top-N vs univers · piliers seuls · profils de poids — sans look-ahead' },
   audit:       { title: 'Audit · Survivorship + WFO',    subtitle: 'Registry delisted · Poids OOS vs prod · IC test history' },
   settings:    { title: 'Préférences',                   subtitle: 'Apparence · API Token · Defaults Propositions' },
 };

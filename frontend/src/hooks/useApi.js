@@ -36,6 +36,7 @@ import {
   fetchPerformanceBenchmark,
   fetchProtection,
   fetchSystemHealth,
+  fetchScoringLab,
   fetchPortfolio,
   fetchProposals,
   fetchSnapshotsList,
@@ -498,3 +499,6 @@ export const useSystemHealth = (opts = {}) =>
     staleTime: 30_000,
     ...opts,
   })
+
+export const useScoringLab = (opts = {}) =>
+  useQuery({ queryKey: ['scoring_lab'], queryFn: fetchScoringLab, staleTime: 60 * 60_000, retry: false, ...opts })

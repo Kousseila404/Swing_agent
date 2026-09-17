@@ -333,3 +333,4 @@ export const fetchPerformanceBenchmark = (months = 6, topN = 20) =>
 export const fetchProtection = (refresh = false) =>
   get(`/portfolio/protection${refresh ? '?refresh=true' : ''}`);
 export const fetchSystemHealth = () => get('/system/health');
+export const fetchScoringLab = () => get('/scoring/lab');

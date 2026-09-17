@@ -254,4 +254,22 @@ def get_system_health(_auth: None = Security(api_core.require_auth)):
     }
 
 
+# ─────────────────────────────────────────────────────────────────
+# /scoring/lab
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/scoring/lab")
+def get_scoring_lab(_auth: None = Security(api_core.require_auth)):
+    """Edge du scoring sur la fenêtre live (paniers, piliers seuls, profils de
+    poids) — lecture de `data/.scoring_lab.json` produit par
+    `python -m modules.scoring_lab` (run_titan.sh). 404 si jamais calculé."""
+    from fastapi import HTTPException
+
+    from modules.scoring_lab import load_lab
+    data = load_lab()
+    if not data:
+        raise HTTPException(404, "scoring_lab jamais exécuté — lancer `python -m modules.scoring_lab`")
+    return data
+
+
 __all__ = ["router", "compute_protection"]

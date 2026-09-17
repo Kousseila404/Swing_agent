@@ -41,6 +41,7 @@ const DataHealthPage      = lazy(() => import('./components/DataHealthPage'));
 const RiskMonitorPage     = lazy(() => import('./components/RiskMonitorPage'));
 const MacroCalendarPage   = lazy(() => import('./components/MacroCalendarPage'));
 const AuditPage           = lazy(() => import('./components/AuditPage'));
+const ScoringLabPage      = lazy(() => import('./components/ScoringLabPage'));
 
 // Mapping page → composant. Centralisé ici pour éviter une chaîne de &&
 // dans le JSX (et pour qu'ajouter une page = 1 ligne).
@@ -63,6 +64,7 @@ const PAGES = {
   macro:       MacroCalendarPage,
   attribution: AttributionPage,
   audit:       AuditPage,
+  scoring_lab: ScoringLabPage,
   settings:    SettingsPage,
 };
 

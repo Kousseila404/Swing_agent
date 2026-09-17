@@ -235,6 +235,17 @@ fi
 #     Évalue les gates (killswitch, CB, régime macro, slots libres, cash)
 #     et enqueue jusqu'à N propositions à valider manuellement dans l'UI.
 #     Skipped silencieusement si API_TOKEN absent (auth fail-closed côté API).
+echo "── Step 3d-bis/4 : scoring_lab (dimanche, ou si jamais calculé — ~5 min)"
+if [[ "$(date +%u)" == "7" || ! -f "$BACKEND/data/.scoring_lab.json" ]]; then
+    timeout 900 "$PYTHON" -m modules.scoring_lab
+    rc_lab=$?
+    if [[ $rc_lab -ne 0 ]]; then
+        echo "WARN: scoring_lab exit=$rc_lab (non bloquant)"
+    fi
+else
+    echo "scoring_lab SKIP (jour $(date +%u), exécuté le dimanche)"
+fi
+
 echo "── Step 3e/4 : warm /api/performance/benchmark (panier TITAN théorique, cache 12h)"
 WARM_TOKEN="${API_TOKEN:-}"
 if [[ -z "$WARM_TOKEN" && -f "$BACKEND/.env" ]]; then
