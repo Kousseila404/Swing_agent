@@ -7,6 +7,83 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased] — audit intégral + Lots 1→6 (2026-09-17)
+
+Rapport : [`docs/AUDIT_INTEGRAL_2026-09-17.md`](./docs/AUDIT_INTEGRAL_2026-09-17.md).
+
+#### Fixed — P0 sécurité du capital
+
+- **Brackets Alpaca `DAY` → `GTC`** (`broker_gateway.submit_order`). Les
+  jambes SL/TP expiraient à la clôture le jour du fill (100 % des jambes
+  depuis juillet, `canceled_at = 20:0x UTC`) : 6 positions ouvertes sans
+  aucun stop broker. `client_order_id` déterministe `SQ-<TICKER>-…`.
+- **Ré-armement automatique des stops** (`AlpacaBroker.ensure_protective_stops`,
+  appelé à chaque cycle tracker) : toute position OPEN sans jambe STOP
+  ouverte reçoit un stop GTC (OCO stop+TP si TP connu), au SL journal ou au
+  plancher catastrophe −35 %. Réalignement si le stop broker dérive > 1 %
+  du journal. `update_stop_loss` crée le stop s'il n'existe plus.
+- **Race lost-update du journal** (`tracker.evaluation.save_journal`) :
+  fusion par clé (`Order_ID` / Date+Ticker) avec l'état disque au lieu de
+  réécrire toute la vue chargée en début de cycle. Les appends de l'API
+  pendant un cycle ne sont plus perdus. Miroir DuckDB rejoué après chaque
+  écriture, co-localisé avec le CSV.
+- **Réconciliation broker** (`sync_fills_from_alpaca`) : fenêtre de grâce
+  30 min, parent relu par `Order_ID`, fills de sortie filtrés (`after`
+  entrée, side opposé, `filled_at > entrée`). Plus de clôture d'un trade
+  neuf avec un vieux fill (CF 17/08 clôturé au fill du 27/07).
+- **Journal reconstruit** depuis l'historique Alpaca
+  (`scripts/rebuild_journal_from_alpaca.py`) : 14 lignes cohérentes avec le
+  broker (6 OPEN, 5 WIN, 2 LOSS, 1 CANCELED), PnL réalisé −169 $ (au lieu
+  de −591 $ faussés par 3 doublons). SL/TP/scores restaurés sur HAS/NEM/CF/EOG.
+- `import_positions_to_csv` : récupère SL/TP depuis les jambes broker, sinon
+  plancher catastrophe + WARNING ; `Signal=ALPACA_IMPORT`.
+
+#### Changed — exécution & risque (Lots 2–4)
+
+- **Crontab de référence** `deploy/crontab.txt` en UTC explicite (cron
+  Debian ignore `CRON_TZ`) : auto-approve 15:00–19:59 UTC (jamais dans
+  l'enchère d'ouverture), sync toute la séance, monitor post-clôture,
+  tracker 12–22 h UTC. **À installer manuellement** : `crontab deploy/crontab.txt`.
+- **Auto-approve** : candidats triés par TITAN décroissant, gate
+  `buy_signal ∈ {STRONG_BUY, BUY}`, gate pilier Risk ≥ 40, refus si
+  killswitch/circuit breaker, budgets via `AUTO_APPROVE_MAX_PER_RUN/WEEK`.
+- **Sizing** : vol-targeting seulement si VIX ≥ 25 (`VOL_TARGET_VIX_MIN`),
+  `DEFAULT_MAX_HOLDINGS` 20 → 15, `DEFAULT_MIN_PROPOSAL_USD` 250 → 2 500 $.
+- **Trailing stop LT** : activation 8 → 15 %, lock 40 → 30 %, ATR 4×/4×.
+- **Killswitch** : `KILLSWITCH_ACTION=freeze` (gel des entrées, pas de
+  liquidation), seuil −4 → −6 %/jour ; le tracker continue de surveiller
+  les positions quand le killswitch est actif.
+- **Circuit breaker** : échantillonné 1×/jour (fenêtre 60 séances), seuils
+  −8/−12/−16 % (paramétrés `CB_*` dans config).
+
+#### Added — cockpit (Lot 6)
+
+- `modules/perf_benchmark.py` + `GET /api/performance/benchmark` : compte
+  Alpaca vs SPY vs panier TITAN top-N théorique (fenêtre live, sans
+  look-ahead), rebasés à 100, cache 12 h.
+- `GET /api/portfolio/protection` (stop broker par position, drift) et
+  `GET /api/system/health` (tracker, killswitch, CB, crons).
+- Frontend : page **Cockpit** (route par défaut) — KPI, graphique
+  benchmark, positions × protection × décision LT, à décider, santé.
+  Styles dédiés `styles/cockpit.css`.
+
+#### Fixed — fiabilité (Lot 5)
+
+- Telegram HTTP 400 : échappement HTML des narratifs (`TITAN 69 < 70`).
+- pytest n'écrit plus dans les données prod : defaults DuckDB paresseux,
+  fixture autouse d'isolation du journal, garde-fou `SWINGQUANT_TEST_GUARD=1`,
+  logger fichier désactivé sous pytest.
+- logrotate quotidien, 30 jours (preuves conservées).
+- NDX100 : cache + fallback quand le scrape Wikipedia échoue (WARNING au
+  lieu d'ERROR quotidien).
+
+#### Tests
+
+- +27 tests (protection broker, sync, fusion journal, auto-approve gates,
+  killswitch freeze, cockpit). Suite : 1427.
+
+---
+
 ## [Unreleased] — branche `claude/sweet-faraday-j0cdxp`
 
 ### Audit infra/sécurité/CI (2026-09-17)
