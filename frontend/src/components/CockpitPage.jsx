@@ -19,9 +19,12 @@ import { fetchLtDecision } from '../api/client';
 import {
   useMarketStatus,
   usePerformanceBenchmark,
+  usePerformanceGap,
   usePortfolio,
   useProposals,
   useProtection,
+  useRebalancePreview,
+  useShadow,
   useSystemHealth,
 } from '../hooks/useApi';
 import { fmtNum, fmtPrice } from '../utils/format';
@@ -135,6 +138,9 @@ export default function CockpitPage({ onNavigate }) {
   const protectQ    = useProtection();
   const healthQ     = useSystemHealth();
   const ltQ         = useQuery({ queryKey: ['lt_decision'], queryFn: fetchLtDecision, staleTime: 5 * 60_000 });
+  const gapQ        = usePerformanceGap(6, 20);
+  const shadowQ     = useShadow();
+  const rebQ        = useRebalancePreview();
 
   const equity    = portfolioQ.data?.equity || {};
   const positions = useMemo(() => portfolioQ.data?.equity?.open_positions || [], [portfolioQ.data]);
@@ -306,6 +312,67 @@ export default function CockpitPage({ onNavigate }) {
             </tbody>
           </table>
         )}
+      </Card>
+
+
+      {/* ── Pourquoi l'écart ? + A/B shadow + rebalance ── */}
+      <div className="cockpit-grid-2">
+        <Card title="Pourquoi l'écart avec le panier ?" icon="🔍"
+              note="cash drag = capital non investi × rendement du panier · sélection/timing = résidu">
+          {gapQ.data?.available ? (
+            <table className="cockpit-table">
+              <tbody>
+                <tr><td>Compte</td><td className={`num right ${toneOf(gapQ.data.account_return_pct)}`}>{signed(gapQ.data.account_return_pct)}</td></tr>
+                <tr><td>Panier théorique</td><td className={`num right ${toneOf(gapQ.data.basket_return_pct)}`}>{signed(gapQ.data.basket_return_pct)}</td></tr>
+                <tr><td className="ticker">Écart</td><td className={`num right ${toneOf(gapQ.data.gap_pct)}`}>{signed(gapQ.data.gap_pct)}</td></tr>
+                {Object.entries(gapQ.data.components || {}).map(([k, v]) => (
+                  <tr key={k}><td>↳ {k.replace('_pct', '').replace('_', ' ')}</td><td className={`num right ${toneOf(v)}`}>{signed(v)}</td></tr>
+                ))}
+                <tr><td className="cockpit-note">Investi en moyenne</td><td className="num right">{gapQ.data.details?.avg_invested_pct != null ? `${fmtNum(gapQ.data.details.avg_invested_pct, 0)}%` : '—'}</td></tr>
+              </tbody>
+            </table>
+          ) : <div className="cockpit-empty">{gapQ.isLoading ? 'Calcul…' : 'Attribution indisponible.'}</div>}
+        </Card>
+
+        <Card title="Forward-test A/B des profils (shadow)" icon="🧬" flush
+              note={shadowQ.data ? `Portefeuilles virtuels, top-${shadowQ.data.top_n}, 1/N, rebalance ${shadowQ.data.rebalance_days} j, ${shadowQ.data.cost_bps} bps` : ''}>
+          {shadowQ.data?.rows?.length ? (
+            <table className="cockpit-table">
+              <thead><tr><th>Profil</th><th className="right">NAV</th><th className="right">Depuis début</th><th className="right">30 j</th><th className="right">Max DD</th><th className="right">Jours</th></tr></thead>
+              <tbody>
+                {shadowQ.data.rows.map((r) => (
+                  <tr key={r.profile}>
+                    <td className="ticker">{r.profile}</td>
+                    <td className="num right">{fmtNum(r.nav, 0)}</td>
+                    <td className={`num right ${toneOf(r.return_pct)}`}>{signed(r.return_pct)}</td>
+                    <td className={`num right ${toneOf(r.return_30d_pct)}`}>{signed(r.return_30d_pct)}</td>
+                    <td className="num right neg">{r.max_drawdown_pct != null ? `${fmtNum(r.max_drawdown_pct, 1)}%` : '—'}</td>
+                    <td className="num right">{r.days}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <div className="cockpit-empty">Pas encore de portefeuilles shadow (run_titan.sh 06:00).</div>}
+        </Card>
+      </div>
+
+      <Card title="Rebalance 1/N (mensuel)" icon="⚖️" flush
+            action={<Pill tone={rebQ.data?.due ? 'warn' : 'muted'}>{rebQ.data ? (rebQ.data.due ? 'dû ce mois' : `fait ${rebQ.data.last_run || '—'}`) : '…'}</Pill>}>
+        {rebQ.data?.orders?.length ? (
+          <table className="cockpit-table">
+            <thead><tr><th>Ticker</th><th className="right">Δ actions</th><th className="right">Poids</th><th className="right">Montant</th></tr></thead>
+            <tbody>
+              {rebQ.data.orders.map((o) => (
+                <tr key={o.ticker}>
+                  <td className="ticker">{o.ticker}</td>
+                  <td className={`num right ${o.delta_qty > 0 ? 'pos' : 'neg'}`}>{o.delta_qty > 0 ? '+' : ''}{o.delta_qty}</td>
+                  <td className="num right">{fmtNum(o.from_pct, 1)}% → {fmtNum(o.to_pct, 1)}%</td>
+                  <td className="num right">${fmtNum(o.usd, 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : <div className="cockpit-empty">Aucun ordre de rebalance nécessaire (bande ±{rebQ.data?.band_pts ?? 2} pts).</div>}
       </Card>
 
       {/* ── Santé système ── */}

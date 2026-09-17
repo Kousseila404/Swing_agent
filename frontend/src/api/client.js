@@ -334,3 +334,6 @@ export const fetchProtection = (refresh = false) =>
   get(`/portfolio/protection${refresh ? '?refresh=true' : ''}`);
 export const fetchSystemHealth = () => get('/system/health');
 export const fetchScoringLab = () => get('/scoring/lab');
+export const fetchShadow = () => get('/shadow');
+export const fetchPerformanceGap = (months = 6, topN = 20) => get(`/performance/gap?months=${months}&top_n=${topN}`);
+export const fetchRebalancePreview = () => get('/rebalance/preview');

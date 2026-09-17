@@ -37,6 +37,9 @@ import {
   fetchProtection,
   fetchSystemHealth,
   fetchScoringLab,
+  fetchShadow,
+  fetchPerformanceGap,
+  fetchRebalancePreview,
   fetchPortfolio,
   fetchProposals,
   fetchSnapshotsList,
@@ -502,3 +505,10 @@ export const useSystemHealth = (opts = {}) =>
 
 export const useScoringLab = (opts = {}) =>
   useQuery({ queryKey: ['scoring_lab'], queryFn: fetchScoringLab, staleTime: 60 * 60_000, retry: false, ...opts })
+
+export const useShadow = (opts = {}) =>
+  useQuery({ queryKey: ['shadow'], queryFn: fetchShadow, staleTime: 30 * 60_000, retry: false, ...opts })
+export const usePerformanceGap = (months = 6, topN = 20, opts = {}) =>
+  useQuery({ queryKey: ['performance_gap', months, topN], queryFn: () => fetchPerformanceGap(months, topN), staleTime: 30 * 60_000, retry: false, ...opts })
+export const useRebalancePreview = (opts = {}) =>
+  useQuery({ queryKey: ['rebalance_preview'], queryFn: fetchRebalancePreview, staleTime: 5 * 60_000, retry: false, ...opts })
