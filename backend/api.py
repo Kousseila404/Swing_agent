@@ -90,6 +90,7 @@ from routers import (
 from routers import (
     peers as peers_router,
 )
+from routers import performance as performance_router  # noqa: E402
 from routers import (
     portfolio as portfolio_router,
 )
@@ -269,6 +270,7 @@ app.include_router(my_portfolio_router.router)
 app.include_router(my_portfolio_executions_router.router)
 app.include_router(my_portfolio_thesis_router.router)
 app.include_router(thesis_review_queue_router.router)
+app.include_router(performance_router.router)
 
 
 # ─────────────────────────────────────────────────────────────────
