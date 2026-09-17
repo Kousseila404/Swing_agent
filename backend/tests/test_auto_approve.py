@@ -87,3 +87,46 @@ def test_recent_auto_approve_count_filters_by_decided_by_and_window(tmp_path, mo
     monkeypatch.setattr(proposals, "PROPOSALS_AUDIT_PATH", audit_path)
 
     assert _recent_auto_approve_count(days=7.0) == 2
+
+
+# ─────────────────────────────────────────────────────────────────
+# Audit 2026-09-17 — tri par score, gate buy_signal, gate Risk, gate système
+# ─────────────────────────────────────────────────────────────────
+
+def _prop(ticker, titan, verdict="BUY", risk=70.0, **ctx_extra):
+    ctx = {"titan_score": titan, "buy_signal": {"verdict": verdict}, "risk_score": risk}
+    ctx.update(ctx_extra)
+    return {"id": f"P-{ticker}", "ticker": ticker, "context": ctx}
+
+
+def test_select_candidates_sorted_by_titan_desc():
+    from modules.auto_approve import select_candidates
+    pending = [_prop("LOW", 81.0), _prop("HIGH", 88.0), _prop("MID", 84.5)]
+    got = [p["ticker"] for p, _ in select_candidates(pending)]
+    assert got == ["HIGH", "MID", "LOW"]
+
+
+def test_buy_signal_gate_rejects_watch_and_skip():
+    from modules.auto_approve import _qualifies
+    assert _qualifies({"titan_score": 85.0, "buy_signal": {"verdict": "WATCH"}})[0] is False
+    assert _qualifies({"titan_score": 85.0, "buy_signal": {"verdict": "FALLING_KNIFE"}})[0] is False
+    assert _qualifies({"titan_score": 85.0, "buy_signal": {"verdict": "STRONG_BUY"}})[0] is True
+
+
+def test_risk_gate_rejects_low_risk_pillar():
+    """EIX (TITAN 72, Support ON 91, Piotroski 7) passait l'override avec Risk 26 → −23 %."""
+    from modules.auto_approve import _qualifies
+    ctx = {"titan_score": 72.1, "risk_score": 26.1, "f_score": 7,
+           "support": {"level": "ON_SUPPORT", "score": 91.0}, "buy_signal": {"verdict": "BUY"}}
+    ok, reason = _qualifies(ctx)
+    assert ok is False and "Risk" in reason
+
+
+def test_run_auto_approve_blocked_by_killswitch(monkeypatch):
+    from modules import auto_approve
+    monkeypatch.setattr("modules.tracker.killswitch.is_trading_allowed", lambda: False)
+    called = []
+    monkeypatch.setattr(auto_approve.proposals, "list_all", lambda status=None: called.append(1) or [])
+    out = auto_approve.run_auto_approve()
+    assert out["approved"] == 0 and "killswitch" in out["blocked"]
+    assert called == []  # aucune lecture de la file quand les entrées sont gelées
