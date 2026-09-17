@@ -7,6 +7,42 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased] — améliorations « plus puissant » + dossier documentation (2026-09-17, nuit)
+
+#### Added
+- **Exécution intelligente** (`broker_gateway`) : entrée limite marketable
+  (ask × 1,003, GTC), gate de spread 0,5 % (`alpaca_data.get_latest_quote`),
+  `sweep_unfilled_entries` (Entry = fill réel + Slippage_Bps, limite non
+  fillée > 60 min → market bracket), `adjust_position` (achat/vente partiel),
+  ré-armement des stops sur dérive de **quantité**. Config `EXEC_*`.
+- **Rebalance 1/N mensuel** (`basket_rebalance`, bande ±2 pts, ≥ 300 $,
+  ventes d'abord) appelé par l'auto-approve ; `GET /api/rebalance/preview`.
+- **Stop de portefeuille** (`portfolio_stop`) : drawdown 60 séances ≤ −15 %
+  → gel des entrées (quotidien, run_titan.sh).
+- **Shadow portfolios** (`shadow_portfolios`) : forward-test A/B quotidien
+  de 5 profils (v14_1, equal_7, momentum_tilt, momentum_only, universe_ew),
+  `GET /api/shadow`, carte Cockpit.
+- **Attribution de l'écart** (`gap_attribution`) : cash drag / slippage /
+  stops / sélection, `GET /api/performance/gap`, carte Cockpit.
+- **Scoring Lab** : variantes « régime » (Momentum 5 ans avec/sans filtre
+  SPY < MA200, equal_7 live avec filtre).
+- **Commandes Telegram** (`telegram_inbox`, cron 2 min) : /status, /approve,
+  /reject, /pause, /resume.
+- `LIVE_CAPITAL_FRACTION` (0,10) appliqué automatiquement en URL live.
+- **Dossier `documentation/`** : 15 fichiers (architecture, stratégie,
+  scoring, exécution, risque, opérations, données, API générée, frontend,
+  tests, ADR, historique, glossaire, roadmap, configuration générée) +
+  `audits/`.
+
+#### Changed — performance
+- `backtest.run_titan_top_n` : cache process-level des snapshots décompressés
+  (19 s → 0,7 s par variante ; lab 5 min → ~1 min).
+
+#### Tests
+- +8 (`test_improvements_2026_09_17.py`) + 1 (qty drift). Suite : 1 428.
+
+---
+
 ## [Unreleased] — stratégie « basket » automatisée + UI simplifiée (2026-09-17, soir)
 
 #### Changed — stratégie (mesurée par le Scoring Lab, fenêtre live 21 sem.)
