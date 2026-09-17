@@ -86,9 +86,12 @@ def _compute_support_for_ticker(ticker: str, price: float | None) -> dict[str, A
 # CONSTANTES — defaults conservateurs
 # ─────────────────────────────────────────────────────────────────
 DEFAULT_ALLOWED_REGIMES = ("BULL_MARKET",)
-DEFAULT_MAX_HOLDINGS = 20
+DEFAULT_MAX_HOLDINGS = 15   # audit 2026-09-17 : 20 → 15 (moins de dilution, top-15 ≈ top-20 en backtest)
 DEFAULT_MIN_FREE_SLOTS = 1
-DEFAULT_MIN_PROPOSAL_USD = 250.0  # plancher : ne propose pas en-dessous
+DEFAULT_MIN_PROPOSAL_USD = 2_500.0  # plancher : ne propose pas en-dessous
+# (audit 2026-09-17 : 250 → 2 500 $ ; une ligne à 400 $ sur un book de 100 k$
+#  ne pèse rien et coûte du slippage/attention — MU à 1 action, WDC à 412 $.)
+VOL_TARGET_VIX_MIN = 25.0  # vol-targeting global seulement si VIX ≥ 25
 DEFAULT_TOTAL_CAPITAL = 100_000.0
 # Audit TITAN 2026-08-16 (backend/docs/titan/audit_titan_2026-08-16.md) —
 # backtest cross-sectionnel 5 ans (361 snapshots) : le bucket TITAN<60 a un
@@ -766,12 +769,21 @@ def plan_proposals(
         market_provider = None
         momentum_provider = None
 
+    # Audit 2026-09-17 (P1-3, cash drag) — le vol-targeting ramenait
+    # structurellement le déploiement à ~44 % du capital en régime calme
+    # (σ_p estimée ~30 % > cible 18 % → leverage 0.6, puis × 0.9 régime).
+    # Le backtest qui a de l'edge est **pleinement investi**. On n'applique
+    # le vol-target qu'en régime nerveux (VIX ≥ VOL_TARGET_VIX_MIN) ; en
+    # régime calme, le sizing = risk parity / HRP + caps, sans frein global.
     from modules.portfolio._vol_target import DEFAULT_TARGET_VOL_PCT
+    _vix = float(macro_meta.get("vix") or 20.0)
+    _vt = DEFAULT_TARGET_VOL_PCT if _vix >= VOL_TARGET_VIX_MIN else None
+    diagnostics["vol_target"] = {"vix": _vix, "applied": _vt is not None, "target_vol_pct": _vt}
     pm = PortfolioManager(
         scored,
         market_provider=market_provider,
         momentum_provider=momentum_provider,
-        target_vol_pct=DEFAULT_TARGET_VOL_PCT,
+        target_vol_pct=_vt,
         weighting_method=weighting_method,
     )
     # Effective multiplier = régime macro × circuit breaker progressif.
