@@ -3329,6 +3329,31 @@
           }
         ]
       }
+    },
+    "/api/scoring/lab": {
+      "get": {
+        "tags": [
+          "cockpit"
+        ],
+        "summary": "Get Scoring Lab",
+        "description": "Edge du scoring sur la fenêtre live (paniers, piliers seuls, profils de\npoids) — lecture de `data/.scoring_lab.json` produit par\n`python -m modules.scoring_lab` (run_titan.sh). 404 si jamais calculé.",
+        "operationId": "get_scoring_lab_api_scoring_lab_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
