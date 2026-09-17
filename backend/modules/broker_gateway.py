@@ -781,6 +781,194 @@ class AlpacaBroker(BrokerGateway):
             logger.error(f"[AlpacaBroker] Erreur clôture {ticker} : {exc}")
             return False
 
+    # ─────────────────────────────────────────────────────────────
+    # Helpers ordres de protection (audit 2026-09-17, P0-1)
+    # ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _exit_side_name(direction: str) -> str:
+        return "sell" if str(direction or "LONG").upper() == "LONG" else "buy"
+
+    def _open_orders_for(self, client, ticker: str) -> list:
+        """Ordres ouverts (accepted/new/held…) pour un symbole. Fail-open → []."""
+        try:
+            from alpaca.trading.enums import QueryOrderStatus
+            from alpaca.trading.requests import GetOrdersRequest
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[ticker], limit=50)
+            return list(client.get_orders(filter=req) or [])
+        except Exception as exc:
+            logger.warning(f"[AlpacaBroker] get_orders(OPEN) {ticker} : {exc}")
+            return []
+
+    @staticmethod
+    def _order_side(order) -> str:
+        return str(getattr(order, "side", "") or "").lower().replace("orderside.", "")
+
+    @staticmethod
+    def _order_type(order) -> str:
+        return str(getattr(order, "type", "") or "").lower().replace("ordertype.", "")
+
+    def _find_open_stop(self, orders: list, direction: str = "LONG"):
+        """Retourne la jambe STOP (ou STOP_LIMIT) de sortie ouverte, sinon None."""
+        exit_side = self._exit_side_name(direction)
+        for o in orders:
+            if "stop" in self._order_type(o) and self._order_side(o) == exit_side:
+                return o
+        return None
+
+    def _find_open_limit(self, orders: list, direction: str = "LONG"):
+        """Retourne la jambe LIMIT (take-profit) de sortie ouverte, sinon None."""
+        exit_side = self._exit_side_name(direction)
+        for o in orders:
+            if self._order_type(o) == "limit" and self._order_side(o) == exit_side:
+                return o
+        return None
+
+    def _arm_stop(
+        self,
+        client,
+        ticker: str,
+        stop_price: float,
+        direction: str = "LONG",
+        take_profit: float | None = None,
+        qty: float | None = None,
+    ) -> str | None:
+        """Pose un stop GTC (OCO stop+limit si `take_profit`) sur une position.
+
+        Annule d'abord une éventuelle jambe LIMIT orpheline (elle bloque la
+        quantité disponible et ferait rejeter le stop pour
+        « insufficient qty »). Retourne l'ID de l'ordre posé, None si échec.
+        """
+        try:
+            from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+            from alpaca.trading.requests import (
+                LimitOrderRequest,
+                StopLossRequest,
+                StopOrderRequest,
+            )
+
+            if qty is None:
+                try:
+                    pos = client.get_open_position(ticker)
+                    qty = abs(float(pos.qty))
+                except Exception as exc:
+                    logger.warning(f"[AlpacaBroker] _arm_stop {ticker} : position introuvable ({exc})")
+                    return None
+            qty_int = int(qty)
+            if qty_int <= 0:
+                return None
+
+            orders = self._open_orders_for(client, ticker)
+            stale_limit = self._find_open_limit(orders, direction)
+            if stale_limit is not None:
+                if take_profit is None:
+                    try:
+                        take_profit = float(stale_limit.limit_price)
+                    except (TypeError, ValueError):
+                        take_profit = None
+                try:
+                    client.cancel_order_by_id(str(stale_limit.id))
+                    logger.info(
+                        f"[AlpacaBroker] {ticker} jambe LIMIT orpheline {stale_limit.id} annulée "
+                        "avant ré-armement du stop"
+                    )
+                except Exception as exc:
+                    logger.warning(f"[AlpacaBroker] annulation LIMIT {ticker} : {exc}")
+
+            side = OrderSide.SELL if str(direction).upper() == "LONG" else OrderSide.BUY
+            sp = round(float(stop_price), 2)
+            if take_profit is not None and float(take_profit) > 0:
+                req = LimitOrderRequest(
+                    symbol=ticker, qty=qty_int, side=side,
+                    time_in_force=TimeInForce.GTC,
+                    order_class=OrderClass.OCO,
+                    limit_price=round(float(take_profit), 2),
+                    stop_loss=StopLossRequest(stop_price=sp),
+                    client_order_id=_make_client_order_id(f"{ticker}-OCO"),
+                )
+            else:
+                req = StopOrderRequest(
+                    symbol=ticker, qty=qty_int, side=side,
+                    time_in_force=TimeInForce.GTC,
+                    stop_price=sp,
+                    client_order_id=_make_client_order_id(f"{ticker}-STOP"),
+                )
+            order = client.submit_order(order_data=req)
+            logger.info(
+                f"[AlpacaBroker] 🛡️ {ticker} stop GTC armé @ {sp:.2f}"
+                + (f" + TP {float(take_profit):.2f} (OCO)" if take_profit else "")
+                + f" | id={order.id}"
+            )
+            return str(order.id)
+        except Exception as exc:
+            logger.error(f"[AlpacaBroker] _arm_stop {ticker} @ {stop_price} : {exc}")
+            return None
+
+    def ensure_protective_stops(self, open_rows: list[dict]) -> list[dict]:
+        """Garantit qu'une jambe STOP ouverte existe chez le broker pour chaque
+        position OPEN du journal. Appelé à chaque cycle tracker.
+
+        Pour chaque ligne : si Alpaca détient la position et qu'aucun ordre
+        stop de sortie n'est ouvert → pose un stop GTC (OCO si TP connu) au
+        `Stop_Loss` du journal, ou au plancher catastrophe
+        `IMPORT_FALLBACK_SL_PCT` si le journal n'en a pas.
+
+        Retourne la liste des actions `{ticker, stop_price, take_profit,
+        order_id, fallback, ok}` — le tracker persiste le SL fallback dans le
+        journal et alerte.
+        """
+        actions: list[dict] = []
+        try:
+            client = self._get_client()
+            positions = {
+                str(p.symbol).upper(): p for p in client.get_all_positions()
+            }
+        except Exception as exc:
+            logger.warning(f"[AlpacaBroker] ensure_protective_stops : {exc}")
+            return actions
+
+        seen: set[str] = set()
+        for row in open_rows:
+            ticker = str(row.get("Ticker") or "").strip().upper()
+            if not ticker or ticker in seen or ticker not in positions:
+                continue
+            seen.add(ticker)
+            direction = str(row.get("Direction") or "LONG").upper()
+            orders = self._open_orders_for(client, ticker)
+            if self._find_open_stop(orders, direction) is not None:
+                continue
+
+            def _f(v) -> float | None:
+                try:
+                    x = float(v)
+                    return x if math.isfinite(x) and x > 0 else None
+                except (TypeError, ValueError):
+                    return None
+
+            sl = _f(row.get("Stop_Loss"))
+            tp = _f(row.get("Take_Profit"))
+            entry = _f(row.get("Entry")) or _f(getattr(positions[ticker], "avg_entry_price", None))
+            fallback = False
+            if sl is None:
+                if entry is None:
+                    logger.error(f"[AlpacaBroker] {ticker} sans SL ni prix d'entrée — impossible d'armer")
+                    continue
+                sl = round(entry * (1.0 - IMPORT_FALLBACK_SL_PCT), 2) if direction == "LONG" \
+                    else round(entry * (1.0 + IMPORT_FALLBACK_SL_PCT), 2)
+                fallback = True
+
+            logger.warning(
+                f"[AlpacaBroker] ⚠️ {ticker} position OPEN SANS stop chez le broker — "
+                f"ré-armement @ {sl:.2f}" + (" (plancher catastrophe, SL journal absent)" if fallback else "")
+            )
+            qty = abs(float(positions[ticker].qty))
+            oid = self._arm_stop(client, ticker, sl, direction, take_profit=tp, qty=qty)
+            actions.append({
+                "ticker": ticker, "stop_price": sl, "take_profit": tp,
+                "order_id": oid, "fallback": fallback, "ok": oid is not None,
+            })
+        return actions
+
     def update_stop_loss(
         self,
         ticker: str,
@@ -788,85 +976,110 @@ class AlpacaBroker(BrokerGateway):
         direction: str = "LONG",
         update_csv: bool = True,
     ) -> bool:
-        """
-        Remplace le Stop Loss de l'ordre bracket existant.
+        """Remplace le Stop Loss de la jambe bracket/OCO existante.
+
+        Audit 2026-09-17 : si aucune jambe stop n'est ouverte (bracket DAY
+        expiré, import, OCO annulé…), on en **crée** une (GTC) au lieu de
+        retourner False silencieusement — le trailing stop doit toujours
+        finir chez le broker.
         """
         try:
-            from alpaca.trading.enums import QueryOrderStatus
-            from alpaca.trading.requests import GetOrdersRequest, ReplaceOrderRequest
+            from alpaca.trading.requests import ReplaceOrderRequest
 
             client = self._get_client()
-            request = GetOrdersRequest(
-                status=QueryOrderStatus.OPEN,
-                symbols=[ticker],
-            )
-            open_orders = client.get_orders(filter=request)
-            for order in open_orders:
-                order_type = str(getattr(order, "type", "")).lower()
-                if "stop" in order_type:
-                    replacement = ReplaceOrderRequest(stop_price=round(new_sl, 2))
-                    client.replace_order_by_id(str(order.id), replacement)
-                    logger.info(f"[AlpacaBroker] Bracket SL {ticker} remplacé par {new_sl:.2f}")
+            orders = self._open_orders_for(client, ticker)
+            stop_order = self._find_open_stop(orders, direction)
+            if stop_order is not None:
+                replacement = ReplaceOrderRequest(stop_price=round(new_sl, 2))
+                client.replace_order_by_id(str(stop_order.id), replacement)
+                logger.info(f"[AlpacaBroker] Bracket SL {ticker} remplacé par {new_sl:.2f}")
+            else:
+                if self._arm_stop(client, ticker, new_sl, direction) is None:
+                    return False
 
-                    if update_csv:
-                        import pandas as pd
-                        from filelock import FileLock
-                        with FileLock(str(CSV_LOCK_PATH), timeout=10):
-                            ensure_csv_schema(CSV_PATH)
-                            df = pd.read_csv(CSV_PATH, dtype=str)
-                            mask = (df["Ticker"] == ticker) & (df["Status"] == "OPEN")
-                            if mask.any():
-                                idx = df[mask].index[0]
-                                df.at[idx, "Stop_Loss"] = str(round(new_sl, 4))
-                                df.to_csv(CSV_PATH, index=False)
-                    return True
-            return False
+            if update_csv:
+                import pandas as pd
+                from filelock import FileLock
+                with FileLock(str(CSV_LOCK_PATH), timeout=10):
+                    ensure_csv_schema(CSV_PATH)
+                    df = pd.read_csv(CSV_PATH, dtype=str)
+                    mask = (df["Ticker"] == ticker) & (df["Status"] == "OPEN")
+                    if mask.any():
+                        idx = df[mask].index[0]
+                        df.at[idx, "Stop_Loss"] = str(round(new_sl, 4))
+                        df.to_csv(CSV_PATH, index=False)
+            return True
         except Exception as exc:
             logger.warning(f"[AlpacaBroker] update_stop_loss {ticker} : {exc}")
             return False
 
     def sync_fills_from_alpaca(self) -> int:
-        """
-        Synchronise les positions clôturées automatiquement par Alpaca (bracket SL/TP)
-        avec le CSV local.
+        """Réconcilie les lignes OPEN du journal avec l'état réel du broker.
 
-        Logique :
-          - Récupère tous les ordres filled des 7 derniers jours
-          - Pour chaque ticker OPEN dans le CSV, vérifie si Alpaca a une position fermée
-          - Si Alpaca dit que la position est fermée → met à jour le CSV
+        Réécrite le 2026-09-17 (audit P0-3). L'ancienne version cherchait
+        « les 10 derniers ordres fermés du symbole » sans borne temporelle :
+        un trade ouvert le matin était clôturé 2 min plus tard avec le fill de
+        clôture d'un trade précédent (CF 17/08 → fill du 27/07), puis
+        ré-importé sans stop. Règles maintenant :
 
-        Returns:
-            Nombre de positions synchronisées.
+          1. Fenêtre de grâce : une ligne écrite il y a < SYNC_GRACE_MINUTES
+             n'est jamais réconciliée (latence fill/position à l'ouverture).
+          2. Position toujours ouverte chez Alpaca → seul le partial-fill
+             (qty) est corrigé.
+          3. Position absente → on relit le **parent** par `Order_ID` (UUID
+             Alpaca) : jamais fillé + canceled/expired/rejected → CANCELED.
+          4. Sinon on cherche un fill de **sortie** (side opposé, filled_qty>0,
+             filled_at > date d'entrée) fermé APRÈS l'entrée → WIN/LOSS avec
+             Close_Reason déduit du type d'ordre. Aucun fill → on laisse OPEN
+             et on log (jamais de clôture sur un fill ancien).
+
+        Returns: nombre de lignes modifiées.
         """
+        from datetime import UTC, timedelta
+
         import pandas as pd
         from filelock import FileLock
 
         synced = 0
         try:
             client = self._get_client()
-
-            # Positions encore ouvertes dans Alpaca + map qty pour partial-fill detect
-            alpaca_open_map = {str(p.symbol).upper(): float(p.qty) for p in client.get_all_positions()}
-            alpaca_open = set(alpaca_open_map.keys())
+            alpaca_open_map = {
+                str(p.symbol).upper(): float(p.qty) for p in client.get_all_positions()
+            }
+            now_local = datetime.now()
 
             with FileLock(str(CSV_LOCK_PATH), timeout=10):
                 ensure_csv_schema(CSV_PATH)
                 df = pd.read_csv(CSV_PATH, dtype=str)
-                open_mask = df["Status"] == "OPEN"
-                csv_open  = df[open_mask]["Ticker"].str.upper().tolist()
+                open_idx = list(df.index[df["Status"] == "OPEN"])
 
-                for ticker in csv_open:
-                    if ticker in alpaca_open:
-                        # Ticker OK côté broker — vérifier Lot 14 : PARTIAL FILL
-                        # ou entry qty différente (rare mais possible sur IPO freshly
-                        # listed ou liquidité faible). On ajuste le CSV sur la vraie
-                        # qty du broker.
+                for idx in open_idx:
+                    row = df.loc[idx]
+                    ticker = str(row.get("Ticker") or "").strip().upper()
+                    direction = str(row.get("Direction") or "LONG").strip().upper()
+                    if not ticker:
+                        continue
+
+                    # 1. Fenêtre de grâce (Date du journal = heure locale du process).
+                    try:
+                        entry_local = datetime.strptime(str(row.get("Date"))[:19], "%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        try:
+                            entry_local = datetime.strptime(str(row.get("Date"))[:16], "%Y-%m-%d %H:%M")
+                        except Exception:
+                            entry_local = now_local - timedelta(days=365)
+                    if (now_local - entry_local) < timedelta(minutes=SYNC_GRACE_MINUTES):
+                        logger.debug(f"[AlpacaBroker][Sync] {ticker} : ligne < {SYNC_GRACE_MINUTES} min, skip")
+                        continue
+                    # Borne UTC pour les requêtes Alpaca (marge 1 h pour l'offset local).
+                    entry_utc = (entry_local - timedelta(hours=1)).replace(tzinfo=UTC)
+
+                    # 2. Position toujours ouverte → partial fill uniquement.
+                    if ticker in alpaca_open_map:
                         try:
                             alpaca_qty = alpaca_open_map[ticker]
-                            row = df[(df["Ticker"] == ticker) & (df["Status"] == "OPEN")].iloc[0]
                             csv_qty = float(row.get("Size") or 0)
-                            if abs(alpaca_qty - csv_qty) >= 1.0:  # différence significative
-                                idx = df[(df["Ticker"] == ticker) & (df["Status"] == "OPEN")].index[0]
+                            if abs(alpaca_qty - csv_qty) >= 1.0:
                                 df.at[idx, "Size"] = str(int(alpaca_qty))
                                 logger.warning(
                                     f"[AlpacaBroker][Sync] {ticker} partial fill détecté : "
@@ -877,93 +1090,100 @@ class AlpacaBroker(BrokerGateway):
                             logger.debug(f"[AlpacaBroker][Sync] partial-fill check {ticker} : {exc}")
                         continue
 
-                    # Alpaca n'a plus cette position. Deux cas :
-                    #   A. Bracket hit (SL/TP fillé) → WIN/LOSS
-                    #   B. Ordre d'entrée expired/canceled → CANCELED (jamais ouvert)
+                    # 3. Parent jamais fillé → CANCELED.
+                    order_id = str(row.get("Order_ID") or "").strip()
+                    parent = None
+                    if len(order_id) == 36 and order_id.count("-") == 4:
+                        try:
+                            parent = client.get_order_by_id(order_id)
+                        except Exception as exc:
+                            logger.debug(f"[AlpacaBroker][Sync] get_order_by_id {order_id} : {exc}")
+                    if parent is not None:
+                        p_status = str(getattr(parent, "status", "")).lower()
+                        p_filled = float(getattr(parent, "filled_qty", 0) or 0)
+                        if p_filled <= 0 and any(s in p_status for s in ("canceled", "expired", "rejected")):
+                            df.at[idx, "Status"] = "CANCELED"
+                            df.at[idx, "Exit_Price"] = df.at[idx, "Entry"]
+                            df.at[idx, "Exit_Date"] = now_local.strftime("%Y-%m-%d %H:%M")
+                            df.at[idx, "Close_Reason"] = "ENTRY_EXPIRED"
+                            synced += 1
+                            logger.warning(
+                                f"[AlpacaBroker][Sync] {ticker} → CANCELED (parent {p_status}, jamais fillé)"
+                            )
+                            continue
+
+                    # 4. Fill de sortie postérieur à l'entrée.
                     try:
                         from alpaca.trading.enums import QueryOrderStatus
                         from alpaca.trading.requests import GetOrdersRequest
                         req = GetOrdersRequest(
                             status=QueryOrderStatus.CLOSED,
                             symbols=[ticker],
-                            limit=10,
+                            after=entry_utc,
+                            limit=100,
                         )
-                        closed_orders = client.get_orders(filter=req)
-                        exit_price: float | None = None
-                        status_code = "WIN"
-                        any_filled = False
-                        any_expired = False
-                        order_type = ""
-                        for o in sorted(closed_orders, key=lambda x: str(x.filled_at or x.submitted_at or ""), reverse=True):
-                            o_status = str(getattr(o, "status", "")).lower()
-                            if "expired" in o_status or "canceled" in o_status:
-                                any_expired = True
-                            if o.filled_avg_price and float(o.filled_avg_price) > 0:
-                                any_filled = True
-                                exit_price = float(o.filled_avg_price)
-                                order_type = str(getattr(o, "type", "")).lower()
-                                status_code = "LOSS" if "stop" in order_type else "WIN"
-                                break
-
-                        idx = df[(df["Ticker"] == ticker) & (df["Status"] == "OPEN")].index[0]
-
-                        # Cas B : aucun fill, uniquement des expired/canceled
-                        # → bracket d'entrée jamais exécuté, on marque CANCELED.
-                        if not any_filled and any_expired:
-                            df.at[idx, "Status"] = "CANCELED"
-                            df.at[idx, "Exit_Price"] = df.at[idx, "Entry"]  # PnL=0
-                            df.at[idx, "Exit_Date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                            df.at[idx, "Close_Reason"] = "ENTRY_EXPIRED"
-                            synced += 1
-                            logger.warning(
-                                f"[AlpacaBroker][Sync] {ticker} → CANCELED "
-                                f"(bracket d'entrée expired/canceled — jamais ouvert)"
-                            )
-                            continue
-
-                        if exit_price is None:
-                            logger.debug(
-                                f"[AlpacaBroker][Sync] {ticker} : pas d'order closed "
-                                f"ou prix non exploitable, skip."
-                            )
-                            continue
-
-                        # Raffinement WIN/LOSS réel par direction et P&L.
-                        row = df[(df["Ticker"] == ticker) & (df["Status"] == "OPEN")].iloc[0]
-                        entry_price = float(row.get("Entry", exit_price))
-                        direction   = str(row.get("Direction", "LONG")).upper()
-                        if direction == "LONG":
-                            status_code = "WIN" if exit_price > entry_price else "LOSS"
-                        else:
-                            status_code = "WIN" if exit_price < entry_price else "LOSS"
-
-                        # Close_Reason best-effort depuis le type d'ordre broker —
-                        # ce chemin réconcilie soit un bracket SL/TP fillé nativement
-                        # côté Alpaca, soit une clôture evaluate_trades dont le fill
-                        # n'a pas confirmé dans la fenêtre d'attente (cf. close_position).
-                        # Dans les deux cas, mieux vaut une raison approximative que
-                        # Close_Reason vide (bug corrigé 2026-07-16).
-                        if "stop" in order_type:
-                            close_reason = "SL_HIT"
-                        elif "limit" in order_type:
-                            close_reason = "TP_HIT"
-                        else:
-                            close_reason = "BROKER_SYNC"
-
-                        df.at[idx, "Status"]     = status_code
-                        df.at[idx, "Exit_Price"] = str(round(exit_price, 6))
-                        df.at[idx, "Exit_Date"]  = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        df.at[idx, "Close_Reason"] = close_reason
-                        synced += 1
-                        logger.info(
-                            f"[AlpacaBroker][Sync] {ticker} → {status_code} @ {exit_price:.4f} "
-                            f"(bracket fermé par Alpaca, reason={close_reason})"
-                        )
+                        closed_orders = list(client.get_orders(filter=req) or [])
                     except Exception as exc:
-                        logger.warning(f"[AlpacaBroker][Sync] Erreur {ticker} : {exc}")
+                        logger.warning(f"[AlpacaBroker][Sync] get_orders(CLOSED) {ticker} : {exc}")
+                        continue
+
+                    exit_side = self._exit_side_name(direction)
+                    fills = []
+                    for o in closed_orders:
+                        try:
+                            if self._order_side(o) != exit_side:
+                                continue
+                            fq = float(getattr(o, "filled_qty", 0) or 0)
+                            fp = float(getattr(o, "filled_avg_price", 0) or 0)
+                            fa = getattr(o, "filled_at", None)
+                            if fq <= 0 or fp <= 0 or fa is None:
+                                continue
+                            fa_utc = fa if fa.tzinfo else fa.replace(tzinfo=UTC)
+                            if fa_utc <= entry_utc:
+                                continue
+                            fills.append((fa_utc, fp, self._order_type(o), fq))
+                        except Exception:
+                            continue
+
+                    if not fills:
+                        logger.warning(
+                            f"[AlpacaBroker][Sync] {ticker} : position absente chez Alpaca mais "
+                            "aucun fill de sortie postérieur à l'entrée — ligne laissée OPEN "
+                            "(vérifier manuellement)."
+                        )
+                        continue
+
+                    fills.sort(key=lambda x: x[0])
+                    _, exit_price, order_type, _ = fills[-1]
+                    entry_price = float(row.get("Entry") or exit_price)
+                    if direction == "LONG":
+                        status_code = "WIN" if exit_price > entry_price else "LOSS"
+                    else:
+                        status_code = "WIN" if exit_price < entry_price else "LOSS"
+                    if "stop" in order_type:
+                        close_reason = "SL_HIT"
+                    elif order_type == "limit":
+                        close_reason = "TP_HIT"
+                    else:
+                        close_reason = "BROKER_SYNC"
+
+                    df.at[idx, "Status"] = status_code
+                    df.at[idx, "Exit_Price"] = str(round(exit_price, 6))
+                    df.at[idx, "Exit_Date"] = now_local.strftime("%Y-%m-%d %H:%M")
+                    df.at[idx, "Close_Reason"] = close_reason
+                    synced += 1
+                    logger.info(
+                        f"[AlpacaBroker][Sync] {ticker} → {status_code} @ {exit_price:.4f} "
+                        f"(fill {order_type} postérieur à l'entrée, reason={close_reason})"
+                    )
 
                 if synced > 0:
                     df.to_csv(CSV_PATH, index=False)
+                    try:
+                        from modules.duckdb_journal import sync_from_csv
+                        sync_from_csv()
+                    except Exception as _db_exc:
+                        logger.debug(f"[AlpacaBroker][Sync] duckdb sync : {_db_exc}")
 
         except Exception as exc:
             logger.error(f"[AlpacaBroker] sync_fills_from_alpaca : {exc}")
@@ -1005,11 +1225,18 @@ class AlpacaBroker(BrokerGateway):
             return float(config.ACCOUNT_SIZE)
 
     def import_positions_to_csv(self) -> int:
-        """
-        Importe les positions Alpaca actuellement ouvertes dans trade_journal.csv.
-        Utilisé par --alpaca-sync pour migrer depuis paper trading.
+        """Importe dans le journal les positions Alpaca absentes du CSV.
 
-        Skips les tickers déjà OPEN dans le CSV.
+        Réécrit le 2026-09-17 (audit P2-7). Avant : ligne muette (pas de SL,
+        pas de TP, pas de scores) → position jamais protégée par le tracker
+        (`nan%→SL`) et invisible pour `thesis_stop`. Maintenant :
+          • SL/TP récupérés depuis les jambes STOP/LIMIT ouvertes chez Alpaca ;
+          • sinon SL = plancher catastrophe (IMPORT_FALLBACK_SL_PCT) + WARNING ;
+          • `Signal=ALPACA_IMPORT`, `Order_ID` daté (unicité) ;
+          • miroir DuckDB.
+        Un import ne devrait jamais arriver en fonctionnement normal (chaque
+        ordre passe par submit_order) : c'est un filet, et il est bruyant.
+
         Returns: nombre de positions importées.
         """
         import pandas as pd
@@ -1022,6 +1249,7 @@ class AlpacaBroker(BrokerGateway):
                 logger.info("[AlpacaBroker] Aucune position ouverte à importer.")
                 return 0
 
+            client = self._get_client()
             with FileLock(str(CSV_LOCK_PATH), timeout=10):
                 ensure_csv_schema(CSV_PATH)
                 df = pd.read_csv(CSV_PATH, dtype=str)
@@ -1029,26 +1257,56 @@ class AlpacaBroker(BrokerGateway):
 
                 rows_to_add = []
                 for p in alpaca_positions:
-                    if p.ticker.upper() in existing_open:
-                        logger.info(f"[AlpacaBroker][Import] {p.ticker} déjà OPEN dans CSV — ignoré")
+                    ticker = p.ticker.upper()
+                    if ticker in existing_open:
                         continue
 
-                    rows_to_add.append({
+                    orders = self._open_orders_for(client, ticker)
+                    stop_o = self._find_open_stop(orders, p.direction)
+                    limit_o = self._find_open_limit(orders, p.direction)
+                    sl = None
+                    tp = None
+                    try:
+                        if stop_o is not None and getattr(stop_o, "stop_price", None):
+                            sl = round(float(stop_o.stop_price), 4)
+                        if limit_o is not None and getattr(limit_o, "limit_price", None):
+                            tp = round(float(limit_o.limit_price), 4)
+                    except (TypeError, ValueError):
+                        pass
+                    fallback = False
+                    if sl is None:
+                        fallback = True
+                        sl = round(p.entry * (1.0 - IMPORT_FALLBACK_SL_PCT), 4) if p.direction == "LONG" \
+                            else round(p.entry * (1.0 + IMPORT_FALLBACK_SL_PCT), 4)
+
+                    row = {col: "" for col in CSV_SCHEMA}
+                    row.update({
                         "Date":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "Ticker":      p.ticker,
+                        "Ticker":      ticker,
                         "Direction":   p.direction,
                         "Entry":       round(p.entry, 4),
-                        "Stop_Loss":   "",
-                        "Take_Profit": "",
+                        "Stop_Loss":   sl,
+                        "Initial_SL":  sl,
+                        "Take_Profit": "" if tp is None else tp,
                         "Size":        p.size,
                         "RR":          "",
                         "Status":      "OPEN",
-                        "Exit_Price":  "",
-                        "Exit_Date":   "",
-                        "Order_ID":    f"ALPACA-IMPORT-{p.ticker}",
+                        "Order_ID":    f"ALPACA-IMPORT-{ticker}-{datetime.now().strftime('%Y%m%d')}",
+                        "Signal":      "ALPACA_IMPORT",
                     })
+                    rows_to_add.append(row)
                     imported += 1
-                    logger.info(f"[AlpacaBroker][Import] {p.ticker} {p.direction} ×{p.size} @ {p.entry:.2f}")
+                    level = logger.warning if fallback else logger.info
+                    level(
+                        f"[AlpacaBroker][Import] {ticker} {p.direction} ×{p.size} @ {p.entry:.2f} "
+                        f"| SL={sl} TP={tp}"
+                        + (" — AUCUN stop broker : plancher catastrophe appliqué" if fallback else "")
+                    )
+                    try:
+                        from modules.duckdb_journal import shadow_insert
+                        shadow_insert(row)
+                    except Exception:
+                        pass
 
                 if rows_to_add:
                     new_df = pd.DataFrame(rows_to_add)
@@ -1059,7 +1317,6 @@ class AlpacaBroker(BrokerGateway):
             logger.error(f"[AlpacaBroker] import_positions_to_csv : {exc}")
 
         return imported
-
 
 # ─────────────────────────────────────────────────────────────────
 # FACTORY — Retourne le bon broker selon BROKER_MODE
