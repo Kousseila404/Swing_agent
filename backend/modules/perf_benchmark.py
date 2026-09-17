@@ -78,10 +78,12 @@ def account_equity_series(months: int = 6) -> list[tuple[str, float]]:
             paper="paper" in str(config.ALPACA_BASE_URL),
         )
         period = f"{max(1, min(months, 12))}M"
-        hist = client.get_portfolio_history(
+        hist: Any = client.get_portfolio_history(
             GetPortfolioHistoryRequest(period=period, timeframe="1D", extended_hours=False)
         )
-        for ts, eq in zip(hist.timestamp or [], hist.equity or [], strict=False):
+        timestamps = getattr(hist, "timestamp", None) or (hist.get("timestamp") if isinstance(hist, dict) else None) or []
+        equities = getattr(hist, "equity", None) or (hist.get("equity") if isinstance(hist, dict) else None) or []
+        for ts, eq in zip(timestamps, equities, strict=False):
             try:
                 v = float(eq or 0)
             except (TypeError, ValueError):
@@ -165,7 +167,7 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
                 top_n=top_n, benchmark=None, slippage_bps=BASKET_SLIPPAGE_BPS,
                 publication_lag_days=5,
             )
-            d = res.to_dict() if hasattr(res, "to_dict") else res
+            d: dict[str, Any] = res.to_dict() if hasattr(res, "to_dict") else dict(res)  # type: ignore[arg-type]
             periods = [p for p in (d.get("periods") or []) if str(p.get("signal_date", "")) >= LIVE_START.isoformat()]
         except Exception as exc:
             logger.warning(f"[PerfBenchmark] backtest panier échoué : {exc}")

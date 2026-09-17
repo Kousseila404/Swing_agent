@@ -205,7 +205,7 @@ def get_system_health(_auth: None = Security(api_core.require_auth)):
     hb = api_core.read_json(api_core.TRACKER_HEARTBEAT_PATH, {}) or {}
     hb_age = None
     try:
-        hb_age = round(time.time() - float(hb.get("epoch")), 1) if hb.get("epoch") else None
+        hb_age = round(time.time() - float(hb.get("epoch") or 0), 1) if hb.get("epoch") else None
     except (TypeError, ValueError):
         hb_age = None
     trading = api_core.read_json(api_core.TRADING_PATH, {}) or {}
