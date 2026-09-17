@@ -138,6 +138,30 @@ BEAR_HEDGE_PCT_OF_BOOK  = 0.10     # 10 % du capital total
 BEAR_HEDGE_MIN_DAYS     = 3        # confirmation N-jours (anti-whipsaw)
 
 # ─────────────────────────────────────────────────────────────────
+# 5quater. KILLSWITCH & CIRCUIT BREAKER — recalibrés LT (audit 2026-09-17)
+# ─────────────────────────────────────────────────────────────────
+# Avant : drawdown journalier ≤ −4 % → liquidation de TOUTES les positions
+# (« nuclear stop »). Incohérent avec une détention 60 j+ : une séance S&P à
+# −4 % vendait tout au pire moment. Maintenant :
+#   • KILLSWITCH_ACTION = "freeze" → gel des nouvelles entrées + alerte, les
+#     stops individuels restent la seule cause de sortie. "liquidate" = ancien
+#     comportement (à réserver à un compte levier/short).
+#   • Seuil relevé à −6 % (VIX 30+ : le book entier peut bouger de 4 % en une
+#     séance sans que la thèse d'aucune position ne soit cassée).
+KILLSWITCH_ACTION       = os.getenv("KILLSWITCH_ACTION", "freeze")
+MAX_DAILY_DRAWDOWN_PCT  = float(os.getenv("MAX_DAILY_DRAWDOWN_PCT", "6.0"))
+
+# Circuit breaker progressif (modules/risk.DrawdownCircuitBreaker) : le peak
+# est désormais échantillonné **1×/jour** (pas 1×/cycle 2 min, cf. cycle.py)
+# sur une fenêtre roulante de 60 séances, avec des seuils de drawdown LT :
+#   −8 % → nouvelles positions à 75 % ; −12 % → 50 % ; −16 % → pause 5 séances.
+CB_ROLLING_WINDOW_DAYS  = 60
+CB_DD_REDUCE_75_PCT     = -8.0
+CB_DD_REDUCE_50_PCT     = -12.0
+CB_DD_PAUSE_PCT         = -16.0
+CB_PAUSE_DAYS           = 5
+
+# ─────────────────────────────────────────────────────────────────
 # 6. LOGGING
 # ─────────────────────────────────────────────────────────────────
 LOG_FILE  = "logs/agent.log"

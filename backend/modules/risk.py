@@ -216,7 +216,15 @@ class DrawdownCircuitBreaker:
         pause_days: int = 5,
         rolling_window: int = 20,
         equity_history: list[float] | None = None,
+        dd_reduce_75_pct: float = -2.0,
+        dd_reduce_50_pct: float = -3.0,
+        dd_pause_pct: float = -4.0,
     ):
+        # Seuils paramétrables (audit 2026-09-17) — defaults = legacy swing.
+        # Le tracker LT passe config.CB_DD_* (−8/−12/−16 %).
+        self.dd_reduce_75_pct = float(dd_reduce_75_pct)
+        self.dd_reduce_50_pct = float(dd_reduce_50_pct)
+        self.dd_pause_pct = float(dd_pause_pct)
         self.pause_days = pause_days
         self._pause_remaining = 0   # jours de pause restants
         # Buffer FIFO pour le calcul du peak rolling. On seed avec peak_equity
@@ -256,13 +264,15 @@ class DrawdownCircuitBreaker:
         """Retourne le multiplicateur de taille (0.0 si en pause)."""
         if self._pause_remaining > 0:
             return 0.0
+        if not self.peak_equity or self.peak_equity <= 0:
+            return 1.0
         dd_pct = (current_equity - self.peak_equity) / self.peak_equity * 100
-        if dd_pct <= -4.0:
+        if dd_pct <= self.dd_pause_pct:
             self._pause_remaining = self.pause_days
             return 0.0
-        if dd_pct <= -3.0:
+        if dd_pct <= self.dd_reduce_50_pct:
             return 0.5
-        if dd_pct <= -2.0:
+        if dd_pct <= self.dd_reduce_75_pct:
             return 0.75
         return 1.0
 

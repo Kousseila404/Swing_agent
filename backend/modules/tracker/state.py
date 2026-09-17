@@ -198,6 +198,9 @@ def save_cb_state(cb: DrawdownCircuitBreaker, multiplier: float) -> None:
             "is_paused":       cb.is_paused(),
             "equity_history":  [round(v, 2) for v in getattr(cb, "_equity_history", [])],
             "rolling_window":  getattr(cb, "_rolling_window", 20),
+            # Audit 2026-09-17 — date de la dernière lecture poussée dans le
+            # buffer : le tracker n'échantillonne qu'1×/jour (cf. cycle.py).
+            "last_reading_date": getattr(cb, "last_reading_date", None),
             "updated_at":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         CB_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
