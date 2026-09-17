@@ -24,6 +24,9 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Diagnostic du React Compiler (non utilisé dans ce projet) : signale
+      // les useMemo qu'il ne saurait pas préserver, sans bug runtime.
+      'react-hooks/preserve-manual-memoization': 'off',
     },
   },
 ])

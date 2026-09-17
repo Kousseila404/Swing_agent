@@ -37,7 +37,42 @@ def test_is_market_hours_fallbacks_to_false_on_error(monkeypatch):
             raise ImportError(f"{name} missing")
         return real_import(name, *a, **k)
     monkeypatch.setattr(builtins, "__import__", _mock_import)
+    monkeypatch.setattr(market, "_ALPACA_CLOCK_CACHE", None)
     assert market.is_market_hours() is False
+
+
+def test_is_market_hours_caches_alpaca_clock(monkeypatch):
+    """Le clock Alpaca n'est interrogé qu'une fois par fenêtre TTL."""
+    from modules import broker_gateway
+
+    calls = {"n": 0}
+
+    class _Clock:
+        is_open = True
+
+    class _Client:
+        def get_clock(self):
+            calls["n"] += 1
+            return _Clock()
+
+    class _FakeAlpaca(broker_gateway.AlpacaBroker):
+        def __init__(self):  # pas d'exigence de clés API
+            pass
+
+        def _get_client(self):
+            return _Client()
+
+    monkeypatch.setattr(broker_gateway, "get_broker", lambda **_kw: _FakeAlpaca())
+    monkeypatch.setattr(market, "_ALPACA_CLOCK_CACHE", None)
+
+    assert market.is_market_hours() is True
+    assert market.is_market_hours() is True
+    assert calls["n"] == 1
+
+    # TTL expiré → nouvel appel réseau.
+    monkeypatch.setattr(market, "_ALPACA_CLOCK_CACHE", (True, 0.0))
+    assert market.is_market_hours() is True
+    assert calls["n"] == 2
 
 
 # ─────────────────────────────────────────────────────────────────

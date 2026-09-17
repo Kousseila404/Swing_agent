@@ -37,11 +37,12 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 # Ajoute backend/ au PYTHONPATH pour que `import config` et les `from modules …`
 # fonctionnent quand uvicorn pointe sur api:app depuis n'importe quel CWD.
@@ -191,15 +192,29 @@ app = FastAPI(title="SwingQuant TITAN API", version="2.0.0", lifespan=_lifespan)
 #   - Referrer-Policy: same-origin       → fuite minimale sur les liens sortants.
 #   - Cache-Control private par défaut sur /api/* (les endpoints sensibles
 #     posent leur propre Cache-Control plus strict si besoin).
-class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next) -> Response:
-        response: Response = await call_next(request)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "same-origin")
-        if request.url.path.startswith("/api/"):
-            response.headers.setdefault("Cache-Control", "private, max-age=0")
-        return response
+# Middleware ASGI pur (pas BaseHTTPMiddleware) : pas de buffering du body ni
+# de task group par requête, compatible streaming / StaticFiles.
+class _SecurityHeadersMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        is_api = scope.get("path", "").startswith("/api/")
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("X-Content-Type-Options", "nosniff")
+                headers.setdefault("X-Frame-Options", "DENY")
+                headers.setdefault("Referrer-Policy", "same-origin")
+                if is_api:
+                    headers.setdefault("Cache-Control", "private, max-age=0")
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 app.add_middleware(_SecurityHeadersMiddleware)
@@ -207,7 +222,7 @@ app.add_middleware(_SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "If-None-Match"],
     expose_headers=["ETag"],
 )

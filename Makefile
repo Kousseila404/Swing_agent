@@ -37,11 +37,11 @@ test-fast: ## pytest -x --ff (stoppe au premier échec, priorité flaky)
 test-cov: ## pytest avec couverture (terminal + xml)
 	cd $(BACKEND) && $(PYTEST) tests/ --cov=modules --cov-report=term --cov-report=xml
 
-lint: ## Ruff lint backend (modules + tests + entrypoints)
-	cd $(BACKEND) && $(RUFF) check modules/ tests/ api.py tracker.py
+lint: ## Ruff + mypy backend (même périmètre que la CI)
+	cd $(BACKEND) && $(RUFF) check . && $(PY) -m mypy --config-file mypy.ini .
 
 lint-fix: ## Ruff auto-fix
-	cd $(BACKEND) && $(RUFF) check --fix modules/ tests/ api.py tracker.py
+	cd $(BACKEND) && $(RUFF) check --fix .
 
 types: ## Frontend : régénère openapi→ts et fail si drift
 	$(NPM) run check:types

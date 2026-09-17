@@ -9,7 +9,7 @@ brackets avec gates fail-closed.
 
 ## Stack
 
-- **Backend** — FastAPI, DuckDB, yfinance/FMP/Polygon adapters, ~28 k LOC, 708 tests.
+- **Backend** — FastAPI, DuckDB, yfinance/FMP/Polygon adapters, ~28 k LOC, 1386 tests.
 - **Frontend** — React 19, React Query, Recharts, openapi-typescript pour les types.
 - **Prod** — `swing-api.service` (systemd) sur VM unique. Cron quotidien `run_titan.sh` à 06:00.
 
@@ -58,22 +58,23 @@ backend/
     tracker/                # killswitch, evaluation, market hours
     sector_metrics/         # scoring sectoriel
   data_providers/           # ABC + FMP/Polygon/yfinance/Stooq + composite fallback
-  tests/                    # 708 tests pytest
+  tests/                    # 1386 tests pytest
 frontend/
   src/api/                  # client + types générés depuis OpenAPI
   src/components/           # React 19 pages
   src/utils/                # helpers + tests Vitest
 scripts/
   backup_journal.sh         # backup atomique horodaté
-.github/workflows/ci.yml    # ruff + mypy strict whitelist + pytest+cov 55% + vitest + frontend build
+.github/workflows/ci.yml    # ruff + mypy + pytest+cov 60% + eslint + vitest + build + docker smoke run
 docker-compose.yml          # dev/CI reproductibilité
 DEPLOY.md                   # runbook ingénierie
 ```
 
 ## Tests & qualité
 
-- **708 tests pytest**, coverage **60.3 %** (seuil CI **55 %**, durcir vers 70 %).
-- **mypy strict** sur whitelist (`mypy.ini`), élargie module par module.
-- **ruff** + **pre-commit** (optionnel) pour bloquer les régressions style.
+- **1386 tests pytest**, coverage **64.5 %** (seuil CI **60 %**, durcir vers 70 %).
+- **mypy** sur tout le backend (0 erreur), strict sur `modules/portfolio/*` (`mypy.ini`).
+- **ruff** + **eslint** (bloquants en CI) + **pre-commit** (optionnel).
+- L'image Docker est démarrée en CI et doit répondre sur `/api/status`.
 
 Avant un changement risqué, voir la checklist `DEPLOY.md` § 8.

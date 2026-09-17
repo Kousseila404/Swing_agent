@@ -8,7 +8,7 @@
 //
 // Persistence dans localStorage via utils/presets.js.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   deletePreset, listPresets, loadLastApplied,
   markApplied, savePreset,
@@ -20,7 +20,13 @@ export default function PresetBar({ scope, current, onApply, label }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
 
-  useEffect(() => { setPresets(listPresets(scope)); }, [scope]);
+  // Changement de scope → recharge synchrone pendant le render (pattern
+  // "adjust state on prop change"), pas d'effet → pas de render en cascade.
+  const [prevScope, setPrevScope] = useState(scope);
+  if (scope !== prevScope) {
+    setPrevScope(scope);
+    setPresets(listPresets(scope));
+  }
 
   const apply = (p) => {
     onApply?.(p.payload);

@@ -7,6 +7,68 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased] — branche `claude/sweet-faraday-j0cdxp`
+
+### Audit infra/sécurité/CI (2026-09-17)
+
+Audit intégral hors moteur scoring (aucun poids ni logique de scoring touché).
+
+#### Fixed
+
+- **`backend/Dockerfile`** — installait `requirements.txt` (freeze legacy sans
+  `fastapi`/`uvicorn`/`psutil`) : l'image se construisait mais ne pouvait pas
+  démarrer. Passe sur `requirements-runtime.txt`, utilisateur non-root
+  `app`, `HEALTHCHECK` sur `/api/status`. La CI démarre désormais le
+  conteneur et exige une réponse `/api/status` (avant : build seul).
+- **`api.py` CORS** — `allow_methods` limité à `GET, POST` alors que les
+  routers exposent `PATCH` (thesis, review queue), `PUT` (notes) et `DELETE`
+  (watchlist, alertes) consommés par le frontend : préflight refusé dès que
+  le frontend n'est pas servi same-origin (proxy Vite). Ajout
+  `PUT/PATCH/DELETE/OPTIONS` + tests `test_api_middleware.py`.
+- **`frontend/src/api/{openapi.json,types.ts}`** — régénérés : 5 endpoints
+  `my_portfolio` (price_history, executions, thesis, review queue) manquaient
+  dans les types TypeScript.
+- **`tests/test_duckdb_journal.py::test_fail_open_on_bad_path`** — échouait
+  en root (chemin absolu créable) ; utilise un fichier régulier comme
+  parent, échec garanti quel que soit l'utilisateur.
+
+#### Changed — performance
+
+- **`api.py`** — middleware security headers réécrit en ASGI pur (plus de
+  `BaseHTTPMiddleware` : pas de buffering/task group par requête, compatible
+  streaming et `StaticFiles`).
+- **`modules/tracker/market.py`** — `is_market_hours()` cache 60 s la réponse
+  `get_clock()` Alpaca : avant, 1 appel réseau **par ticker et par cycle**
+  tracker (toutes les 2 min) pour une valeur qui ne change qu'à l'open/close.
+
+#### Security — dépendances (pip-audit / npm audit)
+
+- `fastapi 0.115.0 → 0.141.1` (starlette 0.38.6 → 1.6.0, 8 CVE),
+  `requests 2.32.5 → 2.34.2`, `filelock 3.19.1 → 3.20.3`,
+  `python-dotenv 1.2.1 → 1.2.3`, `lxml 6.0.2 → 6.1.3`,
+  `pyarrow 21.0.0 → 25.0.1`, `curl_cffi 0.13.0 → 0.16.3` (requiert
+  `yfinance 1.2.0 → 1.7.0`). Suite complète verte après bump.
+- Frontend : lockfile régénéré, 12 vulnérabilités dev-only → 0.
+  `eslint-plugin-react-hooks 7.0.1 → 7.1.1` : 5 violations corrigées
+  (setState dans `useEffect` → pattern "adjust state during render" dans
+  `CommandPalette`/`PresetBar`, id de toast impur → compteur `useRef`) ;
+  règle `preserve-manual-memoization` (React Compiler, non utilisé)
+  désactivée explicitement.
+
+#### CI
+
+- ESLint bloquant (était `continue-on-error`, la base est propre).
+- Seuil couverture `55 % → 60 %` (mesuré 64.5 %).
+- `make lint` aligné sur la CI (`ruff check .` + mypy, au lieu d'un
+  sous-ensemble de dossiers).
+
+#### Tests
+
+- 1386/1386 (baseline 1377 + 1 échec sandbox → +9 nouveaux : CORS
+  préflight ×4, security headers ×3, cache clock Alpaca, journal).
+
+---
+
 ## [Unreleased] — branche `claude/titan-hardening-2026-05-07`
 
 ### Audit & Hardening TITAN (2026-05-07)

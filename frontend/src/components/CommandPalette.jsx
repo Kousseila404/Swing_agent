@@ -75,13 +75,20 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
   const universeQ  = useUniverse(null, { enabled: open });
   const watchlistQ = useWatchlist({ enabled: open });
 
-  // Reset à l'ouverture, focus sur l'input.
-  useEffect(() => {
+  // Reset à l'ouverture (état ajusté pendant le render, pas dans un effet)
+  // puis focus sur l'input.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setQuery('');
       setCursor(0);
-      setTimeout(() => inputRef.current?.focus(), 10);
     }
+  }
+  useEffect(() => {
+    if (!open) return undefined;
+    const t = setTimeout(() => inputRef.current?.focus(), 10);
+    return () => clearTimeout(t);
   }, [open]);
 
   const tickerItems = useMemo(() => {
@@ -176,9 +183,6 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
   // Liste à plat pour la navigation clavier (cursor index).
   const flatList = useMemo(() => sections.flatMap(s => s.items), [sections]);
 
-  // Reset cursor quand la liste change (nouvelle query).
-  useEffect(() => { setCursor(0); }, [query]);
-
   // Scroll auto pour garder le cursor visible.
   useEffect(() => {
     if (!listRef.current) return;
@@ -243,7 +247,7 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenTicker
           <input
             ref={inputRef}
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => { setQuery(e.target.value); setCursor(0); }}
             onKeyDown={onKeyDown}
             placeholder="Tape pour chercher : ticker, page, action…"
             className="cmdk-input"

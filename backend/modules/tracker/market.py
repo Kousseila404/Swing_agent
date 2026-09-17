@@ -28,6 +28,13 @@ _INTRADAY_HISTORY_WINDOW_DAYS = 30
 _FX_CACHE: dict[str, tuple[float, float]] = {}  # pair -> (rate, fetched_epoch)
 _FX_CACHE_TTL_SECONDS = 300.0
 
+# Cache de l'horloge Alpaca — is_market_hours() est appelé une fois PAR ticker
+# et PAR cycle tracker (via get_current_price_detailed) ; sans cache, N
+# positions = N appels réseau get_clock() pour une réponse qui ne change
+# qu'à l'open/close. 60 s = granularité largement suffisante.
+_ALPACA_CLOCK_CACHE: tuple[bool, float] | None = None  # (is_open, fetched_epoch)
+_ALPACA_CLOCK_TTL_SECONDS = 60.0
+
 
 def get_fx_rate(pair: str) -> float | None:
     """Taux de change live pour une paire yfinance (ex: "EURUSD=X", "USDHKD=X").
@@ -64,14 +71,22 @@ def is_market_hours() -> bool:
          gère PAS les half-days (close 13:00 veille de Noël/Thanksgiving).
          Pour ces cas-là, configurer Alpaca.
     """
-    # 1) Source de vérité : Alpaca clock si dispo
+    # 1) Source de vérité : Alpaca clock si dispo (cachée 60 s)
+    global _ALPACA_CLOCK_CACHE
     try:
         from modules.broker_gateway import AlpacaBroker, get_broker
         broker = get_broker()
         if isinstance(broker, AlpacaBroker):
+            now_epoch = time.time()
+            if (
+                _ALPACA_CLOCK_CACHE is not None
+                and (now_epoch - _ALPACA_CLOCK_CACHE[1]) < _ALPACA_CLOCK_TTL_SECONDS
+            ):
+                return _ALPACA_CLOCK_CACHE[0]
             client = broker._get_client()
-            clock = client.get_clock()
-            return bool(clock.is_open)
+            is_open = bool(client.get_clock().is_open)
+            _ALPACA_CLOCK_CACHE = (is_open, now_epoch)
+            return is_open
     except Exception:
         pass  # fallback heuristique
 

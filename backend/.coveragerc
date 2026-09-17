@@ -1,5 +1,5 @@
 # SwingQuant TITAN — coverage config
-# Baseline 2026-04-29 : 60.3% sur modules/. Seuil CI = 55% pour absorber
+# Baseline 2026-09-17 : 64.5% sur modules/. Seuil CI = 60% pour absorber
 # les fluctuations, à durcir progressivement (objectif 70%).
 [run]
 source = modules
@@ -15,7 +15,7 @@ omit =
     modules/alpaca_*.py
 
 [report]
-fail_under = 55
+fail_under = 60
 show_missing = True
 skip_covered = False
 precision = 1

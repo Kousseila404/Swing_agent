@@ -75,9 +75,13 @@ class TestShadowInsert:
         assert r[0]["Entry"] == 150.5
         assert r[0]["Size"] == 5
 
-    def test_fail_open_on_bad_path(self):
-        # Chemin non-writable → False, pas d'exception
-        result = shadow_insert({"Ticker": "X"}, Path("/nonexistent/ro/fake.duckdb"))
+    def test_fail_open_on_bad_path(self, tmp_path: Path):
+        # Chemin non-writable → False, pas d'exception. Le parent est un
+        # fichier régulier : mkdir échoue même en root (contrairement à un
+        # chemin absolu inexistant, que root peut créer).
+        blocker = tmp_path / "not_a_dir"
+        blocker.write_text("x")
+        result = shadow_insert({"Ticker": "X"}, blocker / "fake.duckdb")
         assert result is False
 
 

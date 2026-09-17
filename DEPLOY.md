@@ -40,7 +40,7 @@ make lint-fix        # ruff --fix
 make types           # frontend openapi → ts (fail si drift)
 ```
 
-Suite de référence : **708 tests passants** au 2026-04-29 (HEAD `chore/infra-baseline`).
+Suite de référence : **1386 tests passants**, couverture 64.5 % (seuil CI 60 %) au 2026-09-17.
 
 Si `make lint` retourne >0 erreurs sur le HEAD, c'est attendu tant que le WIP
 métier n'est pas commité — la CI va piquer ces erreurs au push.
@@ -141,7 +141,7 @@ Plus aucun prompt sur `git push`.
 - `main` = dernier état stable.
 - `chore/*` = ingénierie (CI, infra, build).
 - `feat/*` = nouvelle feature métier.
-- CI GitHub Actions (`.github/workflows/ci.yml`) tourne sur push/PR : ruff + pytest+cov + frontend build + docker smoke.
+- CI GitHub Actions (`.github/workflows/ci.yml`) tourne sur push/PR : ruff + mypy + pytest+cov (≥60 %) + eslint + vitest + frontend build + docker build **et démarrage** (curl `/api/status`).
 - Pas de push direct sur `main` une fois la CI active — passer par PR.
 
 ---

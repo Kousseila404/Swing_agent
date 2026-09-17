@@ -152,9 +152,11 @@ export default function UniverseManagerPage() {
   const [page, setPage] = useState(1);
 
   const prevRebuildingRef = useRef(false);
+  const toastSeqRef = useRef(0);
 
   const toast = (msg, type = 'ok') => {
-    const id = Date.now() + Math.random();
+    toastSeqRef.current += 1;
+    const id = toastSeqRef.current;
     setToasts(t => [...t, { id, msg, type }]);
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500);
   };

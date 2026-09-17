@@ -309,7 +309,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Post Backfill Entry Scores Api Portfolio Backfill Entry Scores Post"
                 }
               }
@@ -794,7 +793,7 @@
               "anyOf": [
                 {
                   "type": "number",
-                  "minimum": 0
+                  "minimum": 0.0
                 },
                 {
                   "type": "null"
@@ -1411,7 +1410,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Audit Full Api Audit Full Get"
                 }
               }
@@ -1444,7 +1442,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Delisted Api Delisted Get"
                 }
@@ -1468,7 +1465,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Wfo Weights Api Wfo Get"
                 }
@@ -1509,7 +1505,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Wfo History Api Wfo History Get"
                 }
               }
@@ -1559,7 +1554,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Ticker Analysis Api Ticker Analysis  Ticker  Get"
                 }
               }
@@ -1615,7 +1609,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Peers Api Peers  Ticker  Get"
                 }
               }
@@ -1661,7 +1654,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Compare Api Compare Get"
                 }
               }
@@ -1693,7 +1685,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Watchlist Api Watchlist Get"
                 }
@@ -1724,7 +1715,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Post Watchlist Api Watchlist Post"
                 }
@@ -1779,7 +1769,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Delete Watchlist Api Watchlist  Ticker  Delete"
                 }
               }
@@ -1823,7 +1812,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Notes Api Notes  Ticker  Get"
                 }
               }
@@ -1880,7 +1868,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Post Note Api Notes  Ticker  Post"
                 }
               }
@@ -1939,7 +1926,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Put Note Api Notes  Note Id  Put"
                 }
               }
@@ -1986,7 +1972,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Delete Note Endpoint Api Notes  Note Id  Delete"
                 }
               }
@@ -2018,7 +2003,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Titan Alerts Api Titan Alerts Get"
                 }
@@ -2049,7 +2033,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Post Titan Alert Api Titan Alerts Post"
                 }
@@ -2104,7 +2087,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Delete Titan Alert Api Titan Alerts  Alert Id  Delete"
                 }
               }
@@ -2155,7 +2137,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Price Alerts Api Price Alerts Get"
                 }
               }
@@ -2201,7 +2182,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Post Price Alert Api Price Alerts Post"
                 }
               }
@@ -2234,7 +2214,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Price Alerts Stats Api Price Alerts Stats Get"
                 }
@@ -2274,7 +2253,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Delete Price Alert Api Price Alerts  Alert Id  Delete"
                 }
               }
@@ -2322,7 +2300,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Calendar Api Calendar Get"
                 }
               }
@@ -2378,7 +2355,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get News Api News  Ticker  Get"
                 }
               }
@@ -2438,7 +2414,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Portfolio News Firehose Api News Portfolio Firehose Get"
                 }
               }
@@ -2494,7 +2469,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Sec Filings Api Sec Filings  Ticker  Get"
                 }
               }
@@ -2527,7 +2501,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Preview Alerts Api Monitor Preview Get"
                 }
@@ -2556,7 +2529,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Run Alerts Api Monitor Run Post"
                 }
@@ -2585,7 +2557,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Thesis Status All Api Thesis Status Get"
                 }
@@ -2614,7 +2585,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Lt Decision All Api Lt Decision Get"
                 }
@@ -2660,7 +2630,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Lt Decision One Api Lt Decision  Ticker  Get"
                 }
               }
@@ -2693,7 +2662,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Benchmark Portfolio Endpoint Api Sector Benchmark Portfolio Get"
                 }
@@ -2755,7 +2723,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Benchmark Ticker Endpoint Api Sector Benchmark  Ticker  Get"
                 }
               }
@@ -2787,7 +2754,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Attribution Api Attribution Get"
                 }
@@ -2815,7 +2781,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get My Portfolio Api My Portfolio Get"
                 }
@@ -2828,6 +2793,366 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/my_portfolio/{ticker}/price_history": {
+      "get": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Get My Portfolio Price History",
+        "description": "Historique de prix pour la page détail ticker — seule donnée pas déjà\nexposée par `/api/my_portfolio` (le reste : position/thèse/risque/\nearnings/rééquilibrage est déjà dans la ligne de la liste). Réutilise\n`portfolio_risk.get_price_history` (même fetch que le calcul beta/\ncorrélation), aucune nouvelle source de données.",
+        "operationId": "get_my_portfolio_price_history_api_my_portfolio__ticker__price_history_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "1y",
+              "title": "Period"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get My Portfolio Price History Api My Portfolio  Ticker  Price History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/my_portfolio/executions": {
+      "get": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Get Executions",
+        "operationId": "get_executions_api_my_portfolio_executions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Executions Api My Portfolio Executions Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Post Execution",
+        "operationId": "post_execution_api_my_portfolio_executions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Post Execution Api My Portfolio Executions Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/my_portfolio/{ticker}/thesis": {
+      "patch": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Patch Thesis",
+        "operationId": "patch_thesis_api_my_portfolio__ticker__thesis_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThesisPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Patch Thesis Api My Portfolio  Ticker  Thesis Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/my_portfolio/{ticker}/thesis_review_queue": {
+      "post": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Post Review Entry",
+        "operationId": "post_review_entry_api_my_portfolio__ticker__thesis_review_queue_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewQueueSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Post Review Entry Api My Portfolio  Ticker  Thesis Review Queue Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Get Review Queue",
+        "operationId": "get_review_queue_api_my_portfolio__ticker__thesis_review_queue_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Review Queue Api My Portfolio  Ticker  Thesis Review Queue Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/my_portfolio/{ticker}/thesis_review_queue/{entry_id}": {
+      "patch": {
+        "tags": [
+          "my_portfolio"
+        ],
+        "summary": "Patch Review Entry Status",
+        "operationId": "patch_review_entry_status_api_my_portfolio__ticker__thesis_review_queue__entry_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewQueueStatusUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Patch Review Entry Status Api My Portfolio  Ticker  Thesis Review Queue  Entry Id  Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -3187,7 +3512,6 @@
           },
           "open_positions": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -3201,6 +3525,41 @@
           "current_equity"
         ],
         "title": "EquityState"
+      },
+      "FindingItem": {
+        "properties": {
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "constat": {
+            "type": "string",
+            "title": "Constat"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "constat"
+        ],
+        "title": "FindingItem"
       },
       "GenericOkResponse": {
         "properties": {
@@ -3344,6 +3703,45 @@
           "running"
         ],
         "title": "JobOutputResponse"
+      },
+      "LogExecutionRequest": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "shares": {
+            "type": "number",
+            "title": "Shares"
+          },
+          "fill_price_native": {
+            "type": "number",
+            "title": "Fill Price Native"
+          },
+          "executed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Executed At"
+          },
+          "notes": {
+            "type": "string",
+            "title": "Notes",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "direction",
+          "shares",
+          "fill_price_native",
+          "executed_at"
+        ],
+        "title": "LogExecutionRequest"
       },
       "MacroCalendarEvent": {
         "properties": {
@@ -3686,7 +4084,6 @@
           },
           "per_ticker_pnl": {
             "additionalProperties": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "object",
@@ -3714,7 +4111,6 @@
           },
           "journal": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -3722,7 +4118,6 @@
           },
           "open_positions": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -3730,7 +4125,6 @@
           },
           "closed_trades": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -4123,6 +4517,124 @@
         "type": "object",
         "title": "RejectRequest"
       },
+      "ReviewQueueStatusUpdate": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ReviewQueueStatusUpdate"
+      },
+      "ReviewQueueSubmission": {
+        "properties": {
+          "execution_type": {
+            "type": "string",
+            "title": "Execution Type"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingItem"
+            },
+            "type": "array",
+            "title": "Findings",
+            "default": []
+          },
+          "proposed_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Verdict"
+          },
+          "run_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_type"
+        ],
+        "title": "ReviewQueueSubmission"
+      },
+      "SellSignalPatch": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "libelle": {
+            "type": "string",
+            "title": "Libelle"
+          },
+          "statut": {
+            "type": "string",
+            "title": "Statut"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "date_maj": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Maj"
+          },
+          "auto_metric": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Metric"
+          }
+        },
+        "type": "object",
+        "required": [
+          "libelle",
+          "statut"
+        ],
+        "title": "SellSignalPatch"
+      },
       "StatusResponse": {
         "properties": {
           "ok": {
@@ -4192,6 +4704,46 @@
           "broker_mode"
         ],
         "title": "StatusResponse"
+      },
+      "ThesisPatchRequest": {
+        "properties": {
+          "why_bought": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WhyBoughtPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sell_signals": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SellSignalPatch"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Signals"
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerificationPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ThesisPatchRequest"
       },
       "TitanAlertCreate": {
         "properties": {
@@ -4417,22 +4969,18 @@
             "title": "Source Indices"
           },
           "filter": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Filter"
           },
           "stats": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Stats"
           },
           "sectors": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Sectors"
           },
           "tickers": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Tickers"
           },
@@ -4507,6 +5055,24 @@
         ],
         "title": "ValidationError"
       },
+      "VerificationPatch": {
+        "properties": {
+          "derniere_verification": {
+            "type": "string",
+            "title": "Derniere Verification"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "derniere_verification",
+          "verdict"
+        ],
+        "title": "VerificationPatch"
+      },
       "WatchlistAddRequest": {
         "properties": {
           "ticker": {
@@ -4552,6 +5118,48 @@
           "ticker"
         ],
         "title": "WatchlistAddRequest"
+      },
+      "WhyBoughtPatch": {
+        "properties": {
+          "catalyseurs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalyseurs"
+          },
+          "valorisation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valorisation"
+          },
+          "role_portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Portefeuille"
+          }
+        },
+        "type": "object",
+        "title": "WhyBoughtPatch"
       }
     },
     "securitySchemes": {
