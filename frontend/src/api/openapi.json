@@ -3354,6 +3354,117 @@
           }
         ]
       }
+    },
+    "/api/shadow": {
+      "get": {
+        "tags": [
+          "cockpit"
+        ],
+        "summary": "Get Shadow",
+        "description": "Forward-test A/B : NAV des portefeuilles virtuels par profil de scoring.",
+        "operationId": "get_shadow_api_shadow_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/performance/gap": {
+      "get": {
+        "tags": [
+          "cockpit"
+        ],
+        "summary": "Get Performance Gap",
+        "description": "Attribution de l'écart compte vs panier : cash drag, slippage, stops, sélection.",
+        "operationId": "get_performance_gap_api_performance_gap_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "months",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 12,
+              "minimum": 1,
+              "default": 6,
+              "title": "Months"
+            }
+          },
+          {
+            "name": "top_n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 5,
+              "default": 20,
+              "title": "Top N"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rebalance/preview": {
+      "get": {
+        "tags": [
+          "cockpit"
+        ],
+        "summary": "Get Rebalance Preview",
+        "description": "Ordres de rebalance 1/N qui seraient passés (lecture seule).",
+        "operationId": "get_rebalance_preview_api_rebalance_preview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
