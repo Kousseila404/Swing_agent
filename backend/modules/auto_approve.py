@@ -34,6 +34,7 @@ from typing import Any
 
 import httpx
 
+import config
 from modules import api_core, proposals
 from modules.log import logger
 
@@ -53,12 +54,48 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-MAX_AUTO_APPROVE_PER_RUN  = _env_int("AUTO_APPROVE_MAX_PER_RUN", 2)
-MAX_AUTO_APPROVE_PER_WEEK = _env_int("AUTO_APPROVE_MAX_PER_WEEK", 5)
+# Mode basket (2026-09-17) : on achète ce qui est dans le top-N, pas seulement
+# ce qui dépasse 80. Budgets larges : le panier doit se remplir en quelques
+# séances, pas en un trimestre (5 ordres/semaine = 4 mois pour 20 lignes).
+STRATEGY_MODE = str(getattr(config, "STRATEGY_MODE", "basket")).lower()
+BASKET_TOP_N  = int(getattr(config, "BASKET_TOP_N", 20))
+BASKET_BAD_VERDICTS = ("FALLING_KNIFE", "CHEAP_JUNK", "EARNINGS_BLACKOUT", "NO_DATA")
+
+MAX_AUTO_APPROVE_PER_RUN  = _env_int("AUTO_APPROVE_MAX_PER_RUN", 4 if STRATEGY_MODE == "basket" else 2)
+MAX_AUTO_APPROVE_PER_WEEK = _env_int("AUTO_APPROVE_MAX_PER_WEEK", 20 if STRATEGY_MODE == "basket" else 5)
 
 DECIDED_BY = "auto_approve_bot"
 
 _API_BASE = "http://127.0.0.1:8000"
+
+
+def _qualifies_basket(ctx: dict[str, Any], rank: int | None) -> tuple[bool, str]:
+    """Mode basket : rang courant ≤ BASKET_TOP_N, verdict non rédhibitoire, Risk ≥ RISK_MIN."""
+    titan = ctx.get("titan_score")
+    if rank is None:
+        return False, "rang TITAN inconnu (ticker absent de l'univers scoré)"
+    if rank > BASKET_TOP_N:
+        return False, f"rang #{rank} > top-{BASKET_TOP_N}"
+    verdict = str(((ctx.get("buy_signal") or {}).get("verdict")) or "").upper()
+    if verdict in BASKET_BAD_VERDICTS:
+        return False, f"buy_signal={verdict}"
+    risk = ctx.get("risk_score")
+    try:
+        if risk is not None and float(risk) < RISK_MIN:
+            return False, f"Risk {float(risk):.0f} < {RISK_MIN:.0f}"
+    except (TypeError, ValueError):
+        pass
+    return True, f"panier : rang #{rank}/{BASKET_TOP_N}, TITAN {float(titan or 0):.1f}, verdict {verdict or '—'}"
+
+
+def _current_ranks() -> dict[str, int]:
+    try:
+        from modules.lt_exit_policy import compute_ranks
+        from modules.sector_metrics import get_scored_universe
+        return compute_ranks(get_scored_universe() or {})
+    except Exception as exc:
+        logger.warning(f"[AutoApprove] rangs indisponibles : {exc}")
+        return {}
 
 
 def _qualifies(ctx: dict[str, Any]) -> tuple[bool, str]:
@@ -146,9 +183,18 @@ def _recent_auto_approve_count(days: float = 7.0) -> int:
     return count
 
 
-def select_candidates(pending: list[dict[str, Any]]) -> list[tuple[dict[str, Any], str]]:
-    """Filtre + trie (TITAN décroissant) les propositions qui qualifient.
-    Pure (sans IO) — testable."""
+def select_candidates(
+    pending: list[dict[str, Any]],
+    ranks: dict[str, int] | None = None,
+    mode: str | None = None,
+) -> list[tuple[dict[str, Any], str]]:
+    """Filtre + trie les propositions qui qualifient. Pure (sans IO) — testable.
+
+    Mode basket : tri par rang croissant (meilleur classement d'abord) ;
+    mode legacy : règle TITAN ≥ 80 / override, tri par TITAN décroissant.
+    """
+    mode = (mode or STRATEGY_MODE).lower()
+    ranks = ranks or {}
     candidates: list[tuple[dict[str, Any], str]] = []
     for p in pending:
         ctx = p.get("context") or {}
@@ -156,10 +202,16 @@ def select_candidates(pending: list[dict[str, Any]]) -> list[tuple[dict[str, Any
             continue
         if bool((ctx.get("sector_exposure") or {}).get("over_cap")):
             continue
-        ok, reason = _qualifies(ctx)
+        if mode == "basket":
+            ok, reason = _qualifies_basket(ctx, ranks.get(str(p.get("ticker") or "").upper()))
+        else:
+            ok, reason = _qualifies(ctx)
         if ok:
             candidates.append((p, reason))
-    candidates.sort(key=lambda pr: -float((pr[0].get("context") or {}).get("titan_score") or 0))
+    if mode == "basket":
+        candidates.sort(key=lambda pr: ranks.get(str(pr[0].get("ticker") or "").upper(), 10**6))
+    else:
+        candidates.sort(key=lambda pr: -float((pr[0].get("context") or {}).get("titan_score") or 0))
     return candidates
 
 
@@ -169,6 +221,18 @@ def run_auto_approve() -> dict[str, Any]:
     if not allowed:
         logger.warning(f"[AutoApprove] Entrées gelées — {why}. Rien à faire.")
         return {"qualified": 0, "approved": 0, "blocked": why}
+
+    # Mode basket : rotation (ventes rank-based) AVANT les achats — libère
+    # slots et cash pour les nouveaux entrants du panier. 1×/jour utile.
+    rotation: dict[str, Any] | None = None
+    if STRATEGY_MODE == "basket":
+        try:
+            from modules.basket_rotation import run_rotation
+            rotation = run_rotation()
+            if rotation.get("closed"):
+                logger.warning(f"[AutoApprove] rotation : {len(rotation['closed'])} vente(s) — {rotation['closed']}")
+        except Exception as exc:
+            logger.error(f"[AutoApprove] rotation échouée : {exc}", exc_info=True)
 
     pending = proposals.list_all(status="pending")
 
@@ -180,7 +244,8 @@ def run_auto_approve() -> dict[str, Any]:
         )
         return {"qualified": 0, "approved": 0, "skipped_budget": True}
 
-    candidates = select_candidates(pending)
+    ranks = _current_ranks() if STRATEGY_MODE == "basket" else {}
+    candidates = select_candidates(pending, ranks=ranks, mode=STRATEGY_MODE)
 
     n_take = min(len(candidates), MAX_AUTO_APPROVE_PER_RUN, budget_left)
     to_approve = candidates[:n_take]
@@ -228,6 +293,8 @@ def run_auto_approve() -> dict[str, Any]:
         "approved": len(approved),
         "failed": len(failed),
         "details": approved,
+        "mode": STRATEGY_MODE,
+        "rotation": rotation,
     }
 
 

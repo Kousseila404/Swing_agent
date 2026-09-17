@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import config
 from modules import api_core, proposals, signal_qualification
 from modules.buy_signal import compute_buy_signal
 from modules.log import logger
@@ -86,7 +87,10 @@ def _compute_support_for_ticker(ticker: str, price: float | None) -> dict[str, A
 # CONSTANTES — defaults conservateurs
 # ─────────────────────────────────────────────────────────────────
 DEFAULT_ALLOWED_REGIMES = ("BULL_MARKET",)
-DEFAULT_MAX_HOLDINGS = 15   # audit 2026-09-17 : 20 → 15 (moins de dilution, top-15 ≈ top-20 en backtest)
+# Mode basket (2026-09-17) : taille du panier = config.BASKET_TOP_N (20) et
+# pondération 1/N, fidèle au backtest. Mode legacy : 15 / HRP.
+_BASKET = str(getattr(config, "STRATEGY_MODE", "basket")).lower() == "basket"
+DEFAULT_MAX_HOLDINGS = int(getattr(config, "BASKET_TOP_N", 20)) if _BASKET else 15
 DEFAULT_MIN_FREE_SLOTS = 1
 DEFAULT_MIN_PROPOSAL_USD = 2_500.0  # plancher : ne propose pas en-dessous
 # (audit 2026-09-17 : 250 → 2 500 $ ; une ligne à 400 $ sur un book de 100 k$
@@ -153,7 +157,7 @@ EARNINGS_BLACKOUT_DAYS = 7
 # corrélation inter-tickers dans l'allocation (López de Prado 2016) au lieu de
 # la traiter en post-hoc haircut comme le faisait le 1/σ legacy. Fallback
 # automatique vers risk_parity si scipy/data manquent (cf. _hrp.py).
-DEFAULT_WEIGHTING_METHOD = "hrp"
+DEFAULT_WEIGHTING_METHOD = "equal" if _BASKET else "hrp"
 
 
 @dataclass

@@ -166,6 +166,25 @@ CB_DD_PAUSE_PCT         = -16.0
 CB_PAUSE_DAYS           = 5
 
 # ─────────────────────────────────────────────────────────────────
+# 5quinquies. STRATÉGIE « BASKET » (2026-09-17, Scoring Lab)
+# ─────────────────────────────────────────────────────────────────
+# Choix mesuré sur la fenêtre live (21 sem., hebdo, 10 bps) : panier top-20,
+# profil de poids `equal_7` (TITAN_WEIGHT_PROFILE, cf. _scoring.py) →
+# +34 % / hit 76 % / DD −5 % vs +18 % pour le composite V14.1 et +14 % pour
+# l'univers équipondéré. Équipondéré = aucun paramètre ajusté à la fenêtre.
+#   • proposer : max_holdings = BASKET_TOP_N, pondération « equal », vol-target
+#     seulement si VIX ≥ 25 ;
+#   • auto-approve (mode basket) : rang courant ≤ BASKET_TOP_N + verdict non
+#     rédhibitoire + Risk ≥ 40 → achat, budgets larges ;
+#   • rotation : rang > BASKET_EXIT_RANK pendant BASKET_EXIT_CONFIRM_DAYS jours
+#     consécutifs → vente (sauf ADD_ON fondamental). Stops catastrophe inchangés.
+STRATEGY_MODE            = os.getenv("STRATEGY_MODE", "basket")   # "basket" | "legacy"
+BASKET_TOP_N             = int(os.getenv("BASKET_TOP_N", "20"))
+BASKET_EXIT_RANK         = int(os.getenv("BASKET_EXIT_RANK", "40"))
+BASKET_EXIT_CONFIRM_DAYS = int(os.getenv("BASKET_EXIT_CONFIRM_DAYS", "5"))
+BASKET_MAX_EXITS_PER_RUN = 3
+
+# ─────────────────────────────────────────────────────────────────
 # 6. LOGGING
 # ─────────────────────────────────────────────────────────────────
 LOG_FILE  = "logs/agent.log"

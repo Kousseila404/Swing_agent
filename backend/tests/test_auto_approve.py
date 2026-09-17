@@ -102,7 +102,7 @@ def _prop(ticker, titan, verdict="BUY", risk=70.0, **ctx_extra):
 def test_select_candidates_sorted_by_titan_desc():
     from modules.auto_approve import select_candidates
     pending = [_prop("LOW", 81.0), _prop("HIGH", 88.0), _prop("MID", 84.5)]
-    got = [p["ticker"] for p, _ in select_candidates(pending)]
+    got = [p["ticker"] for p, _ in select_candidates(pending, mode="legacy")]
     assert got == ["HIGH", "MID", "LOW"]
 
 
@@ -130,3 +130,25 @@ def test_run_auto_approve_blocked_by_killswitch(monkeypatch):
     out = auto_approve.run_auto_approve()
     assert out["approved"] == 0 and "killswitch" in out["blocked"]
     assert called == []  # aucune lecture de la file quand les entrées sont gelées
+
+
+# ─────────────────────────────────────────────────────────────────
+# Mode basket (2026-09-17)
+# ─────────────────────────────────────────────────────────────────
+
+def test_basket_mode_ranks_and_filters():
+    from modules.auto_approve import select_candidates
+    pending = [_prop("A", 70.0, verdict="WATCH"), _prop("B", 85.0, verdict="BUY"),
+               _prop("C", 60.0, verdict="FALLING_KNIFE"), _prop("D", 75.0, verdict="SKIP", risk=30.0),
+               _prop("E", 72.0, verdict="WATCH")]
+    ranks = {"A": 3, "B": 1, "C": 2, "D": 4, "E": 45}
+    got = select_candidates(pending, ranks=ranks, mode="basket")
+    assert [p["ticker"] for p, _ in got] == ["B", "A"]      # C : falling knife, D : Risk 30, E : rang 45
+    assert "rang #1/" in got[0][1]
+
+
+def test_basket_mode_unknown_rank_rejected():
+    from modules.auto_approve import _qualifies_basket
+    assert _qualifies_basket({"titan_score": 90.0}, None)[0] is False
+    assert _qualifies_basket({"titan_score": 90.0}, 21)[0] is False
+    assert _qualifies_basket({"titan_score": 65.0, "buy_signal": {"verdict": "WATCH"}}, 20)[0] is True

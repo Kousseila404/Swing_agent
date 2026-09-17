@@ -20,7 +20,7 @@ rotation ne doit pas vendre ce que la couche fondamentale veut renforcer.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
