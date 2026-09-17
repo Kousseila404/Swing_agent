@@ -26,7 +26,7 @@ import { readJSON, writeJSON } from '../utils/storage';
 const GLOBAL_ACTIONS = [
   { id: 'toggle-theme',   icon: '🌓', label: 'Basculer thème clair/sombre', hint: 'Action · prefers-color-scheme' },
   { id: 'toggle-density', icon: '↕️',  label: 'Basculer densité compact/cosy', hint: 'Action · plus de lignes visibles' },
-  { id: 'goto-briefing',  icon: '☀️', label: 'Ouvrir Briefing du jour',     hint: 'Action · raccourci' },
+  { id: 'goto-cockpit',   icon: '🧭', label: 'Ouvrir le Cockpit',           hint: 'Action · raccourci' },
   { id: 'goto-proposals', icon: '📬', label: 'Ouvrir Propositions',         hint: 'Action · veto humain' },
   { id: 'goto-settings',  icon: '⚙️', label: 'Ouvrir Préférences',          hint: 'Action · apparence + API token' },
 ];

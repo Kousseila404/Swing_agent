@@ -23,47 +23,21 @@ import { useHashRoute, usePreferences } from './utils/preferences';
 
 // Code-splitting par page — Vite génère un chunk séparé par lazy().
 const CockpitPage         = lazy(() => import('./components/CockpitPage'));
-const BriefingPage        = lazy(() => import('./components/BriefingPage'));
-const WatchlistPage       = lazy(() => import('./components/WatchlistPage'));
-const CalendarPage        = lazy(() => import('./components/CalendarPage'));
-const NewsFirehosePage    = lazy(() => import('./components/NewsFirehosePage'));
-const AttributionPage     = lazy(() => import('./components/AttributionPage'));
 const SettingsPage        = lazy(() => import('./components/SettingsPage'));
 const UniverseManagerPage = lazy(() => import('./components/UniverseManagerPage'));
-const SectorsPage         = lazy(() => import('./components/SectorsPage'));
 const PortfolioPage       = lazy(() => import('./components/PortfolioPage'));
 const MyPortfolioPage     = lazy(() => import('./components/MyPortfolioPage'));
 const ProposalsPage       = lazy(() => import('./components/ProposalsPage'));
-const PerformancePage     = lazy(() => import('./components/PerformancePage'));
-const TickerDetailPage    = lazy(() => import('./components/TickerDetailPage'));
-const ComparePage         = lazy(() => import('./components/ComparePage'));
-const DataHealthPage      = lazy(() => import('./components/DataHealthPage'));
-const RiskMonitorPage     = lazy(() => import('./components/RiskMonitorPage'));
-const MacroCalendarPage   = lazy(() => import('./components/MacroCalendarPage'));
-const AuditPage           = lazy(() => import('./components/AuditPage'));
 const ScoringLabPage      = lazy(() => import('./components/ScoringLabPage'));
 
 // Mapping page → composant. Centralisé ici pour éviter une chaîne de &&
 // dans le JSX (et pour qu'ajouter une page = 1 ligne).
 const PAGES = {
   cockpit:     CockpitPage,
-  briefing:    BriefingPage,
-  watchlist:   WatchlistPage,
   universe:    UniverseManagerPage,
-  sectors:     SectorsPage,
   portfolio:   PortfolioPage,
   my_portfolio: MyPortfolioPage,
   proposals:   ProposalsPage,
-  performance: PerformancePage,
-  ticker:      TickerDetailPage,
-  compare:     ComparePage,
-  datahealth:  DataHealthPage,
-  risk:        RiskMonitorPage,
-  calendar:    CalendarPage,
-  news:        NewsFirehosePage,
-  macro:       MacroCalendarPage,
-  attribution: AttributionPage,
-  audit:       AuditPage,
   scoring_lab: ScoringLabPage,
   settings:    SettingsPage,
 };
@@ -88,7 +62,7 @@ function handleGlobalAction(id, ctx) {
     case 'toggle-theme':   ctx.toggleTheme();   break;
     case 'toggle-density': ctx.toggleDensity(); break;
     case 'goto-settings':  ctx.setActivePage('settings'); break;
-    case 'goto-briefing':  ctx.setActivePage('briefing'); break;
+    case 'goto-cockpit':   ctx.setActivePage('cockpit'); break;
     case 'goto-proposals': ctx.setActivePage('proposals'); break;
     default: break;
   }
@@ -202,10 +176,10 @@ export default function App() {
             scrolled={scrolled}
             isDesktop={isDesktop}
             onOpenMobileMenu={() => setSidebarMobileOpen(true)}
-            onOpenMacro={() => setActivePage('macro')}
+            onOpenMacro={() => setActivePage('cockpit')}
           />
 
-          <DataHealthBanner onShowDetails={() => setActivePage('datahealth')} />
+          <DataHealthBanner onShowDetails={() => setActivePage('cockpit')} />
 
           <ErrorBoundary>
             <Suspense fallback={<PageFallback />}>

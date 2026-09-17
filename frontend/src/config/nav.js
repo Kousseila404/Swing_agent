@@ -13,44 +13,21 @@ export const NAV_SECTIONS = [
     label: 'Pilotage',
     items: [
       { id: 'cockpit',     label: 'Cockpit',       icon: '🧭' },
-      { id: 'briefing',    label: 'Briefing',      icon: '☀️' },
       { id: 'proposals',   label: 'Propositions',  icon: '📬' },
       { id: 'portfolio',   label: 'Portfolio',     icon: '📊' },
+    ],
+  },
+  {
+    label: 'Recherche',
+    items: [
+      { id: 'universe',    label: 'Univers',       icon: '🌐' },
+      { id: 'scoring_lab', label: 'Scoring Lab',   icon: '🧪' },
     ],
   },
   {
     label: 'Mon Portefeuille',
     items: [
       { id: 'my_portfolio', label: 'Mon Portefeuille', icon: '💼' },
-    ],
-  },
-  {
-    label: 'Découverte',
-    items: [
-      { id: 'watchlist',   label: 'Watchlist',     icon: '👁' },
-      { id: 'universe',    label: 'Univers',       icon: '🌐' },
-      { id: 'sectors',     label: 'Secteurs',      icon: '🏛' },
-      { id: 'ticker',      label: 'Ticker Detail', icon: '🎯' },
-      { id: 'compare',     label: 'Comparer',      icon: '⚖️' },
-    ],
-  },
-  {
-    label: 'Catalyseurs',
-    items: [
-      { id: 'calendar',    label: 'Catalysts',     icon: '🗓' },
-      { id: 'news',        label: 'News',          icon: '📰' },
-      { id: 'macro',       label: 'Macro',         icon: '📅' },
-    ],
-  },
-  {
-    label: 'Santé',
-    items: [
-      { id: 'performance', label: 'Performance',   icon: '📈' },
-      { id: 'attribution', label: 'Attribution',   icon: '🎲' },
-      { id: 'risk',        label: 'Risk Monitor',  icon: '⚠️' },
-      { id: 'datahealth',  label: 'Data Health',   icon: '🩺' },
-      { id: 'audit',       label: 'Audit',         icon: '🔍' },
-      { id: 'scoring_lab', label: 'Scoring Lab',   icon: '🧪' },
     ],
   },
   {
@@ -63,24 +40,11 @@ export const NAV_SECTIONS = [
 
 export const PAGE_META = {
   cockpit:     { title: 'Cockpit',                       subtitle: 'Compte vs SPY vs panier TITAN · Protection des positions · Santé système' },
-  briefing:    { title: 'Briefing du jour',              subtitle: 'Régime · Macro · Action requise · Positions à surveiller' },
-  watchlist:   { title: 'Watchlist & Notes',             subtitle: 'Tickers observés · Thèses & rappels personnels' },
   universe:    { title: 'Univers Quantamental',          subtitle: 'Smart Beta · Rotation Sectorielle · Fondamentaux yfinance' },
-  sectors:     { title: 'Rotation Sectorielle',          subtitle: '11 secteurs GICS · Momentum 6M · Rotation Score composite' },
   portfolio:   { title: 'Portfolio & Journal',           subtitle: 'Données réelles — trade_journal.csv' },
   my_portfolio: { title: 'Mon Portefeuille',             subtitle: 'Book personnel long terme — allocation manuelle, indépendant du moteur TITAN' },
   proposals:   { title: 'Propositions auto · Veto humain', subtitle: 'Trades suggérés par TITAN — approuver ou rejeter' },
-  performance: { title: 'Performance & Métriques',       subtitle: 'Sharpe · Sortino · Calmar · DD · Expectancy · Distribution PnL' },
-  attribution: { title: 'Performance Attribution',       subtitle: "Win rate par bucket de score TITAN à l'entrée — calibration du moteur" },
-  ticker:      { title: 'Ticker Detail · Score history', subtitle: "Évolution scores TITAN d'un ticker via universe_history" },
-  compare:     { title: 'Comparer des tickers',          subtitle: 'Fondamentaux + score TITAN côte à côte — sélection libre' },
-  datahealth:  { title: 'Data Health · Providers + cache', subtitle: 'Santé providers + cache fundamentals + fields manquants' },
-  risk:        { title: 'Risk Monitor',                  subtitle: 'Budget · VIX · concentration · Kelly' },
-  calendar:    { title: 'Catalyst Calendar',             subtitle: 'Earnings (positions + watchlist) + Macro consolidés' },
-  news:        { title: 'News firehose',                 subtitle: 'Flux consolidé positions + watchlist · Finnhub' },
-  macro:       { title: 'Calendrier Macro',              subtitle: 'FOMC · CPI · NFP — zones de blackout J-1' },
   scoring_lab: { title: 'Scoring Lab · edge sur la fenêtre live', subtitle: 'Paniers top-N vs univers · piliers seuls · profils de poids — sans look-ahead' },
-  audit:       { title: 'Audit · Survivorship + WFO',    subtitle: 'Registry delisted · Poids OOS vs prod · IC test history' },
   settings:    { title: 'Préférences',                   subtitle: 'Apparence · API Token · Defaults Propositions' },
 };
 
