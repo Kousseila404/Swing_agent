@@ -79,6 +79,22 @@ SYNC_GRACE_MINUTES = 30
 IMPORT_FALLBACK_SL_PCT = 0.35
 
 
+def _cell(v, default: str = "") -> str:
+    """Valeur CSV normalisée : None/NaN/'nan' → default. Les DataFrames lus avec
+    dtype=str exposent les cellules vides comme float('nan'), qui est *truthy* —
+    `row.get(x) or default` ne protège donc pas (bug trouvé par les tests
+    de l'audit 2026-09-17)."""
+    if v is None:
+        return default
+    try:
+        if isinstance(v, float) and math.isnan(v):
+            return default
+    except Exception:
+        pass
+    sv = str(v).strip()
+    return default if sv == "" or sv.lower() == "nan" else sv
+
+
 def _fmt_score(v) -> str:
     """Formatage d'un score 0-100 pour CSV. Retourne '' si None/invalide."""
     if v is None:
@@ -935,11 +951,11 @@ class AlpacaBroker(BrokerGateway):
 
         seen: set[str] = set()
         for row in open_rows:
-            ticker = str(row.get("Ticker") or "").strip().upper()
+            ticker = _cell(row.get("Ticker")).upper()
             if not ticker or ticker in seen or ticker not in positions:
                 continue
             seen.add(ticker)
-            direction = str(row.get("Direction") or "LONG").upper()
+            direction = _cell(row.get("Direction"), "LONG").upper()
             orders = self._open_orders_for(client, ticker)
             if self._find_open_stop(orders, direction) is not None:
                 continue
@@ -1056,13 +1072,13 @@ class AlpacaBroker(BrokerGateway):
 
             with FileLock(str(CSV_LOCK_PATH), timeout=10):
                 ensure_csv_schema(CSV_PATH)
-                df = pd.read_csv(CSV_PATH, dtype=str)
+                df = pd.read_csv(CSV_PATH, dtype=str).fillna("")
                 open_idx = list(df.index[df["Status"] == "OPEN"])
 
                 for idx in open_idx:
                     row = df.loc[idx]
-                    ticker = str(row.get("Ticker") or "").strip().upper()
-                    direction = str(row.get("Direction") or "LONG").strip().upper()
+                    ticker = _cell(row.get("Ticker")).upper()
+                    direction = _cell(row.get("Direction"), "LONG").upper()
                     if not ticker:
                         continue
 
@@ -1097,7 +1113,7 @@ class AlpacaBroker(BrokerGateway):
                         continue
 
                     # 3. Parent jamais fillé → CANCELED.
-                    order_id = str(row.get("Order_ID") or "").strip()
+                    order_id = _cell(row.get("Order_ID"))
                     parent = None
                     if len(order_id) == 36 and order_id.count("-") == 4:
                         try:
