@@ -278,8 +278,8 @@ def _fetch_ndx100_from_nasdaq_api() -> list[str]:
         )
         r.raise_for_status()
         rows = ((r.json().get("data") or {}).get("data") or {}).get("rows") or []
-        tickers = sorted({_normalize_ticker(str(x.get("symbol") or "")) for x in rows})
-        tickers = [t for t in tickers if t]
+        normalized = {_normalize_ticker(str(x.get("symbol") or "")) for x in rows}
+        tickers: list[str] = sorted(t for t in normalized if t)
         if 80 <= len(tickers) <= 120:
             return tickers
         logger.warning(f"[UniverseEngine] NDX100 API Nasdaq : {len(tickers)} tickers (hors plage) — ignoré")
