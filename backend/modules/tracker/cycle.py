@@ -183,6 +183,15 @@ def run_cycle() -> None:
         except Exception as exc:
             logger.warning(f"[AlpacaSync] Erreur sync : {exc}")
 
+    # ── Sweep entrées : Entry = fill réel, limites non fillées → market ──
+    if broker is not None:
+        try:
+            sw = broker.sweep_unfilled_entries()
+            if sw.get("entry_fixed") or sw.get("replaced"):
+                logger.info(f"[Sweep] entrées corrigées={len(sw['entry_fixed'])} remplacées={len(sw['replaced'])}")
+        except Exception as exc:
+            logger.warning(f"[Sweep] {exc}")
+
     df = load_journal()
 
     # ── Garde stops : chaque position OPEN doit avoir un stop broker ──

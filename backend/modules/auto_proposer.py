@@ -709,6 +709,15 @@ def plan_proposals(
     exposure = compute_current_exposure(open_positions)
     n_open = exposure["n_open_positions"]
     already_invested = exposure["total_invested_usd"]
+    # Passage progressif en réel (2026-09-17) : en URL live, seule une fraction
+    # du capital est déployée (LIVE_CAPITAL_FRACTION) tant que paper ≠ réel
+    # n'a pas été comparé. Sans effet en paper.
+    _live = "paper" not in str(getattr(config, "ALPACA_BASE_URL", "paper")).lower() \
+        and str(getattr(config, "BROKER_MODE", "paper")).lower() == "alpaca"
+    if _live:
+        frac = float(getattr(config, "LIVE_CAPITAL_FRACTION", 1.0))
+        total_capital = total_capital * max(0.0, min(1.0, frac))
+        diagnostics["live_capital_fraction"] = frac
     available_budget = max(0.0, total_capital - already_invested)
     diagnostics["portfolio"] = {
         "n_open_positions":     n_open,

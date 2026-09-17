@@ -154,7 +154,7 @@ def test_ensure_protective_stops_falls_back_to_catastrophe_floor(broker):
 def test_ensure_protective_stops_noop_when_stop_exists(broker):
     fake = _FakeClient(
         positions=[SimpleNamespace(symbol="MU", qty="1", avg_entry_price="1007")],
-        open_orders=[_order(symbol="MU", side="sell", type="stop", stop_price=652.0)],
+        open_orders=[_order(symbol="MU", side="sell", type="stop", stop_price=652.0, qty=1)],
     )
     broker._client = fake
     actions = broker.ensure_protective_stops([
@@ -301,3 +301,17 @@ def test_save_journal_does_not_lose_api_append(monkeypatch, tmp_path):
     assert out.loc[out["Ticker"] == "HAS", "Stop_Loss"].iloc[0] == "61.1"
     # miroir DuckDB co-localisé avec le CSV (jamais la DB prod)
     assert (tmp_path / "trade_journal.duckdb").exists()
+
+
+def test_ensure_protective_stops_realigns_qty_after_rebalance(broker):
+    """Stop de 10 actions pour une position de 15 → ré-armé à 15 (rebalance)."""
+    fake = _FakeClient(
+        positions=[SimpleNamespace(symbol="CF", qty="15", avg_entry_price="118.9")],
+        open_orders=[_order(id="s1", symbol="CF", side="sell", type="stop", stop_price=76.46, qty=10)],
+    )
+    broker._client = fake
+    actions = broker.ensure_protective_stops([
+        {"Ticker": "CF", "Direction": "LONG", "Entry": "118.9", "Stop_Loss": "76.46", "Take_Profit": ""},
+    ])
+    assert fake.canceled == ["s1"] and len(fake.submitted) == 1
+    assert fake.submitted[0].qty == 15 and actions[0].get("realigned") is True
