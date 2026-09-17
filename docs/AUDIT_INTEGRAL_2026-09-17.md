@@ -262,7 +262,7 @@ par une liquidation.
 |---|---|---|
 | 0 — mise en sécurité | ✅ fait automatiquement | le tracker (nouveau code) a armé 6 stops GTC chez Alpaca (MU/EIX en OCO stop+TP, CF/EOG/HAS/NEM en stop simple). `GET /api/portfolio/protection` → 6/6 protégées |
 | 1 — P0 code | ✅ | GTC + `client_order_id` + vérif jambes ; `ensure_protective_stops` à chaque cycle (réalignement si dérive > 1 %) ; `save_journal` fusionné par clé ; sync filtrée (grâce 30 min, parent par Order_ID, fills postérieurs) ; journal reconstruit depuis Alpaca (14 lignes, PnL réalisé −169 $) ; 12 tests de non-régression |
-| 2 — ordonnancement | ⚠️ à installer | `deploy/crontab.txt` (UTC explicite) écrit ; **`crontab deploy/crontab.txt` à exécuter à la main** (permission refusée à l'agent). Auto-approve : tri par score, gates buy_signal / Risk ≥ 40 / killswitch / CB |
+| 2 — ordonnancement | ✅ | `deploy/crontab.txt` (UTC explicite) installé le 17/09 à 20:00 UTC. Auto-approve : tri par score, gates buy_signal / Risk ≥ 40 / killswitch / CB |
 | 3 — portefeuille | ✅ | vol-target seulement si VIX ≥ 25 ; 15 positions max ; 2 500 $ min. Allocation test : 87 % du cash déployé (vs 44 %) |
 | 4 — sorties | ✅ | TS 15 % / lock 30 % / ATR 4× ; killswitch `freeze` à −6 % ; circuit breaker journalier −8/−12/−16 % (fenêtre 60 j) ; le tracker surveille les positions même sous killswitch |
 | 5 — fiabilité | ✅ (sauf systemd) | Telegram échappé ; pytest isolé (garde-fou `SWINGQUANT_TEST_GUARD=1`, suite verte sans toucher aux données prod) ; logrotate daily/30 j ; NDX100 fallback. `--reload` en prod conservé volontairement (topologie dev de l'utilisateur) |
