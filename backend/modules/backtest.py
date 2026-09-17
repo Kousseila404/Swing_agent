@@ -646,6 +646,41 @@ def _resample_snapshots(
     return out
 
 
+# Cache process-level des snapshots décompressés (audit 2026-09-17, optimisation).
+# Chaque `run_titan_top_n` relisait ~390 fichiers gz (~10 s) : le Scoring Lab
+# (14 variantes) et le benchmark payaient ça à chaque appel. Clé = répertoire
+# + (date, mtime) de chaque fichier → invalidation automatique après un
+# nouveau snapshot ; les tests qui redirigent HISTORY_DIR ont leur propre clé.
+_SNAP_CACHE: dict[str, tuple[tuple, list[tuple[date, dict[str, Any]]]]] = {}
+_SNAP_CACHE_MAX = 2
+
+
+def _load_snapshots_cached(dates: list[date]) -> list[tuple[date, dict[str, Any]]]:
+    from pathlib import Path as _P
+    hdir = _P(universe_history.HISTORY_DIR)
+    sig_parts = []
+    for d in dates:
+        p = hdir / f"snapshot_{d.strftime('%Y%m%d')}.json.gz"
+        try:
+            sig_parts.append((d.isoformat(), p.stat().st_mtime_ns))
+        except OSError:
+            sig_parts.append((d.isoformat(), 0))
+    sig = tuple(sig_parts)
+    key = str(hdir)
+    hit = _SNAP_CACHE.get(key)
+    if hit and hit[0] == sig:
+        return hit[1]
+    loaded: list[tuple[date, dict[str, Any]]] = []
+    for d in dates:
+        snap = universe_history.read_snapshot(d)
+        if snap:
+            loaded.append((d, snap))
+    if len(_SNAP_CACHE) >= _SNAP_CACHE_MAX:
+        _SNAP_CACHE.pop(next(iter(_SNAP_CACHE)))
+    _SNAP_CACHE[key] = (sig, loaded)
+    return loaded
+
+
 def run_titan_top_n(
     top_n: int = 20,
     benchmark: str | None = "SPY",
@@ -686,16 +721,8 @@ def run_titan_top_n(
             f"Disponibles : {[d.isoformat() for d in dates]}"
         )
 
-    snapshots: list[tuple[date, dict[str, Any]]] = []
-    n_bootstrap = 0
-    for d in dates:
-        snap = universe_history.read_snapshot(d)
-        if snap:
-            snapshots.append((d, snap))
-            # Détecte si le snapshot vient du bootstrap rétroactif (fundamentals
-            # figés à aujourd'hui = lookahead). Cf. universe_history_bootstrap.py.
-            if (snap.get("macro") or {}).get("_bootstrap"):
-                n_bootstrap += 1
+    snapshots = _load_snapshots_cached(dates)
+    n_bootstrap = sum(1 for _, snap in snapshots if (snap.get("macro") or {}).get("_bootstrap"))
     if len(snapshots) < 2:
         raise ValueError("Snapshots illisibles")
     if n_bootstrap > 0:
