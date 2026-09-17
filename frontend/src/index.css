@@ -20,6 +20,7 @@
 */
 
 @import url('./styles/tokens.css');
+@import url('./styles/cockpit.css');
 
 /* ── LAYOUT ── */
 .app-container { display: flex; min-height: 100vh; }

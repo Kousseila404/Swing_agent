@@ -33,6 +33,9 @@ import {
   patchThesisReviewQueueStatus,
   fetchNotes,
   fetchPerformanceMetrics,
+  fetchPerformanceBenchmark,
+  fetchProtection,
+  fetchSystemHealth,
   fetchPortfolio,
   fetchProposals,
   fetchSnapshotsList,
@@ -468,3 +471,30 @@ export const useDeleteNote = () => {
     },
   })
 }
+
+// ── Cockpit (audit 2026-09-17) ───────────────────────────────────
+export const usePerformanceBenchmark = (months = 6, topN = 20, opts = {}) =>
+  useQuery({
+    queryKey: ['performance_benchmark', months, topN],
+    queryFn: () => fetchPerformanceBenchmark(months, topN),
+    staleTime: 15 * 60_000,
+    ...opts,
+  })
+
+export const useProtection = (opts = {}) =>
+  useQuery({
+    queryKey: ['portfolio_protection'],
+    queryFn: () => fetchProtection(false),
+    refetchInterval: 60_000,
+    staleTime: 45_000,
+    ...opts,
+  })
+
+export const useSystemHealth = (opts = {}) =>
+  useQuery({
+    queryKey: ['system_health'],
+    queryFn: fetchSystemHealth,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    ...opts,
+  })

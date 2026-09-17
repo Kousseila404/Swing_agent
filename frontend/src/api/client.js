@@ -326,3 +326,10 @@ export const updateNote = (noteId, body) =>
 
 export const deleteNote = (noteId) =>
   _del(`/notes/${encodeURIComponent(noteId)}`);
+
+// ── Cockpit (audit 2026-09-17, Lot 6) ─────────────────────────────
+export const fetchPerformanceBenchmark = (months = 6, topN = 20) =>
+  get(`/performance/benchmark?months=${months}&top_n=${topN}`);
+export const fetchProtection = (refresh = false) =>
+  get(`/portfolio/protection${refresh ? '?refresh=true' : ''}`);
+export const fetchSystemHealth = () => get('/system/health');

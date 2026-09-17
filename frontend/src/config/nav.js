@@ -12,6 +12,7 @@ export const NAV_SECTIONS = [
   {
     label: 'Pilotage',
     items: [
+      { id: 'cockpit',     label: 'Cockpit',       icon: '🧭' },
       { id: 'briefing',    label: 'Briefing',      icon: '☀️' },
       { id: 'proposals',   label: 'Propositions',  icon: '📬' },
       { id: 'portfolio',   label: 'Portfolio',     icon: '📊' },
@@ -60,6 +61,7 @@ export const NAV_SECTIONS = [
 ];
 
 export const PAGE_META = {
+  cockpit:     { title: 'Cockpit',                       subtitle: 'Compte vs SPY vs panier TITAN · Protection des positions · Santé système' },
   briefing:    { title: 'Briefing du jour',              subtitle: 'Régime · Macro · Action requise · Positions à surveiller' },
   watchlist:   { title: 'Watchlist & Notes',             subtitle: 'Tickers observés · Thèses & rappels personnels' },
   universe:    { title: 'Univers Quantamental',          subtitle: 'Smart Beta · Rotation Sectorielle · Fondamentaux yfinance' },

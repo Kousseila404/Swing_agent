@@ -22,6 +22,7 @@ import { readString, writeString } from './utils/storage';
 import { useHashRoute, usePreferences } from './utils/preferences';
 
 // Code-splitting par page — Vite génère un chunk séparé par lazy().
+const CockpitPage         = lazy(() => import('./components/CockpitPage'));
 const BriefingPage        = lazy(() => import('./components/BriefingPage'));
 const WatchlistPage       = lazy(() => import('./components/WatchlistPage'));
 const CalendarPage        = lazy(() => import('./components/CalendarPage'));
@@ -44,6 +45,7 @@ const AuditPage           = lazy(() => import('./components/AuditPage'));
 // Mapping page → composant. Centralisé ici pour éviter une chaîne de &&
 // dans le JSX (et pour qu'ajouter une page = 1 ligne).
 const PAGES = {
+  cockpit:     CockpitPage,
   briefing:    BriefingPage,
   watchlist:   WatchlistPage,
   universe:    UniverseManagerPage,
@@ -91,7 +93,7 @@ function handleGlobalAction(id, ctx) {
 }
 
 export default function App() {
-  const [activePage, setActivePageRaw, routeParam] = useHashRoute('briefing', VALID_PAGES);
+  const [activePage, setActivePageRaw, routeParam] = useHashRoute('cockpit', VALID_PAGES);
   const { theme, density, toggleTheme, toggleDensity } = usePreferences();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteTicker, setPaletteTicker] = useState(null);
