@@ -866,6 +866,7 @@ class AlpacaBroker(BrokerGateway):
                 LimitOrderRequest,
                 StopLossRequest,
                 StopOrderRequest,
+                TakeProfitRequest,
             )
 
             if qty is None:
@@ -900,11 +901,14 @@ class AlpacaBroker(BrokerGateway):
             sp = round(float(stop_price), 2)
             req: Any
             if take_profit is not None and float(take_profit) > 0:
+                tp_px = round(float(take_profit), 2)
+                # OCO Alpaca : type=limit + take_profit.limit_price + stop_loss.
                 req = LimitOrderRequest(
                     symbol=ticker, qty=qty_int, side=side,
                     time_in_force=TimeInForce.GTC,
                     order_class=OrderClass.OCO,
-                    limit_price=round(float(take_profit), 2),
+                    limit_price=tp_px,
+                    take_profit=TakeProfitRequest(limit_price=tp_px),
                     stop_loss=StopLossRequest(stop_price=sp),
                     client_order_id=_make_client_order_id(f"{ticker}-OCO"),
                 )
@@ -956,10 +960,6 @@ class AlpacaBroker(BrokerGateway):
                 continue
             seen.add(ticker)
             direction = _cell(row.get("Direction"), "LONG").upper()
-            orders = self._open_orders_for(client, ticker)
-            if self._find_open_stop(orders, direction) is not None:
-                continue
-
             def _f(v) -> float | None:
                 try:
                     x = float(v)
@@ -970,6 +970,29 @@ class AlpacaBroker(BrokerGateway):
             sl = _f(row.get("Stop_Loss"))
             tp = _f(row.get("Take_Profit"))
             entry = _f(row.get("Entry")) or _f(getattr(positions[ticker], "avg_entry_price", None))
+
+            orders = self._open_orders_for(client, ticker)
+            existing = self._find_open_stop(orders, direction)
+            if existing is not None:
+                # Dérive niveau journal ↔ broker (> 1 %) : après une
+                # reconstruction du journal ou un édit manuel, le stop broker
+                # doit suivre le journal (source de vérité du tracker).
+                try:
+                    bsp = float(getattr(existing, "stop_price", 0) or 0)
+                except (TypeError, ValueError):
+                    bsp = 0.0
+                if sl is not None and bsp > 0 and abs(bsp - sl) / sl > 0.01:
+                    try:
+                        from alpaca.trading.requests import ReplaceOrderRequest
+                        client.replace_order_by_id(str(existing.id), ReplaceOrderRequest(stop_price=round(sl, 2)))
+                        logger.info(f"[AlpacaBroker] 🛡️ {ticker} stop broker {bsp:.2f} → {sl:.2f} (aligné journal)")
+                        actions.append({"ticker": ticker, "stop_price": sl, "take_profit": tp,
+                                        "order_id": str(existing.id), "fallback": False, "ok": True,
+                                        "realigned": True})
+                    except Exception as exc:
+                        logger.warning(f"[AlpacaBroker] réalignement stop {ticker} : {exc}")
+                continue
+
             fallback = False
             if sl is None:
                 if entry is None:

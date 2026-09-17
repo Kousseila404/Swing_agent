@@ -72,6 +72,9 @@ def _rearm_protective_stops(broker, df):
         if not a.get("ok"):
             logger.error(f"[StopGuard] ❌ {a.get('ticker')} : stop NON armé @ {a.get('stop_price')}")
             continue
+        if a.get("realigned"):
+            logger.info(f"[StopGuard] {a['ticker']} stop broker réaligné sur le journal @ {float(a['stop_price']):.2f}")
+            continue
         armed += 1
         if a.get("fallback"):
             mask = (df["Status"] == "OPEN") & (df["Ticker"].astype(str).str.upper() == a["ticker"])
