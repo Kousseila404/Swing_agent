@@ -145,7 +145,7 @@ export default function App() {
     ? (effectiveMobileOpen ? 'mobile-open' : 'hidden')
     : sidebarDesktop;
 
-  const ActivePageComponent = PAGES[activePage] || BriefingPage;
+  const ActivePageComponent = PAGES[activePage] || CockpitPage;
 
   return (
     <ErrorBoundary>
