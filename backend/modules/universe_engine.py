@@ -256,7 +256,7 @@ def _ndx100_fallback() -> list[str]:
         upath = Path(__file__).resolve().parents[1] / "data" / "universe.json"
         u = json.loads(upath.read_text(encoding="utf-8"))
         rows = u.get("tickers") or {}
-        tickers = sorted(t for t, r in rows.items() if "ndx100" in (r.get("index_sources") or r.get("sources") or []))
+        tickers = sorted(t for t, r in rows.items() if "ndx100" in (r.get("source_indices") or []))
         if 80 <= len(tickers) <= 120:
             logger.warning(f"[UniverseEngine] NDX100 : fallback universe.json ({len(tickers)} tickers)")
             return tickers
