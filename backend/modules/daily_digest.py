@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from html import escape as _esc
 from typing import Any
 
 import config
@@ -88,7 +89,9 @@ def build_digest_text() -> str:
             verdict = (ctx.get("buy_signal") or {}).get("verdict", "?")
             narrative = ((ctx.get("qualification") or {}).get("narrative")
                          or p.get("ticker"))
-            lines.append(f"  • <b>{p.get('ticker')}</b> ({verdict}) — {narrative}")
+            lines.append(
+                f"  • <b>{_esc(str(p.get('ticker')))}</b> ({_esc(str(verdict))}) — {_esc(str(narrative))}"
+            )
     else:
         lines.append("\U0001f441 Aucun nouveau signal depuis le dernier cycle.")
 
