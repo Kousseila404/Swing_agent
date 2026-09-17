@@ -27,6 +27,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import config
 from modules.log import logger
@@ -877,6 +878,7 @@ class AlpacaBroker(BrokerGateway):
 
             side = OrderSide.SELL if str(direction).upper() == "LONG" else OrderSide.BUY
             sp = round(float(stop_price), 2)
+            req: Any
             if take_profit is not None and float(take_profit) > 0:
                 req = LimitOrderRequest(
                     symbol=ticker, qty=qty_int, side=side,
@@ -1181,7 +1183,7 @@ class AlpacaBroker(BrokerGateway):
                     df.to_csv(CSV_PATH, index=False)
                     try:
                         from modules.duckdb_journal import sync_from_csv
-                        sync_from_csv()
+                        sync_from_csv(csv_path=CSV_PATH, db_path=CSV_PATH.with_name("trade_journal.duckdb"))
                     except Exception as _db_exc:
                         logger.debug(f"[AlpacaBroker][Sync] duckdb sync : {_db_exc}")
 
@@ -1279,7 +1281,7 @@ class AlpacaBroker(BrokerGateway):
                         sl = round(p.entry * (1.0 - IMPORT_FALLBACK_SL_PCT), 4) if p.direction == "LONG" \
                             else round(p.entry * (1.0 + IMPORT_FALLBACK_SL_PCT), 4)
 
-                    row = {col: "" for col in CSV_SCHEMA}
+                    row: dict[str, Any] = {col: "" for col in CSV_SCHEMA}
                     row.update({
                         "Date":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "Ticker":      ticker,

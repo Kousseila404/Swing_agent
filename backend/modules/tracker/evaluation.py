@@ -240,24 +240,87 @@ def load_journal() -> pd.DataFrame:
     return df
 
 
-def save_journal(df: pd.DataFrame) -> None:
-    """Écrit dans un .tmp, puis renomme atomiquement en .csv sous FileLock.
+def _journal_row_key(row: pd.Series | dict) -> str:
+    """Clé stable d'une ligne : Order_ID (UUID Alpaca / PAPER-xxx / MANUAL_xxx),
+    sinon (Date, Ticker) pour les lignes historiques sans identifiant."""
+    oid = str(row.get("Order_ID") or "").strip()
+    if oid and oid.lower() != "nan":
+        return f"oid:{oid}"
+    return f"dt:{str(row.get('Date') or '').strip()}|{str(row.get('Ticker') or '').strip().upper()}"
 
-    Garantit :
-      - Aucune corruption si le processus est interrompu (rename atomique).
-      - Aucun écrasement concurrent d'un append de l'alerter (FileLock — Bug I).
+
+def merge_journal_frames(disk: pd.DataFrame, updated: pd.DataFrame) -> pd.DataFrame:
+    """Fusionne `updated` (vue du tracker) dans `disk` (état courant du fichier).
+
+    Les deux frames sont attendues en dtype=str (représentation CSV). Pour
+    chaque clé présente dans `updated`, la ligne disque est remplacée ; les
+    lignes disque inconnues de `updated` (ex. append de l'API pendant le
+    cycle) sont **conservées** ; les lignes de `updated` absentes du disque
+    sont ajoutées à la fin. L'ordre disque est préservé.
     """
+    if disk is None or disk.empty:
+        return updated.copy()
+    cols = list(dict.fromkeys(list(disk.columns) + list(updated.columns)))
+    disk = disk.reindex(columns=cols).fillna("")
+    updated = updated.reindex(columns=cols).fillna("")
+    upd_by_key: dict[str, pd.Series] = {}
+    for _, r in updated.iterrows():
+        upd_by_key[_journal_row_key(r)] = r
+    out_rows: list[pd.Series] = []
+    seen: set[str] = set()
+    for _, r in disk.iterrows():
+        k = _journal_row_key(r)
+        if k in upd_by_key and k not in seen:
+            out_rows.append(upd_by_key[k])
+        else:
+            out_rows.append(r)
+        seen.add(k)
+    for k, r in upd_by_key.items():
+        if k not in seen:
+            out_rows.append(r)
+    return pd.DataFrame(out_rows, columns=cols).reset_index(drop=True)
+
+
+def save_journal(df: pd.DataFrame) -> None:
+    """Écrit le journal sous FileLock, par **fusion** avec l'état disque.
+
+    Audit 2026-09-17 (P0-2) — l'ancienne version réécrivait tout le fichier
+    depuis la vue chargée en début de cycle : un append de l'API pendant
+    l'évaluation (5–30 s avec les timeouts provider) était perdu (lignes
+    HAS/NEM du 01/09 disparues avec leurs SL/TP/scores). On relit maintenant
+    le disque sous le lock et on ne remplace que les lignes que ce process
+    connaît (clé Order_ID ou Date+Ticker).
+
+    Garantit aussi :
+      - Aucune corruption si le processus est interrompu (rename atomique).
+      - Miroir DuckDB rejoué après chaque écriture (fail-open), co-localisé
+        avec le CSV (tests isolés → DB isolée).
+    """
+    import io
+
     tmp_path = CSV_PATH.with_suffix(".tmp")
     with FileLock(str(CSV_LOCK_PATH), timeout=10):
         try:
-            df.to_csv(tmp_path, index=False)
+            # Vue tracker → représentation CSV (dtype=str) pour fusion homogène.
+            updated = pd.read_csv(io.StringIO(df.to_csv(index=False)), dtype=str).fillna("")
+            if CSV_PATH.exists() and CSV_PATH.stat().st_size > 0:
+                disk = pd.read_csv(CSV_PATH, dtype=str).fillna("")
+                merged = merge_journal_frames(disk, updated)
+            else:
+                merged = updated
+            merged.to_csv(tmp_path, index=False)
             tmp_path.replace(CSV_PATH)
-            logger.info(f"Journal sauvegardé → {CSV_PATH}")
+            logger.info(f"Journal sauvegardé → {CSV_PATH} ({len(merged)} lignes)")
         except Exception as exc:
             logger.error(f"Échec de la sauvegarde : {exc}")
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
             raise
+    try:
+        from modules.duckdb_journal import sync_from_csv
+        sync_from_csv(csv_path=CSV_PATH, db_path=CSV_PATH.with_name("trade_journal.duckdb"))
+    except Exception as exc:
+        logger.debug(f"[Journal] miroir DuckDB non rejoué : {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────
