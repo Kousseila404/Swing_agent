@@ -50,6 +50,34 @@ class OrderResult:
 # HELPERS — capture des scores TITAN à l'entrée
 # ─────────────────────────────────────────────────────────────────
 
+def _make_client_order_id(ticker: str) -> str:
+    """ID client déterministe et unique : SQ-<TICKER>-<UTC yyyymmddHHMMSS>-<4 hex>.
+
+    Alpaca impose ≤ 128 caractères et l'unicité par compte. Le préfixe `SQ-`
+    permet de distinguer nos ordres d'ordres manuels passés dans le dashboard
+    Alpaca lors de la réconciliation.
+    """
+    import uuid
+    from datetime import UTC
+
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    return f"SQ-{str(ticker).upper()}-{stamp}-{uuid.uuid4().hex[:4]}"
+
+
+# Fenêtre de grâce avant qu'une ligne OPEN fraîchement écrite puisse être
+# réconciliée comme "fermée par le broker". Audit 2026-09-17 (P0-3) : à
+# l'ouverture, le fill du parent et l'apparition de la position dans
+# `get_all_positions` ont quelques secondes de latence ; un cycle tracker qui
+# démarre dans la même minute voyait "pas de position" et clôturait la ligne
+# avec le premier vieux fill trouvé (CF 17/08 clôturé au fill du 27/07).
+SYNC_GRACE_MINUTES = 30
+
+# Plancher catastrophe appliqué quand une position importée depuis Alpaca n'a
+# aucun stop connu (ni journal, ni jambe bracket ouverte). Aligné sur
+# `portfolio._trade_levels._MAX_SL_PCT`.
+IMPORT_FALLBACK_SL_PCT = 0.35
+
+
 def _fmt_score(v) -> str:
     """Formatage d'un score 0-100 pour CSV. Retourne '' si None/invalide."""
     if v is None:
@@ -564,7 +592,7 @@ class AlpacaBroker(BrokerGateway):
                 with open(CSV_PATH, "a", newline="", encoding="utf-8") as fh:
                     writer = csv.DictWriter(fh, fieldnames=CSV_SCHEMA, extrasaction="ignore")
                     _sl_val = "" if math.isnan(scan.stop_loss) else round(scan.stop_loss, 4)
-                    writer.writerow({
+                    row = {
                         "Date":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "Ticker":      scan.ticker,
                         "Direction":   scan.direction,
@@ -581,7 +609,16 @@ class AlpacaBroker(BrokerGateway):
                         "Signal":      getattr(scan, "signal",     ""),
                         "Sector":      getattr(scan, "sector_etf", ""),
                         **_entry_scores_dict(scan),
-                    })
+                    }
+                    writer.writerow(row)
+            # Audit 2026-09-17 (P2-8) — miroir DuckDB dès l'ouverture (avant :
+            # seules les clôtures y étaient répliquées, la DB ne contenait
+            # que les lignes importées).
+            try:
+                from modules.duckdb_journal import shadow_insert
+                shadow_insert({k: ("" if v is None else v) for k, v in row.items()})
+            except Exception as _db_exc:
+                logger.debug(f"[AlpacaBroker] shadow_insert {scan.ticker} : {_db_exc}")
         except Exception as exc:
             logger.error(f"[AlpacaBroker] Erreur CSV log {scan.ticker} : {exc}")
 
