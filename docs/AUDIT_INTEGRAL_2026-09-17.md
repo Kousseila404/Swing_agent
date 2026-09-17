@@ -268,7 +268,11 @@ par une liquidation.
 | 5 — fiabilité | ✅ (sauf systemd) | Telegram échappé ; pytest isolé (garde-fou `SWINGQUANT_TEST_GUARD=1`, suite verte sans toucher aux données prod) ; logrotate daily/30 j ; NDX100 fallback. `--reload` en prod conservé volontairement (topologie dev de l'utilisateur) |
 | 6 — mesure | ✅ | `/api/performance/benchmark`, `/api/portfolio/protection`, `/api/system/health`, `/api/scoring/lab` + pages **Cockpit** (route par défaut) et **Scoring Lab** |
 
-Restent ouverts : installation du crontab ; ADD_ON/TRIM de `lt_exit_policy`
+**Stratégie retenue (soir du 17/09)** : `STRATEGY_MODE=basket` + profil
+`equal_7`, top-20 équipondéré, achats par rang ≤ 20, rotation rang > 40 sur
+5 j, stops catastrophe conservés. Interface réduite à 7 pages.
+
+Restent ouverts (historique) : installation du crontab (✅ fait) ; ADD_ON/TRIM de `lt_exit_policy`
 (gate rang/Risk — non fait, EIX reste en ADD_ON) ; source Nasdaq-100 (Wikipedia
 ne sert plus la table : fallback vide tant qu'aucun scrape ne réussit — l'univers
 est S&P 500 seul depuis juillet).

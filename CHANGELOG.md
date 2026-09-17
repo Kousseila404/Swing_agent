@@ -7,6 +7,43 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased] — stratégie « basket » automatisée + UI simplifiée (2026-09-17, soir)
+
+#### Changed — stratégie (mesurée par le Scoring Lab, fenêtre live 21 sem.)
+
+- **Profil de poids `equal_7`** (`TITAN_WEIGHT_PROFILE`, `_scoring.WEIGHT_PROFILES`) :
+  équipondéré sur les 7 piliers à IC ≥ 0 (sentiment/insider à 0). Top-20 :
+  +34 % / hit 76 % / DD −5 % / Sharpe 4,0 vs +18 % pour V14.1. Aucun
+  paramètre ajusté à la fenêtre. Profil actif dans `backend/.env`.
+- **Mode `STRATEGY_MODE=basket`** (config) : proposer top-20 en pondération
+  `equal` (nouvelle option `weighting_method="equal"`), auto-approve par
+  **rang courant ≤ 20** (verdict non rédhibitoire, Risk ≥ 40), budgets
+  4/run · 20/semaine ; **rotation** (`modules/basket_rotation.py`) : rang
+  > 40 pendant 5 jours consécutifs → vente au marché (`Close_Reason=ROTATION`),
+  exemption ADD_ON, max 3/run, jamais sous killswitch. Stops catastrophe et
+  trailing inchangés.
+- `lt_exit_policy` : plus d'ADD_ON si rang > 40 ou pilier Risk < 40
+  (`compute_ranks`, câblé tracker + `/api/lt_decision`).
+- Nasdaq-100 : API JSON officielle Nasdaq en source primaire (101 tickers),
+  Wikipedia en secours, cache.
+- Propositions pending générées sous l'ancien sizing expirées
+  (`strategy_basket_switch`) ; le refresh 06:00 régénère en 1/N.
+
+#### Removed — frontend (interface réduite à 7 pages)
+
+- Supprimées : Briefing (remplacée par Cockpit), Watchlist, Secteurs, Ticker
+  Detail, Comparer, Catalysts, News, Macro, Performance, Attribution, Risk
+  Monitor, Data Health, Audit (+ SectorCard, PriceAlertsPanel, TitanAlertsPanel).
+  Les endpoints backend correspondants restent servis (routines, tests).
+- Navigation : Pilotage (Cockpit · Propositions · Portfolio), Recherche
+  (Univers · Scoring Lab), Mon Portefeuille, Préférences.
+
+#### Tests
+
+- +6 (basket mode, rotation). Suite : 1420.
+
+---
+
 ## [Unreleased] — audit intégral + Lots 1→6 (2026-09-17)
 
 Rapport : [`docs/AUDIT_INTEGRAL_2026-09-17.md`](./docs/AUDIT_INTEGRAL_2026-09-17.md).

@@ -124,6 +124,14 @@ def spy_series(start: date, end: date | None = None, ticker: str = "SPY") -> lis
     return out
 
 
+def _active_profile_name() -> str:
+    try:
+        from modules.sector_metrics._scoring import ACTIVE_WEIGHT_PROFILE
+        return str(ACTIVE_WEIGHT_PROFILE)
+    except Exception:
+        return "unknown"
+
+
 def _snapshot_count() -> int:
     try:
         from modules import universe_history
@@ -140,7 +148,7 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
     (1 + return net) à la date `next_date`.
     """
     n_snap = _snapshot_count()
-    cache_key = f"basket:{top_n}"
+    cache_key = f"basket:{top_n}:{_active_profile_name()}"
     if not force:
         cached = _ram_get(cache_key)
         if cached is not None:
@@ -148,7 +156,7 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
         try:
             if CACHE_PATH.exists():
                 disk = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-                entry = (disk.get("baskets") or {}).get(str(top_n))
+                entry = (disk.get("baskets") or {}).get(cache_key)
                 if entry:
                     age = time.time() - float(entry.get("computed_epoch", 0))
                     if age < BASKET_CACHE_TTL_SEC and entry.get("n_snapshots") == n_snap:
@@ -163,9 +171,23 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
             return cached
         try:
             from modules.backtest import run_titan_top_n
+            # Le panier est classé avec le profil de poids ACTIF recalculé depuis
+            # les piliers stockés (les snapshots historiques gardent le composite
+            # de l'époque : mélanger V14.1 passé et equal_7 futur fausserait la
+            # série). Même mécanique que le Scoring Lab.
+            rank_fn = None
+            try:
+                from modules.scoring_lab import make_rank_fn
+                from modules.sector_metrics._scoring import ACTIVE_WEIGHT_PROFILE, WEIGHT_PROFILES
+                raw = WEIGHT_PROFILES.get(ACTIVE_WEIGHT_PROFILE) or {}
+                weights = {f"{k}_score": float(v) for k, v in raw.items() if v and k != "sentiment"}
+                if weights:
+                    rank_fn = make_rank_fn(weights=weights)
+            except Exception as exc:
+                logger.debug(f"[PerfBenchmark] profil actif indisponible, composite stocké : {exc}")
             res = run_titan_top_n(
                 top_n=top_n, benchmark=None, slippage_bps=BASKET_SLIPPAGE_BPS,
-                publication_lag_days=5,
+                publication_lag_days=5, rank_fn=rank_fn,
             )
             d: dict[str, Any] = res.to_dict()
             periods = [p for p in (d.get("periods") or []) if str(p.get("signal_date", "")) >= LIVE_START.isoformat()]
@@ -184,6 +206,7 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
             points.append((str(p.get("next_date")), round(idx, 4)))
         entry = {
             "top_n": top_n,
+            "profile": _active_profile_name(),
             "points": points,
             "periods": len(periods),
             "hit_rate": round(wins / len(periods), 3) if periods else None,
@@ -197,7 +220,7 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
             disk = {}
             if CACHE_PATH.exists():
                 disk = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-            disk.setdefault("baskets", {})[str(top_n)] = entry
+            disk.setdefault("baskets", {})[cache_key] = entry
             tmp = CACHE_PATH.with_suffix(".tmp")
             tmp.write_text(json.dumps(disk), encoding="utf-8")
             tmp.replace(CACHE_PATH)
