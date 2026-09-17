@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import re
 import sys
@@ -35,7 +36,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -232,16 +233,47 @@ def fetch_sp500_tickers() -> list[str]:
     return []
 
 
-def fetch_nasdaq100_tickers() -> list[str]:
-    """Scrape la table officielle Nasdaq-100 sur Wikipedia. Retourne [] si échec."""
-    html = _fetch_html(_WIKI_NDX100)
-    if html is None:
-        return []
+_NDX100_CACHE_PATH = Path(__file__).resolve().parents[1] / "data" / ".ndx100_cache.json"
+
+
+def _ndx100_fallback() -> list[str]:
+    """Liste Nasdaq-100 de secours : dernier scrape réussi (cache), sinon les
+    tickers marqués `ndx100` dans universe.json (audit 2026-09-17, P2-5 : le
+    scrape Wikipedia échouait chaque jour depuis juillet — 138 erreurs — sans
+    que personne ne sache d'où venait la liste effectivement utilisée)."""
     try:
-        tables = pd.read_html(html)
-    except Exception as e:
-        logger.error(f"[UniverseEngine] NDX100 parse failed: {e}")
-        return []
+        if _NDX100_CACHE_PATH.exists():
+            data = json.loads(_NDX100_CACHE_PATH.read_text(encoding="utf-8"))
+            tickers = sorted({str(t) for t in data.get("tickers", []) if t})
+            if 80 <= len(tickers) <= 120:
+                logger.warning(
+                    f"[UniverseEngine] NDX100 : fallback cache {data.get('fetched_at', '?')} ({len(tickers)} tickers)"
+                )
+                return tickers
+    except Exception as exc:
+        logger.debug(f"[UniverseEngine] NDX100 cache illisible : {exc}")
+    try:
+        upath = Path(__file__).resolve().parents[1] / "data" / "universe.json"
+        u = json.loads(upath.read_text(encoding="utf-8"))
+        rows = u.get("tickers") or {}
+        tickers = sorted(t for t, r in rows.items() if "ndx100" in (r.get("index_sources") or r.get("sources") or []))
+        if 80 <= len(tickers) <= 120:
+            logger.warning(f"[UniverseEngine] NDX100 : fallback universe.json ({len(tickers)} tickers)")
+            return tickers
+    except Exception as exc:
+        logger.debug(f"[UniverseEngine] NDX100 fallback universe.json : {exc}")
+    return []
+
+
+def fetch_nasdaq100_tickers() -> list[str]:
+    """Scrape la table officielle Nasdaq-100 sur Wikipedia ; fallback cache/univers."""
+    html = _fetch_html(_WIKI_NDX100)
+    tables = []
+    if html is not None:
+        try:
+            tables = pd.read_html(io.StringIO(html))
+        except Exception as e:
+            logger.error(f"[UniverseEngine] NDX100 parse failed: {e}")
     # La table "Components" varie d'emplacement — cherche par colonne.
     for tbl in tables:
         cols = [str(c).strip().lower() for c in tbl.columns]
@@ -252,9 +284,16 @@ def fetch_nasdaq100_tickers() -> list[str]:
                 kept = sorted({t for t in tickers if t})
                 # Sanity check : Nasdaq-100 ≈ 100 tickers, tolère ±15
                 if 80 <= len(kept) <= 120:
+                    try:
+                        _NDX100_CACHE_PATH.write_text(json.dumps({
+                            "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                            "tickers": kept,
+                        }), encoding="utf-8")
+                    except Exception:
+                        pass
                     return kept
-    logger.error("[UniverseEngine] NDX100 table Components introuvable")
-    return []
+    logger.warning("[UniverseEngine] NDX100 table Components introuvable sur Wikipedia — fallback")
+    return _ndx100_fallback()
 
 
 def _collect_tickers(indices: Sequence[str]) -> dict[str, list[str]]:
