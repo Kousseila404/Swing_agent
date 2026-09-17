@@ -1148,7 +1148,8 @@ class AlpacaBroker(BrokerGateway):
                             if fa_utc <= entry_utc:
                                 continue
                             fills.append((fa_utc, fp, self._order_type(o), fq))
-                        except Exception:
+                        except Exception as _fill_exc:
+                            logger.debug(f"[AlpacaBroker][Sync] {ticker} fill ignoré : {_fill_exc!r}")
                             continue
 
                     if not fills:
