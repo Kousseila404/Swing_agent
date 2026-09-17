@@ -42,6 +42,9 @@ MAILTO=""
 # (11:00–15:30 EDT / 10:00–14:30 EST) : jamais dans l'enchère d'ouverture.
 */30 15-19 * * 1-5 cd /home/swing/swingquant/backend && ./venv/bin/python main.py --auto-approve-proposals >> logs/auto_approve.log 2>&1
 
+# Commandes Telegram entrantes (/status, /approve, /reject, /pause, /resume) — 2 min, 12-22h UTC
+*/2 12-22 * * * cd /home/swing/swingquant/backend && ./venv/bin/python -m modules.telegram_inbox >> logs/telegram_inbox.log 2>&1
+
 # Digest Telegram quotidien — 07:30 UTC lun-ven (09:30 Paris été / 08:30 hiver)
 30 7 * * 1-5 cd /home/swing/swingquant/backend && ./venv/bin/python main.py --daily-digest >> logs/daily_digest.log 2>&1
 

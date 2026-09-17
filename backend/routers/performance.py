@@ -272,4 +272,33 @@ def get_scoring_lab(_auth: None = Security(api_core.require_auth)):
     return data
 
 
+# ─────────────────────────────────────────────────────────────────
+# /shadow · /performance/gap · /rebalance/preview
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/shadow")
+def get_shadow(_auth: None = Security(api_core.require_auth)):
+    """Forward-test A/B : NAV des portefeuilles virtuels par profil de scoring."""
+    from modules.shadow_portfolios import load_state, summary
+    state = load_state()
+    out = summary(state)
+    out["nav"] = {name: (p.get("nav") or [])[-250:] for name, p in (state.get("profiles") or {}).items()}
+    return out
+
+
+@router.get("/performance/gap")
+def get_performance_gap(months: int = Query(6, ge=1, le=12), top_n: int = Query(20, ge=5, le=50),
+                        _auth: None = Security(api_core.require_auth)):
+    """Attribution de l'écart compte vs panier : cash drag, slippage, stops, sélection."""
+    from modules.gap_attribution import compute_live_gap
+    return compute_live_gap(months=months, top_n=top_n)
+
+
+@router.get("/rebalance/preview")
+def get_rebalance_preview(_auth: None = Security(api_core.require_auth)):
+    """Ordres de rebalance 1/N qui seraient passés (lecture seule)."""
+    from modules.basket_rebalance import preview
+    return preview()
+
+
 __all__ = ["router", "compute_protection"]

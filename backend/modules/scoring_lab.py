@@ -26,7 +26,7 @@ import json
 import math
 import sys
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -160,6 +160,9 @@ def run_lab(quick: bool = False) -> dict[str, Any]:
                      **stats, "elapsed_sec": round(time.time() - t1, 1)})
         logger.info(f"[ScoringLab] {v['id']}: {stats.get('return_pct')}% ({stats.get('periods')} périodes)")
 
+    if not quick:
+        rows.extend(regime_variants())
+
     ref = next((r for r in rows if r["id"] == "top20"), None)
     base = next((r for r in rows if r["id"] == "universe_ew"), None)
     for r in rows:
@@ -201,6 +204,85 @@ def _verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if edge is not None:
         strength = "strong" if edge >= 8 else "weak" if edge >= 2 else "none"
     return {"edge_vs_universe_pct": edge, "strength": strength, "messages": msgs}
+
+
+def _spy_regime_flags(start: date) -> dict[str, bool]:
+    """{date: True si SPY > MA200} — filtre de régime (yfinance, fail-open → {})."""
+    try:
+        import yfinance as yf
+        hist = yf.Ticker("SPY").history(start=(start - timedelta(days=320)).isoformat(), timeout=20)
+        closes = hist["Close"]
+        ma = closes.rolling(200).mean()
+        return {idx.date().isoformat(): bool(c > m) for idx, c, m in zip(closes.index, closes, ma, strict=False) if m == m}
+    except Exception as exc:
+        logger.warning(f"[ScoringLab] SPY/MA200 indisponible : {exc}")
+        return {}
+
+
+def _stats_with_filter(periods: list[dict[str, Any]], flags: dict[str, bool], since: date | None) -> dict[str, Any]:
+    """Applique « cash quand SPY < MA200 » (rendement 0 la période) puis stats."""
+    filtered = []
+    for p in periods:
+        sd = str(p.get("signal_date", ""))
+        if since and sd < since.isoformat():
+            continue
+        on = flags.get(sd)
+        if on is None:
+            prev = [d for d in flags if d <= sd]
+            on = flags[max(prev)] if prev else True
+        filtered.append({**p, "portfolio_return": p["portfolio_return"] if on else 0.0})
+    return _live_stats_any(filtered)
+
+
+def _live_stats_any(periods: list[dict[str, Any]]) -> dict[str, Any]:
+    """Comme _live_stats mais sans borne LIVE_START (historique 5 ans)."""
+    idx = peak = 1.0
+    mdd = 0.0
+    wins = 0
+    rets: list[float] = []
+    for p in periods:
+        r = float(p.get("portfolio_return") or 0.0)
+        rets.append(r)
+        idx *= 1 + r
+        peak = max(peak, idx)
+        mdd = min(mdd, idx / peak - 1)
+        wins += 1 if r > 0 else 0
+    n = len(periods)
+    mean = sum(rets) / n if n else 0.0
+    var = sum((x - mean) ** 2 for x in rets) / (n - 1) if n > 1 else 0.0
+    sharpe = (mean / math.sqrt(var) * math.sqrt(52)) if var > 0 else None
+    return {"return_pct": round((idx - 1) * 100, 2) if n else None, "periods": n,
+            "hit_rate": round(wins / n, 3) if n else None, "max_drawdown_pct": round(mdd * 100, 2) if n else None,
+            "sharpe_weekly_ann": round(sharpe, 2) if sharpe is not None else None,
+            "worst_week_pct": round(min(rets) * 100, 2) if rets else None,
+            "start": periods[0]["signal_date"] if periods else None, "end": periods[-1]["next_date"] if periods else None}
+
+
+def regime_variants() -> list[dict[str, Any]]:
+    """Le filtre de régime (cash si SPY < MA200) aide-t-il ? Testé sur 5 ans avec
+    le pilier Momentum (seul point-in-time propre sur les snapshots bootstrappés)
+    et sur la fenêtre live avec le profil equal_7."""
+    from modules.backtest import run_titan_top_n
+    rows: list[dict[str, Any]] = []
+    try:
+        res = run_titan_top_n(top_n=20, benchmark=None, slippage_bps=SLIPPAGE_BPS, publication_lag_days=5,
+                              rank_fn=make_rank_fn(field="momentum_score"))
+        periods = res.to_dict().get("periods") or []
+        first = date.fromisoformat(str(periods[0]["signal_date"])) if periods else LIVE_START
+        flags = _spy_regime_flags(first)
+        rows.append({"id": "momentum_5y_nofilter", "label": "Momentum top-20 · 5 ans · sans filtre", "group": "regime", "top_n": 20,
+                     **_live_stats_any(periods)})
+        rows.append({"id": "momentum_5y_ma200", "label": "Momentum top-20 · 5 ans · cash si SPY < MA200", "group": "regime", "top_n": 20,
+                     **_stats_with_filter(periods, flags, None)})
+        res2 = run_titan_top_n(top_n=20, benchmark=None, slippage_bps=SLIPPAGE_BPS, publication_lag_days=5,
+                               rank_fn=make_rank_fn(weights={f"{k}_score": 1.0 for k in ("quality", "value", "risk", "momentum", "piotroski", "growth", "revisions")}))
+        p2 = res2.to_dict().get("periods") or []
+        rows.append({"id": "equal7_live_ma200", "label": "equal_7 top-20 · live · cash si SPY < MA200", "group": "regime", "top_n": 20,
+                     **_stats_with_filter(p2, flags, LIVE_START)})
+    except Exception as exc:
+        logger.warning(f"[ScoringLab] regime_variants : {exc}")
+        rows.append({"id": "regime_error", "label": "Filtre de régime", "group": "regime", "error": str(exc)})
+    return rows
 
 
 def load_lab() -> dict[str, Any] | None:

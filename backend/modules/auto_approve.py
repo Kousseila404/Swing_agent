@@ -233,6 +233,13 @@ def run_auto_approve() -> dict[str, Any]:
                 logger.warning(f"[AutoApprove] rotation : {len(rotation['closed'])} vente(s) — {rotation['closed']}")
         except Exception as exc:
             logger.error(f"[AutoApprove] rotation échouée : {exc}", exc_info=True)
+        try:
+            from modules.basket_rebalance import run_rebalance
+            reb = run_rebalance()
+            if reb.get("executed"):
+                logger.warning(f"[AutoApprove] rebalance : {len(reb['executed'])} ordre(s)")
+        except Exception as exc:
+            logger.error(f"[AutoApprove] rebalance échoué : {exc}", exc_info=True)
 
     pending = proposals.list_all(status="pending")
 

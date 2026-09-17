@@ -102,16 +102,16 @@ def attribute(
     slippage = 0.0
     stops = 0.0
     n_stop_exits = 0
-    for r in journal:
+    for row in journal:
         try:
-            size = float(r.get("Size") or 0)
-            entry = float(r.get("Entry") or 0)
-            bps = float(r.get("Slippage_Bps") or 0)
+            size = float(row.get("Size") or 0)
+            entry = float(row.get("Entry") or 0)
+            bps = float(row.get("Slippage_Bps") or 0)
             if size > 0 and entry > 0 and bps:
                 slippage -= abs(bps) / 10_000.0 * size * entry / eq_ref * 100.0
-            reason = str(r.get("Close_Reason") or "")
-            if reason in ("SL_HIT", "TRAILING_STOP", "TIMEOUT", "EMERGENCY_DD") and r.get("Exit_Price"):
-                pnl = (float(r["Exit_Price"]) - entry) * size
+            reason = str(row.get("Close_Reason") or "")
+            if reason in ("SL_HIT", "TRAILING_STOP", "TIMEOUT", "EMERGENCY_DD") and row.get("Exit_Price"):
+                pnl = (float(row["Exit_Price"]) - entry) * size
                 stops += pnl / eq_ref * 100.0
                 n_stop_exits += 1
         except (TypeError, ValueError):

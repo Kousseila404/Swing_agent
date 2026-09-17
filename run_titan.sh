@@ -235,6 +235,10 @@ fi
 #     Évalue les gates (killswitch, CB, régime macro, slots libres, cash)
 #     et enqueue jusqu'à N propositions à valider manuellement dans l'UI.
 #     Skipped silencieusement si API_TOKEN absent (auth fail-closed côté API).
+echo "── Step 3c-bis/4 : shadow_portfolios (forward-test A/B des profils) + portfolio_stop"
+"$PYTHON" -m modules.shadow_portfolios > /dev/null 2>&1 || echo "WARN: shadow_portfolios (non bloquant)"
+"$PYTHON" -m modules.portfolio_stop || echo "WARN: portfolio_stop (non bloquant)"
+
 echo "── Step 3d-bis/4 : scoring_lab (dimanche, ou si jamais calculé — ~5 min)"
 if [[ "$(date +%u)" == "7" || ! -f "$BACKEND/data/.scoring_lab.json" ]]; then
     timeout 900 "$PYTHON" -m modules.scoring_lab
