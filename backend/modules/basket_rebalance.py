@@ -135,9 +135,18 @@ def run_rebalance(force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         for o in orders:
             r = adjust(o["ticker"], int(o["delta_qty"]))
             (result["executed"] if r.get("ok") else result["failed"]).append(r)
-    state.update({"last_run": today.isoformat(), "last_run_month": today.strftime("%Y-%m"),
-                  "n_orders": len(orders), "executed": len(result["executed"])})
+    # 2026-11-18 : le mois n'est marqué « fait » que si tout est passé, ou
+    # après 3 tentatives (avant : marqué fait même si tous les ordres échouaient).
+    month = today.strftime("%Y-%m")
+    attempts = (state.get("attempts", 0) if state.get("attempt_month") == month else 0) + 1
+    done = not result["failed"] or attempts >= 3
+    state.update({"last_run": today.isoformat(), "attempt_month": month, "attempts": attempts,
+                  "n_orders": len(orders), "executed": len(result["executed"]),
+                  "failed": len(result["failed"])})
+    if done:
+        state["last_run_month"] = month
     _save_state(state)
+    result["month_done"] = done
     if orders:
         logger.warning(f"[Rebalance] {len(result['executed'])}/{len(orders)} ordre(s) exécuté(s) : "
                        + ", ".join(f"{o['ticker']} {o['delta_qty']:+d}" for o in orders))

@@ -1210,14 +1210,19 @@ class AlpacaBroker(BrokerGateway):
 
     def adjust_position(self, ticker: str, delta_qty: int, direction: str = "LONG") -> dict:
         """Rebalance de poids : achète (delta>0) ou vend (delta<0) `|delta|` actions
-        au marché, puis met à jour la ligne OPEN du journal (Size, Entry moyen
-        pondéré pour un ajout) et journalise dans `data/rebalance_log.jsonl`.
+        au marché, met à jour la ligne OPEN du journal avec la quantité
+        RÉELLEMENT remplie, puis ré-arme immédiatement le stop (+TP) GTC.
 
-        Les jambes stop existantes sont ré-ajustées en quantité par
-        `ensure_protective_stops` au cycle suivant (drift de qty). Pour une
-        réduction, on annule d'abord la jambe stop (elle bloque la quantité).
+        Réécrit le 2026-11-18 (audit 2026-11-06, « rebalance 1 sens ») :
+          - achat : la jambe stop de vente ouverte faisait rejeter l'achat
+            (« potential wash trade ») → on annule aussi les jambes de sortie ;
+          - vente : la vente partait avant que l'annulation du stop soit
+            effective (« insufficient qty ») → on attend la confirmation ;
+          - journal : `Size` était écrasé même sans fill → seulement sur fill,
+            avec `filled_qty`.
         """
         import json as _json
+        import time as _t
 
         import pandas as pd
         from filelock import FileLock
@@ -1232,13 +1237,38 @@ class AlpacaBroker(BrokerGateway):
             client = self._get_client()
             is_long = str(direction).upper() == "LONG"
             selling = (delta_qty < 0) == is_long
-            if selling:
-                for o in self._open_orders_for(client, ticker):
-                    if self._order_side(o) == self._exit_side_name(direction):
-                        try:
-                            client.cancel_order_by_id(str(o.id))
-                        except Exception as exc:
-                            logger.debug(f"[AlpacaBroker] cancel {o.id} : {exc}")
+            exit_side = self._exit_side_name(direction)
+
+            # 1. Annule TOUTES les jambes de sortie (stop + TP), en mémorisant
+            #    leurs niveaux pour les ré-armer après le fill.
+            stop_px: float | None = None
+            tp_px: float | None = None
+            exit_orders = [o for o in self._open_orders_for(client, ticker)
+                           if self._order_side(o) == exit_side]
+            for o in exit_orders:
+                if getattr(o, "stop_price", None):
+                    stop_px = float(o.stop_price)
+                elif getattr(o, "limit_price", None):
+                    tp_px = float(o.limit_price)
+                try:
+                    client.cancel_order_by_id(str(o.id))
+                except Exception as exc:
+                    logger.debug(f"[AlpacaBroker] cancel {o.id} : {exc}")
+            if exit_orders:
+                for _ in range(self._CLOSE_CONFIRM_ATTEMPTS * 2):
+                    _t.sleep(self._CLOSE_CONFIRM_DELAY_SEC)
+                    still = [o for o in self._open_orders_for(client, ticker)
+                             if self._order_side(o) == exit_side]
+                    if not still:
+                        break
+                else:
+                    out["error"] = "annulation des jambes de sortie non confirmée — ordre non envoyé"
+                    logger.error(f"[AlpacaBroker] adjust_position {ticker} : {out['error']}")
+                    return out
+            if stop_px is None:
+                stop_px = self._journal_stop(ticker)
+
+            # 2. Ordre au marché.
             req = MarketOrderRequest(
                 symbol=ticker, qty=abs(int(delta_qty)),
                 side=OrderSide.SELL if selling else OrderSide.BUY,
@@ -1246,33 +1276,50 @@ class AlpacaBroker(BrokerGateway):
                 client_order_id=_make_client_order_id(f"{ticker}-REB"),
             )
             order = client.submit_order(order_data=req)
-            fill_px = 0.0
+            fill_px, filled_qty = 0.0, 0
             for _ in range(self._CLOSE_CONFIRM_ATTEMPTS):
-                import time as _t
                 _t.sleep(self._CLOSE_CONFIRM_DELAY_SEC)
                 try:
                     o = client.get_order_by_id(str(order.id))
                     fill_px = float(getattr(o, "filled_avg_price", 0) or 0)
-                    if fill_px > 0:
+                    filled_qty = int(float(getattr(o, "filled_qty", 0) or 0))
+                    if fill_px > 0 and filled_qty >= abs(int(delta_qty)):
                         break
                 except Exception:
                     continue
-            out.update({"order_id": str(order.id), "fill": fill_px})
-            with FileLock(str(CSV_LOCK_PATH), timeout=10):
-                ensure_csv_schema(CSV_PATH)
-                df = pd.read_csv(CSV_PATH, dtype=str).fillna("")
-                mask = (df["Ticker"].str.upper() == ticker.upper()) & (df["Status"] == "OPEN")
-                if mask.any():
-                    idx = df[mask].index[0]
-                    old_qty = int(float(_cell(df.at[idx, "Size"]) or 0))
-                    old_entry = float(_cell(df.at[idx, "Entry"]) or 0)
-                    new_qty = old_qty + int(delta_qty)
-                    if delta_qty > 0 and fill_px > 0 and old_qty > 0:
-                        df.at[idx, "Entry"] = f"{round((old_entry * old_qty + fill_px * delta_qty) / new_qty, 4):g}"
-                    df.at[idx, "Size"] = str(max(0, new_qty))
-                    df.to_csv(CSV_PATH, index=False)
-                    realized = (fill_px - old_entry) * abs(delta_qty) if (delta_qty < 0 and fill_px > 0) else 0.0
-                    out.update({"old_qty": old_qty, "new_qty": new_qty, "realized_pnl": round(realized, 2)})
+            out.update({"order_id": str(order.id), "fill": fill_px, "filled_qty": filled_qty})
+            if filled_qty <= 0 or fill_px <= 0:
+                try:
+                    client.cancel_order_by_id(str(order.id))
+                except Exception:
+                    pass
+
+            # 3. Journal : uniquement la quantité réellement remplie.
+            eff_delta = (filled_qty if delta_qty > 0 else -filled_qty) if fill_px > 0 else 0
+            if eff_delta:
+                with FileLock(str(CSV_LOCK_PATH), timeout=10):
+                    ensure_csv_schema(CSV_PATH)
+                    df = pd.read_csv(CSV_PATH, dtype=str).fillna("")
+                    mask = (df["Ticker"].str.upper() == ticker.upper()) & (df["Status"] == "OPEN")
+                    if mask.any():
+                        idx = df[mask].index[0]
+                        old_qty = int(float(_cell(df.at[idx, "Size"]) or 0))
+                        old_entry = float(_cell(df.at[idx, "Entry"]) or 0)
+                        new_qty = old_qty + eff_delta
+                        if eff_delta > 0 and old_qty > 0 and new_qty > 0:
+                            df.at[idx, "Entry"] = f"{round((old_entry * old_qty + fill_px * eff_delta) / new_qty, 4):g}"
+                        df.at[idx, "Size"] = str(max(0, new_qty))
+                        df.to_csv(CSV_PATH, index=False)
+                        realized = (fill_px - old_entry) * abs(eff_delta) if eff_delta < 0 else 0.0
+                        out.update({"old_qty": old_qty, "new_qty": new_qty, "realized_pnl": round(realized, 2)})
+
+            # 4. Ré-arme la protection immédiatement (pas d'attente du tracker).
+            if stop_px and stop_px > 0:
+                out["stop_rearmed"] = self._arm_stop(client, ticker, stop_px, direction, take_profit=tp_px) is not None
+            else:
+                out["stop_rearmed"] = False
+                logger.warning(f"[AlpacaBroker] adjust_position {ticker} : aucun niveau de stop connu — ré-armement laissé au tracker")
+
             try:
                 log_path = CSV_PATH.with_name("rebalance_log.jsonl")
                 with log_path.open("a", encoding="utf-8") as fh:
@@ -1281,12 +1328,28 @@ class AlpacaBroker(BrokerGateway):
                 sync_from_csv(csv_path=CSV_PATH, db_path=CSV_PATH.with_name("trade_journal.duckdb"))
             except Exception:
                 pass
-            out["ok"] = fill_px > 0
-            logger.info(f"[AlpacaBroker] rebalance {ticker} {delta_qty:+d} @ {fill_px:.2f} → qty {out.get('new_qty')}")
+            out["ok"] = eff_delta == delta_qty
+            if not out["ok"] and "error" not in out:
+                out["error"] = f"rempli {eff_delta:+d}/{delta_qty:+d}"
+            logger.info(f"[AlpacaBroker] rebalance {ticker} {eff_delta:+d}/{delta_qty:+d} @ {fill_px:.2f} → qty {out.get('new_qty')}")
         except Exception as exc:
             logger.error(f"[AlpacaBroker] adjust_position {ticker} {delta_qty:+d} : {exc}")
             out["error"] = str(exc)
         return out
+
+    @staticmethod
+    def _journal_stop(ticker: str) -> float | None:
+        """Stop_Loss de la ligne OPEN du journal (repli si aucun stop broker)."""
+        try:
+            import pandas as pd
+            df = pd.read_csv(CSV_PATH, dtype=str).fillna("")
+            row = df[(df["Ticker"].str.upper() == ticker.upper()) & (df["Status"] == "OPEN")]
+            if not row.empty:
+                v = float(_cell(row.iloc[0]["Stop_Loss"]) or 0)
+                return v if v > 0 else None
+        except Exception:
+            pass
+        return None
 
     def update_stop_loss(
         self,
