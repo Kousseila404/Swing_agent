@@ -52,7 +52,9 @@ POSITIONS: list[dict] = [
     },
     {
         "ticker": "PSX", "target_weight_pct": 11.5, "target_amount": 230.0,
-        "shares": 0.32436, "entry_price": 246.64, "beta": 0.72,
+        # 2026-11-18 : synchro eToro — 4 lots DCA (19/08 246,64 ; 15/09 260,99 ;
+        # 15/10 293,28 ; 16/11 270,00) = 1,186876 action, PRU 266,51 $.
+        "shares": 1.186876, "entry_price": 266.51, "beta": 0.72,
     },
     {
         "ticker": "DRH", "target_weight_pct": 11.0, "target_amount": 220.0,
@@ -95,6 +97,25 @@ POSITIONS: list[dict] = [
         "shares": 1.76367, "entry_price": 34.02, "beta": 1.63,
         "correlation_alert": {"ref": "MU", "threshold": 0.50, "persist_weeks": 1},
     },
+    # ── Ajouts 2026-11-18 (synchro eToro) : positions réelles ouvertes le
+    #    27/04 et 29/06/2026 via la règle d'achat TITAN, absentes jusqu'ici du
+    #    book. target_amount = montant réellement investi (relevé eToro).
+    {
+        "ticker": "INCY", "target_amount": 250.0,
+        "shares": 2.624671, "entry_price": 95.25, "beta": 0.78,
+    },
+    {
+        "ticker": "CF", "target_amount": 251.39,
+        "shares": 2.073298, "entry_price": 121.25, "beta": 0.54,
+    },
+    {
+        "ticker": "NEM", "target_amount": 200.0,
+        "shares": 2.109927, "entry_price": 94.79, "beta": 0.57,
+    },
+    {
+        "ticker": "EQT", "target_amount": 250.0,
+        "shares": 4.159733, "entry_price": 60.10, "beta": 0.67,
+    },
 ]
 
 CASH_RESERVE_PCT    = 10.0
@@ -110,6 +131,13 @@ CASH_RESERVE_AMOUNT = 200.0
 # +25.7% de dérive au lieu de +3.5% réel). Calculé, pas codé en dur, pour
 # rester cohérent si POSITIONS change.
 TOTAL_ENVELOPE_AMOUNT = sum(p["target_amount"] for p in POSITIONS) + CASH_RESERVE_AMOUNT
+
+# 2026-11-18 : les poids cibles sont CALCULÉS depuis les montants (avant :
+# codés en dur, sommant à 100 % sur $2000 — faux dès qu'une ligne s'ajoute).
+# Les proportions relatives choisies par l'utilisateur sont conservées.
+for _p in POSITIONS:
+    _p["target_weight_pct"] = round(100.0 * _p["target_amount"] / TOTAL_ENVELOPE_AMOUNT, 2)
+CASH_RESERVE_PCT = round(100.0 * CASH_RESERVE_AMOUNT / TOTAL_ENVELOPE_AMOUNT, 2)
 
 # Watchlist pure — thèse cassée, aucune position, 0% cible.
 WATCHLIST: list[dict] = [

@@ -256,7 +256,7 @@ def test_get_my_portfolio_accepts_review_token(monkeypatch):
     client = _client(monkeypatch)
     r = client.get("/api/my_portfolio", headers=_auth(REVIEW_TOKEN))
     assert r.status_code == 200
-    assert len(r.json()["positions"]) == 10
+    assert len(r.json()["positions"]) == 14
 
 
 def test_get_my_portfolio_rejects_garbage_token(monkeypatch):

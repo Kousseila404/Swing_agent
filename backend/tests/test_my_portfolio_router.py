@@ -75,7 +75,7 @@ def test_my_portfolio_happy_path_prices_available(monkeypatch):
     r = _client(monkeypatch).get("/api/my_portfolio")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["positions"]) == 10
+    assert len(body["positions"]) == 14  # 10 + INCY/CF/NEM/EQT (synchro eToro 2026-11-18)
     assert body["cash_reserve"]["amount"] == 200.0
     assert [w["ticker"] for w in body["watchlist"]] == ["SEZL"]
     # total = sum(shares * 100) + 200
@@ -104,8 +104,8 @@ def test_my_portfolio_partial_deployment_shows_progress_not_drift_alert(monkeypa
     # ça doit basculer en statut "en cours de déploiement", pas en alerte
     # de dérive, même si l'écart au poids cible dépasse largement ±25%.
     def _price(p):
-        v = 240.47 if p["ticker"] == "PSX" else 100.0
-        return (v, None, v, 1.0)  # ~$78 / $230 déployé (34%)
+        v = 66.0 if p["ticker"] == "PSX" else 100.0
+        return (v, None, v, 1.0)  # 1,186876 × 66 ≈ $78 / $230 déployé (34%)
     monkeypatch.setattr(my_portfolio_router, "_safe_price", _price)
     r = _client(monkeypatch).get("/api/my_portfolio")
     body = r.json()
@@ -217,7 +217,10 @@ def test_my_portfolio_real_weight_uses_fixed_2000_envelope_not_invested_sum(monk
     assert psx["real_weight_pct"] < 1.0
 
     mu = by_ticker["MU"]
-    assert mu["real_weight_pct"] == mu["target_weight_pct"] == 4.5
+    # Poids cibles calculés depuis les montants (2026-11-18) : 90 / enveloppe.
+    from modules.my_portfolio_data import TOTAL_ENVELOPE_AMOUNT
+    assert mu["target_weight_pct"] == round(100 * 90.0 / TOTAL_ENVELOPE_AMOUNT, 2)
+    assert mu["real_weight_pct"] == mu["target_weight_pct"]
     assert mu["drift_pct"] == 0.0
     assert mu["rebalance_alert"] is False
 
@@ -252,9 +255,9 @@ def test_my_portfolio_pnl_computed_from_real_entry_price(monkeypatch):
     # — fx neutralisé à 1.0 par _client() ici, donc == entry_price natif.
     assert bnp["entry_price_usd"] == 110.64
 
-    # PSX : entrée 246.64 -> prix 200.0 (perte) -> pnl négatif
+    # PSX : PRU 266.51 (4 lots DCA, synchro eToro) -> prix 200.0 (perte)
     psx = by_ticker["PSX"]
-    assert psx["pnl_usd"] == round((200.0 - 246.64) * 0.32436, 2)
+    assert psx["pnl_usd"] == round((200.0 - 266.51) * 1.186876, 2)
     assert psx["pnl_usd"] < 0
     assert psx["pnl_pct"] < 0
 
