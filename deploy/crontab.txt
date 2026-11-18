@@ -56,3 +56,9 @@ MAILTO=""
 # ingère les propositions postées) — 05:05 / 05:10 UTC
 5 5 * * * cd /home/swing/swingquant/backend && ./venv/bin/python -m scripts.publish_thesis_review_context >> logs/thesis_review_bridge.log 2>&1
 10 5 * * * cd /home/swing/swingquant/backend && ./venv/bin/python -m scripts.ingest_thesis_review_comments >> logs/thesis_review_bridge.log 2>&1
+
+# Sentinel (invariants de RÉSULTAT : propositions créées, pipeline, OOM, panier
+# déployé…) + triage IA headless sur nouveau CRIT (agent sq-ops-investigator,
+# lecture seule, ≤ 2/24 h). Audit 2026-11-18 : le proposer est resté mort
+# 2 mois sans alerte. Toutes les 30 min 06:30→22:30 UTC, tous les jours.
+*/30 6-22 * * * /home/swing/swingquant/scripts/sentinel_triage.sh >> /home/swing/swingquant/backend/logs/sentinel.log 2>&1

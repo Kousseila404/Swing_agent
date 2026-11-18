@@ -21,6 +21,7 @@ autonome ; le numéro donne l'ordre de lecture recommandé.
 | [13-glossaire.md](13-glossaire.md) | Vocabulaire (TITAN, bracket, OCO, HRP, IC, look-ahead…) |
 | [14-roadmap.md](14-roadmap.md) | Ce qui reste à faire, par ordre de valeur, avec les critères de « fini » |
 | [15-configuration.md](15-configuration.md) | Référence des paramètres (config.py + variables d'environnement) |
+| [16-agents.md](16-agents.md) | Sentinel de résultats, triage IA, sous-agents sq-* et skill /sq-ops |
 | [audits/](audits/) | Rapports d'audit datés (texte intégral) |
 
 Conventions :

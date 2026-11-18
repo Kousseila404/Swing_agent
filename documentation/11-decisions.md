@@ -87,3 +87,19 @@ zéro clé supplémentaire, comparaison de scoring pure, résultats dès J+1.
 ## ADR-017 · 2026-09-17 — Stop de portefeuille −15 % / 60 séances
 Décision : gel des entrées via le mécanisme killswitch, alerte. Pas de
 liquidation (cohérent ADR-010).
+
+## ADR-018 · 2026-11-18 — Agents : sentinel de résultats + sous-agents Claude en lecture seule
+Contexte : le proposer est resté mort du 2026-09-18 au 2026-11-18
+(`KeyError` en mode `equal`) sans aucune alerte, car `/api/system/health`
+ne mesure que l'âge des logs. 4 runs quotidiens sur 7 étaient KO (API tuée
+par l'OOM killer). Décision : (1) `modules/sentinel.py`, déterministe, qui
+vérifie des **résultats** (propositions créées, panier déployé, OOM…),
+cron 30 min + Telegram dédupliqué ; (2) triage IA headless
+(`scripts/sentinel_triage.sh` → agent `sq-ops-investigator`) seulement sur
+nouveau CRIT, ≤ 2/24 h, outils allow-listés en lecture ; (3) cinq
+sous-agents `.claude/agents/sq-*` + skill `/sq-ops` pour l'usage
+interactif. Principe : les agents diagnostiquent et recommandent, ils
+n'écrivent ni code, ni données, ni ordres. Alternatives écartées : agent
+autonome qui corrige et commit (le dépôt est auto-poussé chaque minute :
+aucune revue humaine) ; agent qui trade sur eToro (argent réel, edge non
+démontré OOS). Condition de révision : 3 mois de triages utiles.
