@@ -2,6 +2,8 @@
 
 Par ordre de valeur attendue sur le PnL, avec le critère de « fini ».
 
+> ⚠️ **2026-11-18 — audit intégral en attente de traitement** : voir [audits/2026-11-18-audit-integral.md](audits/2026-11-18-audit-integral.md) (13 P0, roadmap 90 jours proposée). Les priorités ci-dessous sont à réviser à sa lumière.
+
 ## Court terme (validation de la stratégie)
 
 1. **Laisser tourner sans toucher aux paramètres** jusqu'au 2026-12-17
