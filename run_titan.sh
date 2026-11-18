@@ -275,7 +275,17 @@ fi
 if [[ -z "${API_TOKEN:-}" ]]; then
     echo "SKIP: API_TOKEN absent (set dans crontab ou backend/.env)."
 else
-    if curl --silent --show-error --fail --max-time 120 \
+    # Audit 2026-11-18 : l'API (VM 4 Go partagée) se fait parfois tuer par
+    # l'OOM killer pendant le warm benchmark → step 4 échouait en
+    # "connection reset" (4 jours KO sur 7). On attend que l'API réponde
+    # puis on retente jusqu'à 3 fois.
+    _props_ok=1
+    for _attempt in 1 2 3; do
+        for _ in $(seq 1 30); do
+            curl --silent --max-time 5 -o /dev/null "$API_URL/api/market_status" && break
+            sleep 4
+        done
+        if curl --silent --show-error --fail --max-time 120 \
             -X POST \
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -283,13 +293,19 @@ else
             "$API_URL/api/proposals/refresh" \
             -o /tmp/titan_proposals.json \
             -w "http=%{http_code} time=%{time_total}s\n"; then
+            _props_ok=0; break
+        fi
+        echo "WARN: refresh proposals tentative $_attempt échouée, retry…"
+        sleep 15
+    done
+    if [[ $_props_ok -eq 0 ]]; then
         # Compte les propositions (best-effort jq, fallback grep).
         n=$(jq '.proposals | length' /tmp/titan_proposals.json 2>/dev/null \
             || grep -o '"id"' /tmp/titan_proposals.json 2>/dev/null | wc -l)
         echo "OK — ${n:-0} proposition(s) enqueuée(s)."
     else
-        rc_props=$?
-        echo "WARN: refresh proposals HTTP failed (rc=$rc_props)"
+        rc_props=1
+        echo "WARN: refresh proposals HTTP failed après 3 tentatives"
     fi
 fi
 
