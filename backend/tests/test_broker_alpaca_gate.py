@@ -89,3 +89,14 @@ def test_market_status_helper(alpaca_broker):
     assert status["is_open"] is False
     assert status["next_open"] == "2026-04-24T09:30:00-04:00"
     assert status["next_close"] == "2026-04-24T16:00:00-04:00"
+
+
+def test_account_equity_raises_instead_of_fake_account_size(alpaca_broker):
+    """Audit 2026-11-18 : une panne Alpaca ne doit plus renvoyer ACCOUNT_SIZE
+    (100 000 $ fictifs → killswitch/circuit breaker aveugles)."""
+    class _Down:
+        def get_account(self):
+            raise ConnectionError("alpaca down")
+    alpaca_broker._client = _Down()
+    with pytest.raises(RuntimeError, match="indisponible"):
+        alpaca_broker.get_account_equity()

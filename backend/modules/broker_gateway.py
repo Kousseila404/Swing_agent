@@ -1541,8 +1541,12 @@ class AlpacaBroker(BrokerGateway):
             account = client.get_account()
             return float(account.equity)
         except Exception as exc:
-            logger.warning(f"[AlpacaBroker] get_account_equity : {exc}")
-            return float(config.ACCOUNT_SIZE)
+            # Audit 2026-11-06/11-18 : renvoyer ACCOUNT_SIZE ici rendait le
+            # killswitch et le circuit breaker aveugles (equity fictive pile
+            # à 100 000 $). On lève : chaque appelant a son repli explicite
+            # (killswitch → estimation journal, bear_hedge → ACCOUNT_SIZE loggé).
+            logger.error(f"[AlpacaBroker] get_account_equity indisponible : {exc}")
+            raise RuntimeError(f"Alpaca equity indisponible : {exc}") from exc
 
     def import_positions_to_csv(self) -> int:
         """Importe dans le journal les positions Alpaca absentes du CSV.

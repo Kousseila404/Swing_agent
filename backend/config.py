@@ -183,6 +183,8 @@ BASKET_TOP_N             = int(os.getenv("BASKET_TOP_N", "20"))
 BASKET_EXIT_RANK         = int(os.getenv("BASKET_EXIT_RANK", "40"))
 BASKET_EXIT_CONFIRM_DAYS = int(os.getenv("BASKET_EXIT_CONFIRM_DAYS", "5"))
 BASKET_MAX_EXITS_PER_RUN = 3
+# Plancher par proposition (USD) — cf. auto_proposer.DEFAULT_MIN_PROPOSAL_USD
+MIN_PROPOSAL_USD         = float(os.getenv("MIN_PROPOSAL_USD", "500"))
 
 # Exécution (2026-09-17) : entrée en limite marketable (ask × 1,003), gate de
 # spread 0,5 %, remplacement par un market bracket après 60 min sans fill.

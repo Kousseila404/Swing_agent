@@ -92,7 +92,9 @@ DEFAULT_ALLOWED_REGIMES = ("BULL_MARKET",)
 _BASKET = str(getattr(config, "STRATEGY_MODE", "basket")).lower() == "basket"
 DEFAULT_MAX_HOLDINGS = int(getattr(config, "BASKET_TOP_N", 20)) if _BASKET else 15
 DEFAULT_MIN_FREE_SLOTS = 1
-DEFAULT_MIN_PROPOSAL_USD = 2_500.0  # plancher : ne propose pas en-dessous
+DEFAULT_MIN_PROPOSAL_USD = float(getattr(config, "MIN_PROPOSAL_USD", 500.0))  # plancher par ligne
+# (2026-11-18 : 2 500 → 500 $. Avec VIX ≥ 25, vol-target ×0,51 × régime ×0,6
+#  ramenaient chaque ligne du panier 1/20 à 730–1 900 $ < 2 500 → 0 proposition.)
 # (audit 2026-09-17 : 250 → 2 500 $ ; une ligne à 400 $ sur un book de 100 k$
 #  ne pèse rien et coûte du slippage/attention — MU à 1 action, WDC à 412 $.)
 VOL_TARGET_VIX_MIN = 25.0  # vol-targeting global seulement si VIX ≥ 25
