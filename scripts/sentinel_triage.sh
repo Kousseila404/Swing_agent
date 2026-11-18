@@ -69,7 +69,7 @@ timeout 900 "$CLAUDE_BIN" -p \
       "Bash(wc:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git diff:*)" \
       "Bash(journalctl:*)" "Bash(sudo -n journalctl:*)" "Bash(free:*)" "Bash(df:*)" \
   --disallowedTools "Write" "Edit" "NotebookEdit" \
-  > "$report" 2>&1
+  > "$report" 2> "$report.stderr"
 echo "[$(ts)] triage rc=$?"
 
 cd "$BACKEND" && "$PY" - "$report" <<'EOF'
