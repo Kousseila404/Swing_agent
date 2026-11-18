@@ -60,4 +60,10 @@ backend/htmlcov/
 backups/
 
 # État local Claude Code (locks de tâches planifiées, etc.)
-.claude/
+# .claude : local, sauf les agents/skills SwingQuant (versionnés, audit 2026-11-18)
+.claude/*
+!.claude/agents/
+!.claude/skills/
+
+# Sentinel (runtime)
+backend/data/sentinel/

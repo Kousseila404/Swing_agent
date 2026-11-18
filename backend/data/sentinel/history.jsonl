@@ -1,1 +1,0 @@
-{"ts": "2026-11-18T22:10:45+00:00", "status": "crit", "fingerprint": "bba5df7a33a1", "problems": ["proposals_flow:crit", "pipeline_daily:warn", "oom_kills:warn", "deployment:warn", "log_errors:warn"]}

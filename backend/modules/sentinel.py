@@ -314,16 +314,17 @@ def run_checks() -> Report:
     now = _now()
     market_open = _market_open()
     checks: list[Check] = []
-    for fn, args in (
-        (check_proposals_flow, (now,)), (check_pipeline_daily, (now,)), (check_api_alive, ()),
-        (check_oom_kills, ()), (check_tracker_heartbeat, (now, market_open)), (check_deployment, ()),
-        (check_equity_sanity, ()), (check_universe_fresh, (now,)), (check_log_errors, (now,)),
-        (check_host_resources, ()),
+    g = globals()
+    for name, args in (
+        ("proposals_flow", (now,)), ("pipeline_daily", (now,)), ("api_alive", ()),
+        ("oom_kills", ()), ("tracker_heartbeat", (now, market_open)), ("deployment", ()),
+        ("equity_sanity", ()), ("universe_fresh", (now,)), ("log_errors", (now,)),
+        ("host_resources", ()),
     ):
         try:
-            checks.append(fn(*args))
+            checks.append(g[f"check_{name}"](*args))
         except Exception as exc:  # un check cassé ne doit jamais masquer les autres
-            checks.append(Check(fn.__name__.removeprefix("check_"), WARN, f"check en erreur : {exc}"))
+            checks.append(Check(name, WARN, f"check en erreur : {exc}"))
     worst = max((c.status for c in checks), key=_SEVERITY_RANK.__getitem__, default=OK)
     return Report(ts=now.isoformat(timespec="seconds"), status=worst, checks=checks)
 
@@ -361,12 +362,14 @@ def notify(report: Report, *, send: bool = True) -> bool:
     now_epoch = time.time()
     if not should_alert(report, state, now_epoch):
         return False
-    if send:
-        try:
-            from modules.alerter import _send_telegram_message
-            _send_telegram_message(format_telegram(report))
-        except Exception as exc:
-            print(f"[sentinel] Telegram KO : {exc}", file=sys.stderr)
+    if not send:  # dry-run : ne consomme pas l'alerte
+        return True
+    try:
+        from modules.alerter import _send_telegram_message
+        _send_telegram_message(format_telegram(report))
+    except Exception as exc:
+        print(f"[sentinel] Telegram KO : {exc}", file=sys.stderr)
+        return False
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     ALERT_STATE.write_text(json.dumps({"fingerprint": report.fingerprint(), "status": report.status,
                                        "alerted_at": now_epoch}))
