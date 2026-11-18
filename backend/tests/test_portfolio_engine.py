@@ -702,3 +702,17 @@ def test_hrp_invalid_method_raises():
     scored = {"A": _mk(80, 5.0, 10.0, 100.0)}
     with pytest.raises(ValueError, match="weighting_method"):
         PortfolioManager(scored, weighting_method="markowitz")
+
+
+def test_equal_weighting_method_does_not_crash_on_vol_diag():
+    """Régression 2026-11-18 : en mode panier (`weighting_method="equal"`),
+    vol_diag était vide → KeyError à la boucle d'allocation → proposer mort
+    du 2026-09-18 au 2026-11-18 (aucune proposition pendant 2 mois)."""
+    scored = {t: _mk(80, 10, 25, 100, sector=s) for t, s in
+              [("A", "Tech"), ("B", "Health"), ("C", "Energy"), ("D", "Utilities")]}
+    pm = PortfolioManager(scored, weighting_method="equal", max_avg_corr=None)
+    plan = pm.calculate_allocations(list(scored.keys()), 40_000).to_dict()
+    assert len(plan["allocations"]) == 4
+    weights = [a["weight_pct"] for a in plan["allocations"].values()]
+    assert max(weights) - min(weights) < 1e-6
+    assert plan["diagnostics"]["n_imputed_vols"] == 0

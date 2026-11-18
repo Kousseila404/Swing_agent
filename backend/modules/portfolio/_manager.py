@@ -313,7 +313,12 @@ class PortfolioManager:
             # de l'edge. Les caps secteur/nom/corrélation s'appliquent ensuite.
             n = max(1, len(priced))
             weights = {t: 1.0 / n for t in priced}
-            vol_diag = {}
+            # Diag neutre par ticker : la boucle d'allocation lit vol_diag[t]
+            # (KeyError 'MU' → proposer mort du 2026-09-18 au 2026-11-18).
+            vol_diag = {
+                t: {"vol": None, "imputed_vol": False, "method": "equal"}
+                for t in priced
+            }
             eq_fallback = True
             hrp_diag = {"applied": False, "reason": "weighting_method=equal"}
         else:
