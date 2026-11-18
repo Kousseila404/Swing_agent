@@ -210,6 +210,22 @@ def run_cycle() -> None:
         write_heartbeat(cycle_status="blocked" if entries_blocked else "idle")
         return
 
+    # ── Garde séance (audit 2026-11-06 / 2026-11-18) ─────────────
+    # Hors séance, les cotations "latest quote" sont one-sided (mid IEX
+    # absurde) → faux SL/TS et ratchets de trailing sur prix non
+    # exécutables. La protection hors séance = stops GTC broker (ré-armés
+    # ci-dessus). On ne fait donc PAS d'évaluation logicielle hors séance.
+    if not getattr(config, "TRACKER_EVAL_OUTSIDE_SESSION", False):
+        from modules.tracker.market import is_market_hours
+        if not is_market_hours():
+            logger.info("[Session] Marché fermé — évaluation SL/TS/killswitch sautée (stops GTC broker actifs).")
+            try:
+                save_equity_snapshot(df)
+            except Exception as exc:
+                logger.warning(f"[Snapshot] Erreur mise à jour (hors séance): {exc}")
+            write_heartbeat(cycle_status="market_closed")
+            return
+
     # ── Garde 2 : Daily Drawdown Killswitch ─────────────────────
     if not entries_blocked and check_daily_drawdown(df):
         action = str(getattr(config, "KILLSWITCH_ACTION", "freeze")).lower()

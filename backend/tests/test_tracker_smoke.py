@@ -101,3 +101,25 @@ def test_backward_compat_read_circuit_breaker_state(monkeypatch, tmp_path: Path)
     _isolate_tracker_state(monkeypatch, tmp_path)
     result = state.read_circuit_breaker_state()
     assert result == {"is_paused": False, "size_multiplier": 1.0, "peak_equity": 0.0}
+
+
+def test_run_cycle_skips_evaluation_outside_session(monkeypatch, tmp_path: Path):
+    """Audit 2026-11-18 : hors séance, aucune évaluation SL/TS (prix
+    one-sided) — heartbeat=market_closed et evaluate_trades jamais appelé."""
+    csv, heartbeat, _, _ = _isolate_tracker_state(monkeypatch, tmp_path)
+    row = {c: None for c in CSV_SCHEMA}
+    row.update({"Ticker": "AAA", "Status": "OPEN"})
+    pd.DataFrame([row], columns=CSV_SCHEMA).to_csv(csv, index=False)
+
+    monkeypatch.setattr(cycle, "_alpaca_broker", lambda: None)
+    monkeypatch.setattr(market, "is_market_hours", lambda: False)
+    monkeypatch.setattr(cycle, "save_equity_snapshot", lambda df: None)
+
+    def _boom(df):
+        raise AssertionError("evaluate_trades ne doit pas tourner hors séance")
+    monkeypatch.setattr(cycle, "evaluate_trades", _boom)
+
+    cycle.run_cycle()
+
+    hb = json.loads(heartbeat.read_text())
+    assert hb["status"] == "market_closed"
