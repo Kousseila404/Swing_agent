@@ -774,7 +774,7 @@ export default function MyPortfolioTickerDetail({ position, driftThreshold, onBa
             )}
           </Field>
           <Field label="Poids cible vs réel">
-            {p.target_weight_pct}% cible → <span className="mp-weight-real">{p.real_weight_pct}%</span> réel
+            {Number(p.target_weight_pct).toFixed(1)}% cible → <span className="mp-weight-real">{p.real_weight_pct}%</span> réel
           </Field>
           <Field label="Dérive">
             {p.is_deploying ? (

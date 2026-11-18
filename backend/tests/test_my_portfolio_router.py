@@ -219,14 +219,14 @@ def test_my_portfolio_real_weight_uses_fixed_2000_envelope_not_invested_sum(monk
     mu = by_ticker["MU"]
     # Poids cibles calculés depuis les montants (2026-11-18) : 90 / enveloppe.
     from modules.my_portfolio_data import TOTAL_ENVELOPE_AMOUNT
-    assert mu["target_weight_pct"] == round(100 * 90.0 / TOTAL_ENVELOPE_AMOUNT, 2)
-    assert mu["real_weight_pct"] == mu["target_weight_pct"]
+    assert mu["target_weight_pct"] == round(100 * 90.0 / TOTAL_ENVELOPE_AMOUNT, 4)
+    assert mu["real_weight_pct"] == round(mu["target_weight_pct"], 2)
     assert mu["drift_pct"] == 0.0
     assert mu["rebalance_alert"] is False
 
     for ticker in ("BNP.PA", "FMX", "DRH", "CNC", "HRTG", "NUTX", "ERO"):
         row = by_ticker[ticker]
-        assert row["real_weight_pct"] == row["target_weight_pct"], ticker
+        assert row["real_weight_pct"] == round(row["target_weight_pct"], 2), ticker
         assert row["drift_pct"] == 0.0, ticker
 
 

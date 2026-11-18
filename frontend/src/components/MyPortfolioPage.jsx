@@ -168,7 +168,7 @@ export default function MyPortfolioPage({ routeParam, onNavigate }) {
         <div className="mp-tile">
           <span className="mp-tile-label">Réserve cash</span>
           <span className="mp-tile-value">
-            {fmtUsd(cash.amount)} <small>({cash.target_weight_pct}% cible)</small>
+            {fmtUsd(cash.amount)} <small>({Number(cash.target_weight_pct).toFixed(1)}% cible)</small>
           </span>
         </div>
         <div className={`mp-tile ${alertCount > 0 ? 'mp-tile-alert' : ''}`}>
@@ -277,7 +277,7 @@ export default function MyPortfolioPage({ routeParam, onNavigate }) {
                       />
                     </div>
                   </td>
-                  <td className="mp-value-cell">{p.target_weight_pct}%</td>
+                  <td className="mp-value-cell">{Number(p.target_weight_pct).toFixed(1)}%</td>
                   <td>
                     <span className="mp-weight-real">{p.real_weight_pct}%</span>
                     {p.is_deploying ? (
@@ -373,7 +373,7 @@ export default function MyPortfolioPage({ routeParam, onNavigate }) {
             <tfoot>
               <tr className="mp-cash-row">
                 <td>💵 Réserve cash</td>
-                <td>{cash.target_weight_pct}%</td>
+                <td>{Number(cash.target_weight_pct).toFixed(1)}%</td>
                 <td>{cash.real_weight_pct}%</td>
                 <td className="mp-value-cell">{fmtUsd(cash.amount)}</td>
                 <td className="mp-value-cell">{fmtUsd(cash.amount)}</td>

@@ -136,7 +136,7 @@ TOTAL_ENVELOPE_AMOUNT = sum(p["target_amount"] for p in POSITIONS) + CASH_RESERV
 # codés en dur, sommant à 100 % sur $2000 — faux dès qu'une ligne s'ajoute).
 # Les proportions relatives choisies par l'utilisateur sont conservées.
 for _p in POSITIONS:
-    _p["target_weight_pct"] = round(100.0 * _p["target_amount"] / TOTAL_ENVELOPE_AMOUNT, 2)
+    _p["target_weight_pct"] = round(100.0 * _p["target_amount"] / TOTAL_ENVELOPE_AMOUNT, 4)
 CASH_RESERVE_PCT = round(100.0 * CASH_RESERVE_AMOUNT / TOTAL_ENVELOPE_AMOUNT, 2)
 
 # Watchlist pure — thèse cassée, aucune position, 0% cible.
