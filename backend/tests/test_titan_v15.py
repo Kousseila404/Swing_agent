@@ -80,8 +80,8 @@ def test_lab_v15_rank_fn_applies_sector_cap():
 def test_momentum_is_true_12_1_and_52w_high_on_252_sessions():
     import pandas as pd
 
-    from modules.sector_metrics._momentum import MOMENTUM_FETCH_DAYS, _compute_momentum_stats
     from data_providers.yfinance_provider import _days_to_period
+    from modules.sector_metrics._momentum import MOMENTUM_FETCH_DAYS, _compute_momentum_stats
     assert _days_to_period(MOMENTUM_FETCH_DAYS) == "2y"  # ≥ 13 mois chez yfinance
     # 500 séances : un pic à 1000 il y a 400 séances (hors 52 sem.), puis 100→ linéaire.
     px = [100.0] * 500

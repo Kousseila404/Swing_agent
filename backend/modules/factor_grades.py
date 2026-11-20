@@ -30,7 +30,7 @@ from typing import Any
 PILLAR_FIELDS: tuple[tuple[str, str], ...] = (
     ("quality_score",   "Quality"),
     ("value_score",     "Value"),
-    ("risk_score",      "Bilan"),  # solidité bilan (D/E, liquidité), pas la volatilité
+    ("risk_score",      "Risk"),  # = solidité BILAN (D/E, liquidité), pas la volatilité ; clé d'API, ne pas renommer
     ("momentum_score",  "Momentum"),
     ("piotroski_score", "Piotroski"),
     ("growth_score",    "Growth"),

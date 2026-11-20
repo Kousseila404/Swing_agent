@@ -139,11 +139,11 @@ def test_run_auto_approve_blocked_by_killswitch(monkeypatch):
 def test_basket_mode_ranks_and_filters():
     from modules.auto_approve import select_candidates
     pending = [_prop("A", 70.0, verdict="WATCH"), _prop("B", 85.0, verdict="BUY"),
-               _prop("C", 60.0, verdict="FALLING_KNIFE"), _prop("D", 75.0, verdict="SKIP", risk=30.0),
+               _prop("C", 60.0, verdict="FALLING_KNIFE"), _prop("D", 75.0, verdict="SKIP", risk=5.0),
                _prop("E", 72.0, verdict="WATCH")]
     ranks = {"A": 3, "B": 1, "C": 2, "D": 4, "E": 45}
     got = select_candidates(pending, ranks=ranks, mode="basket")
-    assert [p["ticker"] for p, _ in got] == ["B", "A"]      # C : falling knife, D : Risk 30, E : rang 45
+    assert [p["ticker"] for p, _ in got] == ["B", "A"]      # C : falling knife, D : bilan 5 < plancher, E : rang 45
     assert "rang #1/" in got[0][1]
 
 
