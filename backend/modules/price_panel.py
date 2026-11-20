@@ -18,7 +18,7 @@ import gzip
 import json
 import math
 from bisect import bisect_right
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,13 +37,10 @@ _cache: dict[str, Any] = {"mtime": None, "series": {}}
 
 def _universe_tickers() -> list[str]:
     try:
-        from modules import api_core
-        uni = api_core._read_json(api_core.BASE / "data" / "universe.json") or {}
+        uni = json.loads((_BACKEND / "data" / "universe.json").read_text(encoding="utf-8"))
         tickers = uni.get("tickers") if isinstance(uni, dict) else None
         if isinstance(tickers, dict):
             return sorted(tickers)
-        if isinstance(tickers, list):
-            return sorted({str(t.get("ticker") if isinstance(t, dict) else t) for t in tickers if t})
     except Exception as exc:
         logger.warning(f"[PricePanel] univers illisible : {exc}")
     return []
@@ -159,6 +156,3 @@ def _main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_main())
-
-
-__all__ = ["refresh", "available", "close_on_or_before", "latest_closes", "PANEL_PATH", "timedelta"]
