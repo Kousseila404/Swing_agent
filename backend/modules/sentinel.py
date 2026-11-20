@@ -136,8 +136,9 @@ def _market_open() -> bool | None:
 
 def check_proposals_flow(now: datetime) -> Check:
     props = _read_json(DATA / "proposals.json", []) or []
-    created = [_parse_ts(p.get("created_at")) for p in props if isinstance(p, dict)]
-    created = [c for c in created if c]
+    created: list[datetime] = [
+        c for c in (_parse_ts(p.get("created_at")) for p in props if isinstance(p, dict)) if c
+    ]
     last = max(created) if created else None
     refresh = _read_json(DATA / "proposals_last_refresh.json", {}) or {}
     refresh_ok = refresh.get("ok")
