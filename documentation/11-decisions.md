@@ -133,3 +133,15 @@ sans token. Les écritures gardent `require_auth` strict par route.
 Conséquence : un client interne qui lit l'API doit envoyer
 `Authorization: Bearer $API_TOKEN` ; les tests ne lisent plus le vrai token
 de `.env` (conftest).
+
+## ADR-021 · 2026-11-20 — TITAN V15 : value sector-neutre filtrée qualité remplace le composite
+Contexte : le composite `equal_7` classait à l'envers sur la fenêtre live
+(top-20 +2,7 % vs bottom-20 +20,5 %, IC 21 j −0,055) ; seule la Value a un IC
+positif et stable. Décision : profil `v15_value_quality` (composite = moyenne
+des percentiles intra-secteur EV/EBITDA, P/E fwd, P/B ; plafonné à 40 si
+Quality ou Piotroski < 20ᵉ pct), panier top-30 / 4 par secteur / sortie rang
+50. Construction fixée a priori, mesurée en walk-forward et dans le harnais
+officiel (détails : audits/2026-11-20-titan-v15.md). Critères d'arrêt écrits
+d'avance ; rollback = env. Conséquence : le panier paper tourne
+progressivement (10/14 lignes sortiront via la rotation) ; la règle manuelle
+« TITAN ≥ 80 » change de sens.
