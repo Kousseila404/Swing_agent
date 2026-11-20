@@ -129,3 +129,15 @@ def test_rotation_records_universe_size(monkeypatch):
     r = basket_rotation.run_rotation(dry_run=True)
     assert r["to_exit"] == []
     assert writes[-1]["universe_sizes"] == [2]
+
+
+# ── Shadow : profil plafonné par secteur ─────────────────────────────────────
+
+def test_shadow_select_basket_sector_cap():
+    from modules import shadow_portfolios as sp
+    scored = {f"E{i}": {"current_price": 10, "sector": "Energy", "x_score": 100 - i} for i in range(6)}
+    scored |= {f"T{i}": {"current_price": 10, "sector": "Tech", "x_score": 50 - i} for i in range(6)}
+    w = {"x_score": 1.0}
+    assert sp.select_basket(scored, w, 4) == ["E0", "E1", "E2", "E3"]
+    assert sp.select_basket(scored, w, 4, max_per_sector=2) == ["E0", "E1", "T0", "T1"]
+    assert sp._profile_weights("equal_7_sector_cap") == sp._profile_weights("equal_7")

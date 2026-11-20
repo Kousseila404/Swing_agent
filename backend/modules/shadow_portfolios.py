@@ -38,10 +38,20 @@ PROFILES: dict[str, dict[str, float] | None] = {
     "momentum_tilt": None,
     "momentum_only": {"momentum_score": 1.0},
     "universe_ew": {},      # {} = tout l'univers équipondéré (référence)
+    # Audit 2026-11-20 : le panier equal_7 détenait 7/20 pétrolières +
+    # 3 semis ; ce profil teste si la concentration explique l'écart vs EW.
+    "equal_7_sector_cap": None,
+}
+
+# Variantes : profil → (profil de poids de base, nb max de titres par secteur).
+PROFILE_VARIANTS: dict[str, tuple[str, int]] = {
+    "equal_7_sector_cap": ("equal_7", 3),
 }
 
 
 def _profile_weights(name: str) -> dict[str, float] | None:
+    if name in PROFILE_VARIANTS:
+        name = PROFILE_VARIANTS[name][0]
     explicit = PROFILES.get(name)
     if explicit is not None:
         return explicit
@@ -70,14 +80,33 @@ def _score(row: dict[str, Any], weights: dict[str, float]) -> float | None:
     return num / den if den > 0 else None
 
 
-def select_basket(scored: dict[str, dict[str, Any]], weights: dict[str, float], top_n: int) -> list[str]:
-    """Top-N tickers pour un profil ({} → tout l'univers avec prix)."""
+def select_basket(
+    scored: dict[str, dict[str, Any]], weights: dict[str, float], top_n: int,
+    max_per_sector: int | None = None,
+) -> list[str]:
+    """Top-N tickers pour un profil ({} → tout l'univers avec prix).
+
+    `max_per_sector` : on descend le classement en sautant les titres d'un
+    secteur déjà plein (secteur inconnu = un secteur à part entière).
+    """
     priced = {t: r for t, r in scored.items() if float((r or {}).get("current_price") or 0) > 0}
     if not weights:
         return sorted(priced)
     ranked = [(t, s) for t, r in priced.items() if (s := _score(r, weights)) is not None]
     ranked.sort(key=lambda x: -x[1])
-    return [t for t, _ in ranked[:top_n]]
+    if not max_per_sector:
+        return [t for t, _ in ranked[:top_n]]
+    out: list[str] = []
+    per_sector: dict[str, int] = {}
+    for t, _ in ranked:
+        sec = str((priced[t] or {}).get("sector") or "Unknown")
+        if per_sector.get(sec, 0) >= max_per_sector:
+            continue
+        per_sector[sec] = per_sector.get(sec, 0) + 1
+        out.append(t)
+        if len(out) >= top_n:
+            break
+    return out
 
 
 def mark_to_market(port: dict[str, Any], prices: dict[str, float]) -> float:
@@ -156,7 +185,8 @@ def step(
         due = last_rb is None or (date.fromisoformat(today) - date.fromisoformat(last_rb)).days >= REBALANCE_EVERY_DAYS
         info: dict[str, Any] = {}
         if due:
-            basket = select_basket(scored, weights, TOP_N)
+            cap = PROFILE_VARIANTS.get(name, (name, None))[1]
+            basket = select_basket(scored, weights, TOP_N, max_per_sector=cap)
             info = rebalance(port, basket, prices, COST_BPS)
             port["last_rebalance"] = today
             port["basket"] = basket[:TOP_N] if weights else f"universe:{len(basket)}"
