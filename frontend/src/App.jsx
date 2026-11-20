@@ -8,6 +8,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import CommandPalette from './components/CommandPalette';
+import AuthBanner from './components/common/AuthBanner';
 import DataHealthBanner from './components/common/DataHealthBanner';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { PageSkeleton } from './components/common/Skeleton';
@@ -179,6 +180,7 @@ export default function App() {
             onOpenMacro={() => setActivePage('cockpit')}
           />
 
+          <AuthBanner />
           <DataHealthBanner onShowDetails={() => setActivePage('cockpit')} />
 
           <ErrorBoundary>

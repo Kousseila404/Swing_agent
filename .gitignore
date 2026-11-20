@@ -41,6 +41,8 @@ backend/data/.universe_backups*/
 backend/data/.price_target_history/
 backend/data/finnhub_cache/
 backend/data/sec_cache/
+backend/data/.price_panel.json.gz
+backend/data/.price_panel.tmp
 backend/data/sector_benchmark_cache/
 backend/.archive/
 backend/.pytest_cache/

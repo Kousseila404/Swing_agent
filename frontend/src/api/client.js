@@ -263,7 +263,7 @@ export const patchThesisReviewQueueStatus = async (ticker, entryId, status) => {
     throw new ApiError('Réseau indisponible', 0);
   }
   if (!r.ok) {
-    _signalAuth(r.status, path);
+    _signalAuth(r.status, `/my_portfolio/${ticker}`);
     let detail = `HTTP ${r.status}`;
     try {
       const d = await r.json();
@@ -286,7 +286,7 @@ export const patchMyPortfolioThesis = async (ticker, body) => {
     throw new ApiError('Réseau indisponible', 0);
   }
   if (!r.ok) {
-    _signalAuth(r.status, path);
+    _signalAuth(r.status, `/my_portfolio/${ticker}`);
     let detail = `HTTP ${r.status}`;
     try {
       const d = await r.json();
