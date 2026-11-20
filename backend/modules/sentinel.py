@@ -289,7 +289,7 @@ def check_etoro_snapshot(now: datetime) -> Check:
     if snap is None:
         return Check("etoro_snapshot", WARN, "aucun snapshot eToro", None,
                      "configurer ETORO_API_KEY/ETORO_USER_KEY ou ingérer un snapshot")
-    age = etoro_sync.snapshot_age_hours(snap, now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC))
+    age = etoro_sync.snapshot_age_hours(snap, now if now.tzinfo else now.replace(tzinfo=UTC))
     if age is None or age > 72:
         return Check("etoro_snapshot", WARN, f"snapshot eToro âgé de {age} h", age,
                      "synchro API absente ou en échec (logs/etoro_sync.log)")

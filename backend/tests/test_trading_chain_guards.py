@@ -167,3 +167,22 @@ def test_unjournaled_order_is_recorded_and_alerted(monkeypatch):
     rec = json.loads(bgw.UNJOURNALED_PATH.read_text().splitlines()[-1])
     assert rec["order_id"] == "ord-1" and rec["proposal_id"] == "PROP_1" and "disk full" in rec["error"]
     assert sent and "NON journalisé" in sent[0]
+
+
+# ── Sentinel : nouveaux angles morts ─────────────────────────────────────────
+
+def test_sentinel_unjournaled_and_etoro_checks():
+    from datetime import UTC, datetime, timedelta
+
+    from modules import broker_gateway as bgw
+    from modules import etoro_sync, sentinel
+    now = datetime.now(UTC)
+    assert sentinel.check_unjournaled_orders().status == sentinel.OK
+    bgw.UNJOURNALED_PATH.write_text('{"ticker": "AAA"}\n')
+    assert sentinel.check_unjournaled_orders().status == sentinel.CRIT
+    assert sentinel.check_etoro_snapshot(now).status == sentinel.WARN  # aucun snapshot
+    snap = etoro_sync.normalize_summary({"totals": {"totalValue": 10.0, "availableCash": 10.0},
+                                         "holdings": [], "timestamp": (now - timedelta(hours=2)).isoformat()})
+    etoro_sync.save_snapshot(snap)
+    assert sentinel.check_etoro_snapshot(now).status == sentinel.OK
+    assert sentinel.check_etoro_snapshot(now + timedelta(days=4)).status == sentinel.WARN

@@ -121,3 +121,15 @@ Cockpit : carte « Argent réel · eToro » en tête, au-dessus du paper.
 Jamais d'ordre eToro : aucune route d'écriture n'est appelée.
 Conséquence : snapshot périmé > 36 h signalé en orange ; sans clés API, la
 fraîcheur dépend d'une ingestion manuelle.
+
+## ADR-020 · 2026-11-20 — Toute lecture /api/* est authentifiée
+Contexte : 30 GET répondaient sans token et nginx laisse passer `/api/` sans
+basic-auth (le frontend porte son propre Bearer) : watchlist, notes,
+propositions, alertes, thèses lisibles publiquement. Décision : middleware
+ASGI `_ReadAuthMiddleware` (api.py) — GET/HEAD `/api/*` exigent le token
+complet ou le token de revue (`api_core.read_auth_status`, comparaison en
+temps constant), sauf `/api/market_status` et `/api/data_health`, sondes cron
+sans token. Les écritures gardent `require_auth` strict par route.
+Conséquence : un client interne qui lit l'API doit envoyer
+`Authorization: Bearer $API_TOKEN` ; les tests ne lisent plus le vrai token
+de `.env` (conftest).

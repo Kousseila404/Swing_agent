@@ -2,7 +2,9 @@
 
 Par ordre de valeur attendue sur le PnL, avec le critère de « fini ».
 
-> ⚠️ **2026-11-18 — audit intégral en attente de traitement** : voir [audits/2026-11-18-audit-integral.md](audits/2026-11-18-audit-integral.md) (13 P0, roadmap 90 jours proposée). Les priorités ci-dessous sont à réviser à sa lumière.
+> ✅ **2026-11-20 — audit « boost »** : voir [audits/2026-11-20-audit-boost.md](audits/2026-11-20-audit-boost.md) — 13 P0 traités, P1 chaîne d'ordres (sauf P1-2) et auth des lectures corrigés ; leviers restants classés (§5).
+>
+> ⚠️ **2026-11-18 — audit intégral** : voir [audits/2026-11-18-audit-integral.md](audits/2026-11-18-audit-integral.md) (13 P0, roadmap 90 jours proposée). Les priorités ci-dessous sont à réviser à sa lumière.
 
 ## Court terme (validation de la stratégie)
 
