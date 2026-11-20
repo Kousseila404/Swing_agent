@@ -365,6 +365,7 @@ def approve_proposal(
         rr_ratio=abs(rr),
         signal=item.get("signal") or "AUTO_PROPOSAL",
         sector_etf=item.get("sector") or "",
+        proposal_id=proposal_id,  # client_order_id idempotent (audit P1-4)
     )
     try:
         broker = get_broker()
@@ -855,6 +856,7 @@ def approve_proposals_batch(
             rr_ratio=abs(rr),
             signal=prop.get("signal") or "AUTO_PROPOSAL",
             sector_etf=prop.get("sector") or "",
+            proposal_id=entry_req.id,  # client_order_id idempotent (audit P1-4)
             # Scores TITAN à l'entrée (Lot 15)
             titan_score_entry=ctx.get("titan_score"),
             quality_entry=ctx.get("quality_score"),

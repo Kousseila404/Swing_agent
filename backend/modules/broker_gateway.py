@@ -51,18 +51,57 @@ class OrderResult:
 # HELPERS — capture des scores TITAN à l'entrée
 # ─────────────────────────────────────────────────────────────────
 
-def _make_client_order_id(ticker: str) -> str:
-    """ID client déterministe et unique : SQ-<TICKER>-<UTC yyyymmddHHMMSS>-<4 hex>.
+UNJOURNALED_PATH = Path(__file__).resolve().parent.parent / "data" / "unjournaled_orders.jsonl"
 
-    Alpaca impose ≤ 128 caractères et l'unicité par compte. Le préfixe `SQ-`
-    permet de distinguer nos ordres d'ordres manuels passés dans le dashboard
-    Alpaca lors de la réconciliation.
+
+def _record_unjournaled_order(scan: Any, order_id: str, fill_price: float, exc: Exception) -> None:
+    """Trace un ordre accepté par le broker mais non écrit au journal (P1-5)."""
+    import json as _json
+
+    rec = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "ticker": getattr(scan, "ticker", None), "order_id": order_id,
+        "fill_price": fill_price, "size": getattr(scan, "position_size", None),
+        "stop_loss": getattr(scan, "stop_loss", None), "take_profit": getattr(scan, "take_profit", None),
+        "proposal_id": getattr(scan, "proposal_id", None), "error": str(exc),
+    }
+    try:
+        UNJOURNALED_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(UNJOURNALED_PATH, "a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.critical(f"[AlpacaBroker] ordre non journalisé ET trace impossible : {rec} ({e})")
+    try:
+        from modules.alerter import _send_telegram_message
+        _send_telegram_message(
+            f"🚨 <b>Ordre {rec['ticker']} passé mais NON journalisé</b>\n"
+            f"order_id {order_id} · {rec['size']} @ {fill_price}\n"
+            f"Erreur : {exc}\nÀ réconcilier (data/unjournaled_orders.jsonl)."
+        )
+    except Exception as e:
+        logger.error(f"[AlpacaBroker] alerte ordre non journalisé échouée : {e}")
+
+
+def _make_client_order_id(ticker: str, proposal_id: str | None = None) -> str:
+    """ID client Alpaca (≤ 128 caractères, unique par compte, préfixe `SQ-`).
+
+    - Avec `proposal_id` : **idempotent sur la journée** —
+      `SQ-<TICKER>-P<proposal_id>-<UTC yyyymmdd>`. Audit 2026-11-18 P1-4 : un
+      timeout réseau après acceptation remettait la proposition en pending et
+      la re-soumission créait un 2ᵉ ordre (double achat). Alpaca refuse un
+      `client_order_id` déjà utilisé → le doublon du jour est rejeté ; le
+      lendemain, un nouvel essai légitime reste possible.
+    - Sans : `SQ-<TICKER>-<UTC yyyymmddHHMMSS>-<4 hex>` (jambes, rebalance…).
     """
+    import re
     import uuid
     from datetime import UTC
 
-    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    return f"SQ-{str(ticker).upper()}-{stamp}-{uuid.uuid4().hex[:4]}"
+    now = datetime.now(UTC)
+    if proposal_id:
+        pid = re.sub(r"[^A-Za-z0-9_-]", "", str(proposal_id))[:64]
+        return f"SQ-{str(ticker).upper()}-P{pid}-{now.strftime('%Y%m%d')}"
+    return f"SQ-{str(ticker).upper()}-{now.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4]}"
 
 
 # Fenêtre de grâce avant qu'une ligne OPEN fraîchement écrite puisse être
@@ -534,7 +573,7 @@ class AlpacaBroker(BrokerGateway):
             # jusqu'à l'ouverture (le gate horaire ci-dessus empêche ce cas).
             # `client_order_id` déterministe : permet à la réconciliation de
             # relier parent/enfants sans dépendre d'une recherche par symbole.
-            client_order_id = _make_client_order_id(scan.ticker)
+            client_order_id = _make_client_order_id(scan.ticker, getattr(scan, "proposal_id", None))
             entry_type = str(getattr(config, "EXEC_ENTRY_TYPE", "limit")).lower()
             ref_px = float((quote or {}).get("ask" if side == OrderSide.BUY else "bid") or 0) or float(scan.price or 0)
             order_data: Any
@@ -676,7 +715,12 @@ class AlpacaBroker(BrokerGateway):
             except Exception as _db_exc:
                 logger.debug(f"[AlpacaBroker] shadow_insert {scan.ticker} : {_db_exc}")
         except Exception as exc:
+            # Audit 2026-11-18 P1-5 : l'ordre EST chez le broker mais absent du
+            # journal → position invisible pour le tracker (pas de SL/TS logiciel).
+            # On ne relève pas (l'ordre ne doit pas être re-soumis) mais on
+            # laisse une trace durable + une alerte pour réconciliation manuelle.
             logger.error(f"[AlpacaBroker] Erreur CSV log {scan.ticker} : {exc}")
+            _record_unjournaled_order(scan, order_id, fill_price, exc)
 
     def _cancel_bracket_children(self, ticker: str) -> None:
         """

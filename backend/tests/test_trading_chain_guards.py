@@ -141,3 +141,29 @@ def test_shadow_select_basket_sector_cap():
     assert sp.select_basket(scored, w, 4) == ["E0", "E1", "E2", "E3"]
     assert sp.select_basket(scored, w, 4, max_per_sector=2) == ["E0", "E1", "T0", "T1"]
     assert sp._profile_weights("equal_7_sector_cap") == sp._profile_weights("equal_7")
+
+
+# ── P1-4 : client_order_id idempotent par proposition et par jour ────────────
+
+def test_client_order_id_idempotent_per_proposal_and_day():
+    from modules.broker_gateway import _make_client_order_id
+    a = _make_client_order_id("aapl", "PROP_7ABFF525")
+    b = _make_client_order_id("AAPL", "PROP_7ABFF525")
+    assert a == b and a.startswith("SQ-AAPL-PPROP_7ABFF525-") and len(a) <= 128
+    assert _make_client_order_id("AAPL") != _make_client_order_id("AAPL")  # sans proposition : unique
+
+
+# ── P1-5 : ordre passé mais non journalisé → trace + alerte ──────────────────
+
+def test_unjournaled_order_is_recorded_and_alerted(monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from modules import broker_gateway as bgw
+    sent: list[str] = []
+    monkeypatch.setattr("modules.alerter._send_telegram_message", lambda msg, *a, **k: sent.append(msg))
+    scan = SimpleNamespace(ticker="AAA", position_size=3, stop_loss=9.0, take_profit=14.0, proposal_id="PROP_1")
+    bgw._record_unjournaled_order(scan, "ord-1", 10.5, RuntimeError("disk full"))
+    rec = json.loads(bgw.UNJOURNALED_PATH.read_text().splitlines()[-1])
+    assert rec["order_id"] == "ord-1" and rec["proposal_id"] == "PROP_1" and "disk full" in rec["error"]
+    assert sent and "NON journalisé" in sent[0]
