@@ -68,7 +68,8 @@ def refresh(tickers: list[str] | None = None, days: int = DEFAULT_DAYS) -> dict[
             except (TypeError, ValueError):
                 continue
             if math.isfinite(fv) and fv > 0:
-                dst[str(getattr(idx, "date", lambda: idx)())[:10]] = round(fv, 6)
+                day = idx.date() if hasattr(idx, "date") else idx
+                dst[str(day)[:10]] = round(fv, 6)
         n_ok += 1
     payload = {"updated_at": datetime.now(UTC).isoformat(timespec="seconds"), "closes": closes}
     PANEL_PATH.parent.mkdir(parents=True, exist_ok=True)
