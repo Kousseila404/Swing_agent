@@ -55,7 +55,7 @@ def _redirect_paths_to_tmp(monkeypatch, tmp_path: Path) -> None:
 def test_status_returns_200_with_defaults(monkeypatch, tmp_path: Path):
     """Caches absents → /status retourne INITIAL_CAPITAL + 0 positions + BEAR."""
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    resp = TestClient(api.app).get("/api/status")
+    resp = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/status")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
@@ -76,7 +76,7 @@ def test_status_with_equity_and_macro(monkeypatch, tmp_path: Path):
         "confirmed_regime": "BULL_MARKET", "vix": 17.5,
     }))
 
-    body = TestClient(api.app).get("/api/status").json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/status").json()
     assert body["open_positions"] == 2
     assert body["account_equity"] == 98500.0
     assert body["regime"] == "BULL_MARKET"
@@ -88,7 +88,7 @@ def test_status_with_equity_and_macro(monkeypatch, tmp_path: Path):
 def test_status_blocked_when_killswitch_active(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
     (tmp_path / "trading_state.json").write_text(json.dumps({"blocked": True}))
-    body = TestClient(api.app).get("/api/status").json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/status").json()
     assert body["trading_blocked"] is True
     assert body["nuclear_stop"] is True
 
@@ -99,7 +99,7 @@ def test_status_blocked_when_killswitch_active(monkeypatch, tmp_path: Path):
 
 def test_macro_fallback_when_file_missing(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/macro").json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/macro").json()
     assert body["regime"] == "UNKNOWN"
     assert "introuvable" in body["error"]
 
@@ -113,7 +113,7 @@ def test_macro_happy_path(monkeypatch, tmp_path: Path):
         "ema200": 5400.0,
         "allowed_directions": ["LONG"],
     }))
-    body = TestClient(api.app).get("/api/macro").json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/macro").json()
     assert body["regime"] == "BULL_MARKET"
     assert body["vix"] == 18.2
     assert body["sp500"] == 5600.0
@@ -125,7 +125,7 @@ def test_macro_happy_path(monkeypatch, tmp_path: Path):
 
 def test_portfolio_empty_journal(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/portfolio", headers=_AUTH_HEADERS).json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/portfolio", headers=_AUTH_HEADERS).json()
     assert body["journal"] == []
     assert body["open_positions"] == []
     assert body["closed_trades"] == []
@@ -139,7 +139,7 @@ def test_portfolio_empty_journal(monkeypatch, tmp_path: Path):
 
 def test_equity_curve_empty_journal(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/equity_curve", headers=_AUTH_HEADERS).json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/equity_curve", headers=_AUTH_HEADERS).json()
     assert body["curve"] == []
     assert body["initial_equity"] == api_core.INITIAL_CAPITAL
     assert body["final_equity"] == api_core.INITIAL_CAPITAL
@@ -151,7 +151,7 @@ def test_equity_curve_empty_journal(monkeypatch, tmp_path: Path):
 
 def test_performance_metrics_empty_journal(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/performance_metrics", headers=_AUTH_HEADERS).json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/performance_metrics", headers=_AUTH_HEADERS).json()
     assert body["total_closed"] == 0
     assert body["wins"] == 0
     assert body["losses"] == 0
@@ -164,7 +164,7 @@ def test_performance_metrics_empty_journal(monkeypatch, tmp_path: Path):
 
 def test_macro_calendar_empty(monkeypatch, tmp_path: Path):
     _redirect_paths_to_tmp(monkeypatch, tmp_path)
-    body = TestClient(api.app).get("/api/macro_calendar").json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/macro_calendar").json()
     assert body["events"] == []
     assert body["in_blackout"] is False
     assert body["next_event"] is None
@@ -177,7 +177,7 @@ def test_macro_calendar_with_upcoming_fomc(monkeypatch, tmp_path: Path):
     (tmp_path / "macro_calendar.json").write_text(json.dumps({
         "events": [{"date": future, "type": "FOMC", "label": "FOMC Meeting"}],
     }))
-    body = TestClient(api.app).get("/api/macro_calendar").json()
+    body = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/macro_calendar").json()
     assert len(body["events"]) == 1
     assert body["events"][0]["type"] == "FOMC"
     assert body["events"][0]["upcoming"] is True
@@ -191,5 +191,5 @@ def test_macro_calendar_with_upcoming_fomc(monkeypatch, tmp_path: Path):
 
 def test_jobs_get_nonexistent_returns_404(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(api_core, "JOBS_DIR", tmp_path / ".jobs")
-    resp = TestClient(api.app).get("/api/jobs/deadbeef")
+    resp = TestClient(api.app, headers=_AUTH_HEADERS).get("/api/jobs/deadbeef")
     assert resp.status_code == 404

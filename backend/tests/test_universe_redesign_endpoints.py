@@ -243,7 +243,7 @@ class TestTitanAlerts:
         assert a["fire_count"] == 0
         assert a["id"].startswith("ALT_")
         # GET doit la retourner.
-        r2 = client.get("/api/titan_alerts")
+        r2 = client.get("/api/titan_alerts", headers=auth_headers)
         assert r2.json()["count"] == 1
 
     def test_post_idempotent_on_duplicate(self, client, auth_headers, isolated_alerts):
@@ -251,7 +251,7 @@ class TestTitanAlerts:
         r1 = client.post("/api/titan_alerts", json=body, headers=auth_headers)
         r2 = client.post("/api/titan_alerts", json=body, headers=auth_headers)
         assert r1.json()["alert"]["id"] == r2.json()["alert"]["id"]
-        assert client.get("/api/titan_alerts").json()["count"] == 1
+        assert client.get("/api/titan_alerts", headers=auth_headers).json()["count"] == 1
 
     def test_post_400_on_invalid_threshold(self, client, auth_headers, isolated_alerts):
         # Pydantic ge=0 le=100 → 422 (validation FastAPI native).
@@ -281,7 +281,7 @@ class TestTitanAlerts:
         assert r2.status_code == 200
         assert r2.json()["removed"] is True
         # Liste vide ensuite.
-        assert client.get("/api/titan_alerts").json()["count"] == 0
+        assert client.get("/api/titan_alerts", headers=auth_headers).json()["count"] == 0
 
     def test_delete_404_when_unknown(self, client, auth_headers, isolated_alerts):
         r = client.delete("/api/titan_alerts/ALT_DEADBEEF", headers=auth_headers)

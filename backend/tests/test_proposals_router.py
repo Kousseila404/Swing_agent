@@ -25,6 +25,13 @@ def client():
 
 
 @pytest.fixture
+def fail_closed(monkeypatch):
+    """Aucun token configuré + ALLOW_UNAUTH=false → tout endpoint protégé refuse."""
+    monkeypatch.setattr(api_core, "API_TOKEN", "")
+    monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
+
+
+@pytest.fixture
 def auth_token(monkeypatch):
     monkeypatch.setattr(api_core, "API_TOKEN", "test-token")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
@@ -138,7 +145,7 @@ def test_list_exposes_recurrence_streak(client, isolated_storage):
 # POST /api/proposals/refresh — auth + run
 # ─────────────────────────────────────────────────────────────────
 
-def test_refresh_requires_auth(client, isolated_storage):
+def test_refresh_requires_auth(client, isolated_storage, fail_closed):  # noqa: ARG001
     resp = client.post("/api/proposals/refresh", json={})
     # Sans token configuré ET sans header → 503 (fail-closed)
     assert resp.status_code in (401, 503)
@@ -171,7 +178,7 @@ def test_refresh_with_token_runs_proposer(client, isolated_storage,
 # POST /api/proposals/{id}/approve — auth + écriture journal + transition
 # ─────────────────────────────────────────────────────────────────
 
-def test_approve_requires_auth(client, isolated_storage):
+def test_approve_requires_auth(client, isolated_storage, fail_closed):  # noqa: ARG001
     item = _enqueue_one()
     resp = client.post(f"/api/proposals/{item['id']}/approve")
     assert resp.status_code in (401, 503)
@@ -232,7 +239,7 @@ def test_approve_already_decided_returns_400(client, isolated_storage, auth_toke
 # POST /api/proposals/{id}/reject
 # ─────────────────────────────────────────────────────────────────
 
-def test_reject_requires_auth(client, isolated_storage):
+def test_reject_requires_auth(client, isolated_storage, fail_closed):  # noqa: ARG001
     item = _enqueue_one()
     resp = client.post(f"/api/proposals/{item['id']}/reject", json={})
     assert resp.status_code in (401, 503)
@@ -286,7 +293,7 @@ def mock_live_price(monkeypatch):
     monkeypatch.setattr(market, "get_current_price", lambda t: None)
 
 
-def test_approve_batch_requires_auth(client, isolated_storage):
+def test_approve_batch_requires_auth(client, isolated_storage, fail_closed):  # noqa: ARG001
     item = _enqueue_one()
     resp = client.post(
         "/api/proposals/approve_batch",
@@ -509,7 +516,7 @@ def test_approve_batch_404_on_unknown_id(client, isolated_storage, auth_token):
 # POST /reject_batch
 # ─────────────────────────────────────────────────────────────────
 
-def test_reject_batch_requires_auth(client, isolated_storage):
+def test_reject_batch_requires_auth(client, isolated_storage, fail_closed):  # noqa: ARG001
     item = _enqueue_one()
     resp = client.post(
         "/api/proposals/reject_batch",
@@ -561,7 +568,7 @@ def test_reject_batch_404_on_unknown(client, isolated_storage, auth_token):
 # POST /regenerate — purge + refresh
 # ─────────────────────────────────────────────────────────────────
 
-def test_regenerate_requires_auth(client, isolated_storage):
+def test_regenerate_requires_auth(client, isolated_storage, fail_closed):  # noqa: ARG001
     _enqueue_one("AAPL")
     resp = client.post("/api/proposals/regenerate", json={})
     assert resp.status_code in (401, 503)
@@ -685,7 +692,7 @@ def test_refresh_persists_last_refresh(client, isolated_storage, auth_token, mon
         headers={"Authorization": f"Bearer {auth_token}"},
     )
 
-    resp = client.get("/api/proposals")
+    resp = client.get("/api/proposals", headers={"Authorization": f"Bearer {auth_token}"})
     body = resp.json()
     assert body["last_refresh"] is not None
     assert body["last_refresh"]["ok"] is True
