@@ -27,7 +27,9 @@ from modules.log import logger
 _BACKEND = Path(__file__).resolve().parents[1]
 PANEL_PATH = _BACKEND / "data" / ".price_panel.json.gz"
 
-DEFAULT_DAYS = 260
+# ≥ 13 mois de séances pour le momentum 12-1 de la stratégie cœur-satellite
+# (252 + 21 séances) ; yfinance : 420 jours → période « 2y ».
+DEFAULT_DAYS = 420
 # Une clôture plus vieille que ça par rapport à la date demandée n'est pas
 # considérée comme « le prix de ce jour » (ticker suspendu / délisté).
 MAX_STALENESS_DAYS = 5
