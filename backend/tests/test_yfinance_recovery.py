@@ -13,9 +13,17 @@ from data_providers.yfinance_provider import (
 
 # ── _recover_dividend_yield ─────────────────────────────────────────────────
 
-def test_div_yield_raw_in_bounds_returned_as_is():
-    info = {"dividendYield": 0.0325}
-    assert _recover_dividend_yield(info, price=150.0) == 0.0325
+def test_div_yield_raw_is_percent_since_yfinance_1x():
+    """yfinance ≥ 0.2.5x : dividendYield en POURCENT (3.25 = 3,25 %)."""
+    info = {"dividendYield": 3.25}
+    assert abs(_recover_dividend_yield(info, price=150.0) - 0.0325) < 1e-9
+
+
+def test_div_yield_small_payer_not_inflated_100x():
+    """Régression audit 2026-11-20 : MU dividendYield=0.09 (= 0,09 %) sortait à 9 %."""
+    info = {"dividendYield": 0.09, "dividendRate": 0.60, "trailingAnnualDividendYield": 0.00082}
+    assert abs(_recover_dividend_yield(info, price=594.0) - 0.60 / 594.0) < 1e-9
+    assert abs(_recover_dividend_yield({"dividendYield": 0.09}, price=594.0) - 0.0009) < 1e-9
 
 
 def test_div_yield_raw_out_of_bounds_recovered_from_rate():
@@ -41,15 +49,15 @@ def test_div_yield_falls_back_to_trailing_yield():
 
 
 def test_div_yield_all_sources_bad_returns_none():
-    info = {"dividendYield": 10.0, "dividendRate": 500.0, "trailingAnnualDividendYield": 8.0}
-    # dividendRate/price = 5.0 → toujours out of bounds (> 0.25)
+    info = {"dividendYield": 40.0, "dividendRate": 500.0, "trailingAnnualDividendYield": 8.0}
+    # rate/price = 5.0, trailing 8.0, dividendYield 40 % → tous hors bornes (> 25 %)
     result = _recover_dividend_yield(info, price=100.0)
     assert result is None
 
 
-def test_div_yield_no_price_no_recovery():
+def test_div_yield_no_price_falls_back_to_percent_field():
     info = {"dividendYield": 5.0, "dividendRate": 2.0}
-    assert _recover_dividend_yield(info, price=None) is None
+    assert abs(_recover_dividend_yield(info, price=None) - 0.05) < 1e-9
 
 
 def test_div_yield_missing_everywhere_returns_none():

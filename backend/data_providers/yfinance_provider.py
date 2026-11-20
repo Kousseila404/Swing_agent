@@ -435,34 +435,31 @@ def _scrape_dividend_safety(tk: yf.Ticker, info: dict[str, Any]) -> dict[str, An
 
 
 def _recover_dividend_yield(info: dict[str, Any], price: float | None) -> float | None:
-    """Recovery robuste du dividend yield — yfinance bogue régulièrement sur ce champ.
+    """Rendement du dividende en FRACTION (0.0195 = 1,95 %).
 
-    Stratégie (du plus fiable au moins fiable) :
-      1. `dividendYield` brut si dans [0, 25 %]
-      2. `dividendRate / currentPrice` si `dividendYield` hors bornes
-      3. `trailingAnnualDividendYield` en dernier recours
-      4. None
-
-    Observé en prod sur 268 tickers : yfinance retourne `info["dividendYield"] = 1.95`
-    (le dividend annuel en $) au lieu du ratio 0.0195 attendu.
+    Audit 2026-11-20 : depuis yfinance ≥ 0.2.5x (1.2.0 en prod) `dividendYield`
+    est exprimé en POURCENT (KO = 2.21, MU = 0.09). L'ancien code le prenait
+    tel quel s'il était ≤ 0.25 → les petits payeurs (MU, HLT, PWR…) sortaient
+    100× trop haut (9 % au lieu de 0,09 %). Ordre, du moins ambigu au plus :
+      1. `dividendRate / price` (montant annuel / prix — sans ambiguïté d'unité)
+      2. `trailingAnnualDividendYield` (fraction)
+      3. `dividendYield` / 100 (pourcent)
     """
-    raw = _safe_float(info.get("dividendYield"))
-    if raw is not None and 0.0 <= raw <= _YF_DIV_YIELD_MAX:
-        return raw
-
-    # Recovery via dividendRate (dividend annuel en $) / price
-    rate = _safe_float(
-        info.get("dividendRate") or info.get("trailingAnnualDividendRate")
-    )
+    rate = _safe_float(info.get("dividendRate") or info.get("trailingAnnualDividendRate"))
     if rate is not None and rate >= 0 and price is not None and price > 0:
         computed = rate / price
         if 0.0 <= computed <= _YF_DIV_YIELD_MAX:
             return computed
 
-    # Fallback : trailingAnnualDividendYield
     trailing = _safe_float(info.get("trailingAnnualDividendYield"))
     if trailing is not None and 0.0 <= trailing <= _YF_DIV_YIELD_MAX:
         return trailing
+
+    raw = _safe_float(info.get("dividendYield"))
+    if raw is not None and raw >= 0:
+        frac = raw / 100.0
+        if frac <= _YF_DIV_YIELD_MAX:
+            return frac
 
     return None
 
