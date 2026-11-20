@@ -191,6 +191,9 @@ class InsiderActivity:
     most_recent_10k_date: str | None = None  # dernier rapport annuel SEC
     most_recent_10q_date: str | None = None  # dernier rapport trimestriel SEC
     n_filings_scanned: int = 0
+    n_form4_parsed_90d: int = 0     # Form 4 dont le XML a été lu
+    n_form4_unparsed_90d: int = 0   # échecs réseau / budget → non comptés
+    parser_version: int = 2         # 1 = heuristique « tout Form 4 = achat »
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -380,17 +383,110 @@ def fetch_recent_filings(
     return out
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Form 4 — parsing XML (audit 2026-11-18 P0 #3)
+# ─────────────────────────────────────────────────────────────────────────────
+# Avant : chaque Form 4 était compté comme un ACHAT et le « filer_id » était
+# le préfixe de l'accession (= agent de dépôt, pas l'insider) → 26 % de
+# l'univers en « cluster buying ». On lit désormais le XML : seules les
+# transactions codées « P » (achat sur le marché) sont des achats, « S » des
+# ventes ; l'insider est identifié par `rptOwnerCik`. Les octrois (A), RSU
+# (M), impôts (F), dons (G)… ne comptent ni comme achat ni comme vente.
+# Un Form 4 publié est immuable → cache disque permanent par accession.
+
+_FORM4_CACHE_DIR = _CACHE_DIR / "form4"
+_FORM4_MAX_PER_TICKER = 60  # borne réseau par appel (les plus récents d'abord)
+
+
+def _fetch_text(url: str) -> str | None:
+    _throttle()
+    req = request.Request(url, headers={"User-Agent": _USER_AGENT})
+    try:
+        with request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+            if resp.status != 200:
+                return None
+            return resp.read().decode("utf-8", errors="ignore")
+    except (urlerror.URLError, urlerror.HTTPError, TimeoutError, OSError, ValueError) as e:
+        logger.debug(f"[sec_edgar] fetch failed {url[:80]}: {e}")
+        return None
+
+
+def parse_form4_xml(xml_text: str) -> dict[str, Any] | None:
+    """Extrait {owners, buy_shares, buy_usd, sell_shares, sell_usd, codes} d'un
+    Form 4 XML. None si le document est illisible."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(xml_text.strip().encode("utf-8"))
+    except ET.ParseError:
+        return None
+
+    def _txt(node: Any, path: str) -> str | None:
+        el = node.find(path)
+        return el.text.strip() if el is not None and el.text else None
+
+    owners = sorted({
+        (_txt(o, "reportingOwnerId/rptOwnerCik") or "").lstrip("0")
+        for o in root.findall("reportingOwner")
+    } - {""})
+    out: dict[str, Any] = {
+        "owners": owners, "buy_shares": 0.0, "buy_usd": 0.0,
+        "sell_shares": 0.0, "sell_usd": 0.0, "codes": [],
+    }
+    for tx in root.findall("nonDerivativeTable/nonDerivativeTransaction"):
+        code = _txt(tx, "transactionCoding/transactionCode")
+        if not code:
+            continue
+        out["codes"].append(code)
+        sh = _safe_float(_txt(tx, "transactionAmounts/transactionShares/value")) or 0.0
+        px = _safe_float(_txt(tx, "transactionAmounts/transactionPricePerShare/value")) or 0.0
+        if code == "P":
+            out["buy_shares"] += sh
+            out["buy_usd"] += sh * px
+        elif code == "S":
+            out["sell_shares"] += sh
+            out["sell_usd"] += sh * px
+    return out
+
+
+def _form4_detail(cik: str, accession: str, primary_doc: str | None) -> dict[str, Any] | None:
+    """Détail d'un Form 4 (cache permanent par accession). None si échec réseau."""
+    if not accession or not primary_doc:
+        return None
+    cache = _FORM4_CACHE_DIR / f"{accession}.json"
+    try:
+        if cache.exists():
+            return json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    # `primaryDocument` = « xslF345X06/form4.xml » (rendu HTML) → le XML brut
+    # est le même nom de fichier à la racine du dossier d'accession.
+    doc = primary_doc.split("/")[-1]
+    url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{doc}"
+    xml_text = _fetch_text(url)
+    if xml_text is None:
+        return None
+    detail = parse_form4_xml(xml_text)
+    if detail is None:
+        detail = {"owners": [], "buy_shares": 0.0, "buy_usd": 0.0,
+                  "sell_shares": 0.0, "sell_usd": 0.0, "codes": [], "unparsable": True}
+    try:
+        _FORM4_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix(".tmp")
+        tmp.write_text(json.dumps(detail), encoding="utf-8")
+        tmp.replace(cache)
+    except OSError:
+        pass
+    return detail
+
+
 def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderActivity:
     """Récupère l'activité insider depuis SEC EDGAR submissions API.
 
-    Approche pragmatique : on compte les filings `Form 4` dans les 30/90j,
-    sans parser les XML détaillés (montant USD = 0 par défaut). Pour avoir
-    le montant USD, soit on parse le XML de chaque filing (lent), soit on
-    utilise OpenInsider scrape (futur).
-
-    Le pilier Insider pourra fonctionner sur les COMPTES (signal "il y a
-    eu beaucoup d'achats récemment" est déjà actionnable) avant d'avoir
-    les montants exacts.
+    Depuis l'audit 2026-11-18 (P0 #3), chaque Form 4 des 90 derniers jours
+    est lu (XML, cache permanent par accession) : achats = code « P »,
+    ventes = code « S », insiders distincts = `rptOwnerCik`, montants nets
+    en USD. Un Form 4 illisible n'est compté ni comme achat ni comme vente.
 
     Args:
       ticker: ticker upper.
@@ -405,7 +501,8 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
         if cached is not None:
             try:
                 cached.pop("_cached_at", None)
-                return InsiderActivity(**cached)
+                if int(cached.get("parser_version") or 1) >= 2:
+                    return InsiderActivity(**cached)
             except TypeError:
                 pass  # schéma changé → re-fetch
 
@@ -426,6 +523,7 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
     forms = recent.get("form") or []
     dates = recent.get("filingDate") or []
     accession_nums = recent.get("accessionNumber") or []
+    primary_docs = recent.get("primaryDocument") or [None] * len(forms)
 
     today = datetime.utcnow().date()
     cutoff_30 = today - timedelta(days=30)
@@ -438,6 +536,8 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
     # Pour cluster : on track [(date, filer_id)] sur 90j, et on cherche
     # une fenêtre 7j contenant ≥ 3 filers DISTINCTS (pas 3 filings).
     filings_with_filer: list[tuple[datetime, str]] = []
+    net_usd_30 = net_usd_90 = 0.0
+    n_parsed = n_unparsed = 0
     most_recent: str | None = None
     most_recent_8k: str | None = None
     most_recent_10k: str | None = None
@@ -448,7 +548,7 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
     # extrait aussi la date du 8-K/10-K/10-Q le plus récent (événement
     # matériel / rapports périodiques) sans requête réseau supplémentaire,
     # en plus du filtre Form 4 (transactions).
-    for form, dstr, acc in zip(forms, dates, accession_nums, strict=False):
+    for form, dstr, acc, pdoc in zip(forms, dates, accession_nums, primary_docs, strict=False):
         if form in ("8-K", "8-K/A"):
             try:
                 datetime.strptime(dstr, "%Y-%m-%d")
@@ -483,18 +583,36 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
         if most_recent is None or dstr > most_recent:
             most_recent = dstr
         if d >= cutoff_90:
-            # SEC submissions API ne donne pas le type de transaction (buy/sell)
-            # sans parser le XML. Heuristique : on compte tous les Form 4
-            # comme "activity". `filer_id` = prefix accession ≈ identifiant
-            # unique du filer (insider). Permet de distinguer "10 filings d'un
-            # même insider via RSU/options" de "10 filings de 10 insiders distincts".
-            buy_90 += 1
-            filer_id = str(acc).split("-")[0]
-            insiders_90.add(filer_id)
-            filings_with_filer.append((datetime.combine(d, datetime.min.time()), filer_id))
+            # Audit 2026-11-18 P0 #3 : on lit le XML (cf. parse_form4_xml).
+            # SEC renvoie les filings du plus récent au plus ancien → le
+            # budget _FORM4_MAX_PER_TICKER garde les plus récents.
+            if n_parsed + n_unparsed >= _FORM4_MAX_PER_TICKER:
+                n_unparsed += 1
+                continue
+            detail = _form4_detail(cik, str(acc), pdoc)
+            if detail is None or detail.get("unparsable"):
+                n_unparsed += 1
+                continue
+            n_parsed += 1
+            owners = detail.get("owners") or []
+            bought = float(detail.get("buy_shares") or 0) > 0
+            sold = float(detail.get("sell_shares") or 0) > 0
+            net = float(detail.get("buy_usd") or 0) - float(detail.get("sell_usd") or 0)
+            net_usd_90 += net
+            if bought:
+                buy_90 += 1
+                for o in owners:
+                    insiders_90.add(o)
+                    filings_with_filer.append((datetime.combine(d, datetime.min.time()), o))
+            if sold:
+                sell_90 += 1
             if d >= cutoff_30:
-                buy_30 += 1
-                insiders_30.add(filer_id)
+                net_usd_30 += net
+                if bought:
+                    buy_30 += 1
+                    insiders_30.update(owners)
+                if sold:
+                    sell_30 += 1
 
     # Détection cluster RIGOUREUSE : ≥ 3 INSIDERS DISTINCTS dans une fenêtre 7j
     # roulante. Évite le faux positif "1 insider exerce 5 options en 1 semaine".
@@ -513,8 +631,8 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
     result = InsiderActivity(
         ticker=ticker,
         cik=cik,
-        net_buys_30d_usd=0.0,   # stub — sera rempli par OpenInsider plus tard
-        net_buys_90d_usd=0.0,
+        net_buys_30d_usd=round(net_usd_30, 2),
+        net_buys_90d_usd=round(net_usd_90, 2),
         buy_count_30d=buy_30,
         sell_count_30d=sell_30,
         buy_count_90d=buy_90,
@@ -526,6 +644,8 @@ def fetch_insider_activity(ticker: str, *, use_cache: bool = True) -> InsiderAct
         most_recent_10k_date=most_recent_10k,
         most_recent_10q_date=most_recent_10q,
         n_filings_scanned=n_form4,
+        n_form4_parsed_90d=n_parsed,
+        n_form4_unparsed_90d=n_unparsed,
     )
     _write_cache(ticker, result.to_dict())
     return result
