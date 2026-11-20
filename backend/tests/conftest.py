@@ -43,6 +43,12 @@ def _isolate_universe_history(tmp_path_factory, monkeypatch):
     monkeypatch.delenv("ETORO_USER_KEY", raising=False)
     from modules import broker_gateway as bgw
     monkeypatch.setattr(bgw, "UNJOURNALED_PATH", etoro_dir / "unjournaled_orders.jsonl")
+    # Le profil de scoring de prod (backend/.env) ne doit pas changer les
+    # attentes des tests : composite historique par défaut (V15 testé à part).
+    from modules.sector_metrics import _scoring
+    monkeypatch.setattr(_scoring, "ACTIVE_WEIGHT_PROFILE", "equal_7")
+    import config as _cfg
+    monkeypatch.setattr(_cfg, "BASKET_MAX_PER_SECTOR", 0)
     # Les tests ne doivent jamais dépendre du VRAI API_TOKEN de backend/.env :
     # auth ouverte par défaut, chaque test d'auth fixe son propre token.
     from modules import api_core

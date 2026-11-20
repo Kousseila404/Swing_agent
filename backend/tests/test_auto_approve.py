@@ -148,7 +148,7 @@ def test_basket_mode_ranks_and_filters():
 
 
 def test_basket_mode_unknown_rank_rejected():
-    from modules.auto_approve import _qualifies_basket
+    from modules.auto_approve import BASKET_TOP_N, _qualifies_basket
     assert _qualifies_basket({"titan_score": 90.0}, None)[0] is False
-    assert _qualifies_basket({"titan_score": 90.0}, 21)[0] is False
-    assert _qualifies_basket({"titan_score": 65.0, "buy_signal": {"verdict": "WATCH"}}, 20)[0] is True
+    assert _qualifies_basket({"titan_score": 90.0}, BASKET_TOP_N + 1)[0] is False
+    assert _qualifies_basket({"titan_score": 65.0, "buy_signal": {"verdict": "WATCH"}}, BASKET_TOP_N)[0] is True
