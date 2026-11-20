@@ -2,7 +2,8 @@
 //
 // Répond à une seule question : « est-ce que ça gagne de l'argent, et
 // est-ce que c'est sous contrôle ? »
-//   1. Compte réel vs SPY vs panier TITAN théorique (rebasés à 100).
+//   0. Argent réel eToro : direct / copy-trading / cash + actions du jour.
+//   1. Compte paper Alpaca vs SPY vs panier TITAN théorique (rebasés à 100).
 //   2. Chaque position : stop broker présent ? distance ? décision LT ?
 //   3. Ce qui attend une décision (propositions qualifiées).
 //   4. Santé système : tracker, killswitch, circuit breaker, crons.
@@ -10,12 +11,12 @@
 // Styles : src/styles/cockpit.css (aucun style inline).
 
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 
-import { fetchLtDecision } from '../api/client';
+import { fetchEtoroOverview, fetchLtDecision, syncEtoro } from '../api/client';
 import {
   useMarketStatus,
   usePerformanceBenchmark,
@@ -130,6 +131,120 @@ function BenchmarkChart({ bench }) {
   );
 }
 
+const SEVERITY_TONE = { high: 'danger', medium: 'warn', low: 'muted' };
+
+// Argent réel (eToro) — lecture seule. Le compte Alpaca plus bas est du paper.
+function RealMoneyCard({ onNavigate }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['etoro_overview'], queryFn: fetchEtoroOverview, staleTime: 5 * 60_000 });
+  const syncMut = useMutation({
+    mutationFn: syncEtoro,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['etoro_overview'] }),
+  });
+  const o = q.data;
+  const title = 'Argent réel · eToro';
+
+  if (q.isLoading) return <Card title={title} icon="💶"><div className="cockpit-empty">Chargement…</div></Card>;
+  if (q.isError) return <Card title={title} icon="💶"><div className="cockpit-empty">Indisponible : {q.error?.message}</div></Card>;
+  if (!o?.available) {
+    return <Card title={title} icon="💶"><div className="cockpit-empty">{o?.reason || 'Aucun snapshot eToro.'}</div></Card>;
+  }
+
+  const snap = o.snapshot;
+  const split = snap.split || {};
+  const tot = snap.totals || {};
+  const actions = o.actions || [];
+  const recon = o.reconciliation || [];
+  const asOf = snap.as_of ? snap.as_of.slice(0, 16).replace('T', ' ') : '—';
+  const head = (
+    <span className="pill-row">
+      <Pill tone={o.stale ? 'warn' : 'ok'} title={`source : ${snap.source}`}>
+        {o.stale ? '⚠️ ' : ''}snapshot {asOf} UTC
+      </Pill>
+      {o.api_configured && (
+        <button type="button" className="btn btn-secondary btn-sm" disabled={syncMut.isPending}
+                onClick={() => syncMut.mutate()}>
+          {syncMut.isPending ? 'Synchro…' : 'Resynchroniser'}
+        </button>
+      )}
+      {onNavigate && (
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onNavigate('my_portfolio')}>
+          Mon Portefeuille →
+        </button>
+      )}
+    </span>
+  );
+  const syncError = syncMut.data && !syncMut.data.ok
+    ? `Synchro échouée : ${syncMut.data.detail || syncMut.data.error || 'erreur'}` : null;
+
+  return (
+    <Card title={title} icon="💶" action={head} note={syncError}>
+      <div className="kpi-grid">
+        <Kpi label="Valeur totale" value={`$${fmtNum(tot.total_value, 0)}`}
+             sub={`PnL latent ${signed(tot.unrealized_pnl, 0, ' $')}`}
+             tone={(tot.unrealized_pnl ?? 0) >= 0 ? 'ok' : 'danger'} />
+        <Kpi label="Copy-trading" value={`${fmtNum(split.copy_pct, 0)}%`}
+             sub={`$${fmtNum(split.copy_value, 0)} · ${snap.copy.length} trader${snap.copy.length > 1 ? 's' : ''}`} />
+        <Kpi label="Actions en direct" value={`${fmtNum(split.direct_pct, 0)}%`}
+             sub={`$${fmtNum(split.direct_value, 0)} · ${snap.direct.filter((d) => d.value >= 5).length} lignes`}
+             onClick={onNavigate ? () => onNavigate('my_portfolio') : undefined} />
+        <Kpi label="Cash disponible" value={`${fmtNum(split.cash_pct, 0)}%`} sub={`$${fmtNum(split.cash, 0)}`} />
+      </div>
+
+      <div className="cockpit-grid-2">
+        <div>
+          <h4 className="cockpit-note">À décider aujourd'hui</h4>
+          {actions.length === 0 && recon.length === 0 ? (
+            <div className="cockpit-note">Rien à décider : aucun signal de vente déclenché, book aligné sur eToro.</div>
+          ) : (
+            <ul className="check-list">
+              {actions.map((a) => (
+                <li key={a.ticker}>
+                  <Pill tone={SEVERITY_TONE[a.severity] || 'muted'}>{a.ticker}</Pill>
+                  <span>
+                    {a.action}
+                    {a.reasons?.length ? ` — ${a.reasons.join(' ; ')}` : ''}
+                    {a.pnl_pct != null && <span className="cockpit-note"> ({signed(a.pnl_pct, 1)})</span>}
+                  </span>
+                </li>
+              ))}
+              {recon.map((r) => (
+                <li key={`recon-${r.symbol}-${r.kind}`}>
+                  <Pill tone="warn">{r.symbol}</Pill>
+                  <span>Book à corriger : {r.detail}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <h4 className="cockpit-note">Copy-trading</h4>
+          <table className="cockpit-table">
+            <thead>
+              <tr>
+                <th>Trader</th><th className="right">Valeur</th><th className="right">Poids</th>
+                <th className="right">Latent</th><th className="right">Réalisé</th><th className="right">Stop copie</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snap.copy.map((c) => (
+                <tr key={c.mirror_id ?? c.username}>
+                  <td className="ticker">{c.username}{c.paused ? ' ⏸' : ''}</td>
+                  <td className="num right">${fmtNum(c.value, 0)}</td>
+                  <td className="num right">{fmtNum(c.weight_pct, 1)}%</td>
+                  <td className={`num right ${toneOf(c.open_pnl)}`}>{signed(c.open_pnl_pct, 1)}</td>
+                  <td className={`num right ${toneOf(c.closed_pnl)}`}>{signed(c.closed_pnl, 0, ' $')}</td>
+                  <td className="num right">{c.stop_loss_pct != null ? `${fmtNum(c.stop_loss_pct, 0)}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function CockpitPage({ onNavigate }) {
   const marketQ     = useMarketStatus();
   const portfolioQ  = usePortfolio({ refetchInterval: 30_000 });
@@ -207,9 +322,12 @@ export default function CockpitPage({ onNavigate }) {
         </div>
       </header>
 
-      {/* ── KPI ── */}
+      {/* ── Argent réel (eToro) ── */}
+      <RealMoneyCard onNavigate={onNavigate} />
+
+      {/* ── KPI paper (Alpaca) ── */}
       <div className="kpi-grid">
-        <Kpi label="Equity" value={current ? `$${fmtNum(current, 0)}` : '—'}
+        <Kpi label="Equity paper (Alpaca)" value={current ? `$${fmtNum(current, 0)}` : '—'}
              sub={`PnL latent ${signed(equity.unrealized_pnl, 0, ' $')} · réalisé ${signed(equity.realized_pnl, 0, ' $')}`}
              tone={(equity.unrealized_pnl ?? 0) >= 0 ? 'ok' : 'danger'} />
         <Kpi label="Compte · fenêtre live" value={signed(summary.account_return_pct)} valueTone={toneOf(summary.account_return_pct)}

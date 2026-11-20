@@ -62,3 +62,7 @@ MAILTO=""
 # lecture seule, ≤ 2/24 h). Audit 2026-11-18 : le proposer est resté mort
 # 2 mois sans alerte. Toutes les 30 min 06:30→22:30 UTC, tous les jours.
 */30 6-22 * * * /home/swing/swingquant/scripts/sentinel_triage.sh >> /home/swing/swingquant/backend/logs/sentinel.log 2>&1
+
+# Synchro lecture seule du compte eToro réel (ADR-019) — 22:30 UTC lun-ven,
+# après clôture US. No-op (rc 0) tant que ETORO_API_KEY/ETORO_USER_KEY absents.
+30 22 * * 1-5 cd /home/swing/swingquant/backend && ./venv/bin/python -m modules.etoro_sync >> logs/etoro_sync.log 2>&1

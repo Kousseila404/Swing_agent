@@ -103,3 +103,21 @@ n'écrivent ni code, ni données, ni ordres. Alternatives écartées : agent
 autonome qui corrige et commit (le dépôt est auto-poussé chaque minute :
 aucune revue humaine) ; agent qui trade sur eToro (argent réel, edge non
 démontré OOS). Condition de révision : 3 mois de triages utiles.
+
+## ADR-019 · 2026-11-20 — Compte eToro réel visible dans l'app (lecture seule)
+Contexte : audit 2026-11-18 P0 #12/#13 — l'accueil ne montrait que le paper
+Alpaca ; le copy-trading (~58 % des ~9,6 k$ réels) était invisible et le book
+« Mon Portefeuille » était saisi à la main. Décision : `modules/etoro_sync.py`
+produit un snapshot normalisé (totaux, lignes directes agrégées par
+instrument, copy-traders) dans `backend/data/etoro/` (gitignoré) + une ligne
+d'historique par jour. Deux sources au même format : l'API publique eToro
+(`GET /api/v1/trading/info/real/pnl`, clés `ETORO_API_KEY` + `ETORO_USER_KEY`
+dans `backend/.env`, cron 22:30 UTC) ou l'ingestion d'un « portfolio summary »
+du connecteur Claude (`POST /api/etoro/snapshot`, auth complète).
+`GET /api/etoro/overview` ajoute les actions du jour (signaux de thèse
+`declenche` sur les lignes réellement détenues, stop de copie ≥ 40 %, copie en
+pause) et la réconciliation book ↔ eToro (unités, lignes manquantes).
+Cockpit : carte « Argent réel · eToro » en tête, au-dessus du paper.
+Jamais d'ordre eToro : aucune route d'écriture n'est appelée.
+Conséquence : snapshot périmé > 36 h signalé en orange ; sans clés API, la
+fraîcheur dépend d'une ingestion manuelle.

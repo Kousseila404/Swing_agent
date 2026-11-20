@@ -178,6 +178,11 @@ export const fetchThesisStatus = () => get('/thesis_status');
 // LT decision — refonte 2026-04-29 (Buffett-style). Agrégat des 4 couches
 // (catastrophe / thesis / valuation / add-on) par position OPEN.
 export const fetchLtDecision   = () => get('/lt_decision');
+
+// Compte eToro RÉEL (lecture seule, audit 2026-11-18 P0 #12/#13) :
+// snapshot direct / copy-trading / cash + actions du jour + réconciliation book.
+export const fetchEtoroOverview = () => get('/etoro/overview');
+export const syncEtoro          = () => post('/etoro/sync');
 export const fetchLtDecisionForTicker = (ticker) =>
   get(`/lt_decision/${encodeURIComponent(ticker)}`);
 // Backfill rétroactif des *_Entry depuis universe_history (admin).
