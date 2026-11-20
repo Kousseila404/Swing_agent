@@ -59,6 +59,7 @@ from ._aggregation import (
 from ._momentum import (
     _EMPTY_MOMENTUM,
     _MOMENTUM_HISTORY_DAYS,
+    MOMENTUM_FETCH_DAYS,
     SECTOR_TO_ETF,
     _compute_momentum_stats,
     _extract_close_series,
@@ -173,7 +174,7 @@ def _compute_momentum_fresh(
     }
     try:
         series_by_etf = market_provider.get_daily_history_batch(
-            etfs, days=_MOMENTUM_HISTORY_DAYS,
+            etfs, days=MOMENTUM_FETCH_DAYS,
         )
     except ProviderQuotaExceeded as e:
         logger.critical(

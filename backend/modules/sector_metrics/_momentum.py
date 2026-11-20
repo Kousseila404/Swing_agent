@@ -33,6 +33,16 @@ _TRADING_DAYS_PER_YEAR = 252
 # la mieux documentée). Buffer de 20j pour les jours fériés.
 _MOMENTUM_HISTORY_DAYS = 272
 
+# Horizon à DEMANDER aux providers (jours calendaires). Audit 2026-11-20 :
+# yfinance convertit `days` en période calendaire (220 → "9mo" ≈ 189 séances,
+# 272 → "1y" ≈ 250 séances) : le « 12M-1M » était en réalité un 8M-1M et le
+# « plus haut 52 semaines » un plus haut 9 mois. 400 j → "2y" chez yfinance,
+# puis `_compute_momentum_stats` découpe exactement la fenêtre utile.
+MOMENTUM_FETCH_DAYS = 400
+
+# Fenêtre d'un plus haut « 52 semaines » en séances.
+_HIGH_52W_DAYS = 252
+
 # Skip les N derniers jours de la série pour retirer le short-term reversal
 # (effet documenté par Jegadeesh-Titman 1993, Asness 1994). Le 12M-1M est le
 # standard académique pour le momentum cross-sectionnel.
@@ -83,6 +93,9 @@ def _compute_momentum_stats(close_series: Any) -> dict[str, float | None]:
     if close_series is None or len(close_series) < 2:
         return dict(_EMPTY_MOMENTUM)
 
+    # Fenêtre exacte : 252 séances de rendement + 21 de skip (= 273 clôtures),
+    # quel que soit l'historique fourni par le provider.
+    close_series = close_series.iloc[-(_MOMENTUM_HISTORY_DAYS + 1):]
     n = len(close_series)
     skip = _MOMENTUM_SKIP_RECENT_DAYS if n >= _MOMENTUM_MIN_WINDOW_DAYS + _MOMENTUM_SKIP_RECENT_DAYS else 0
     end_idx = -1 - skip if skip > 0 else -1
@@ -132,7 +145,7 @@ def _compute_momentum_stats(close_series: Any) -> dict[str, float | None]:
     high_52w_ratio: float | None = None
     try:
         last_px = float(close_series.iloc[-1])
-        high_52w = float(close_series.max())
+        high_52w = float(close_series.iloc[-_HIGH_52W_DAYS:].max())
         if math.isfinite(last_px) and math.isfinite(high_52w) and high_52w > 0:
             high_52w_ratio = last_px / high_52w
             if not math.isfinite(high_52w_ratio) or high_52w_ratio <= 0:

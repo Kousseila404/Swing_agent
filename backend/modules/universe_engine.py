@@ -353,9 +353,10 @@ def _collect_tickers(indices: Sequence[str]) -> dict[str, list[str]]:
 # ENRICHMENT — via FundamentalProviderBase (cf. data_providers/)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Historique demandé au market provider pour le momentum 6M : on prend ~220
-# jours de trading (≈ 10.5 mois calendaire) pour couvrir 6 mois + buffer σ.
-_MOMENTUM_HISTORY_DAYS = 220
+# Historique demandé au market provider pour le momentum 12M-1M — voir
+# `sector_metrics._momentum.MOMENTUM_FETCH_DAYS` (bug 2026-11-20 : 220 → 9 mois
+# chez yfinance, momentum réellement 8M-1M).
+from modules.sector_metrics._momentum import MOMENTUM_FETCH_DAYS as _MOMENTUM_HISTORY_DAYS  # noqa: E402
 
 
 def _ratios_to_fundamentals(
