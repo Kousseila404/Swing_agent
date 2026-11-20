@@ -297,17 +297,8 @@ else
     fi
 fi
 
-echo "── Step 4b : warm (après les propositions — audit 2026-11-18 : ce warm déclenchait l'OOM de l'API) /api/performance/benchmark (panier TITAN théorique, cache 12h)"
-WARM_TOKEN="${API_TOKEN:-}"
-if [[ -z "$WARM_TOKEN" && -f "$BACKEND/.env" ]]; then
-    WARM_TOKEN=$(grep -E '^API_TOKEN=' "$BACKEND/.env" | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")
-fi
-if [[ -n "$WARM_TOKEN" ]]; then
-    curl --silent --show-error --fail --max-time 180 \
-        -H "Authorization: Bearer ${WARM_TOKEN}" \
-        "$API_URL/api/performance/benchmark?months=6&top_n=20" \
-        -o /dev/null -w "benchmark http=%{http_code} time=%{time_total}s\n" || echo "WARN: warm benchmark failed (non bloquant)"
-fi
+echo "── Step 4b : warm panier TITAN théorique HORS API (audit 2026-11-18 P0 #2 — le warm via l'endpoint faisait tourner le backtest dans l'API et déclenchait l'OOM)"
+timeout 600 "$PYTHON" -m modules.perf_benchmark --warm || echo "WARN: warm benchmark failed (non bloquant)"
 
 
 # ── 5. Bear hedge (audit 2026-05-12) ─────────────────────────────

@@ -15,8 +15,14 @@ Sources :
                  look-ahead et ne sont jamais utilisés ici.
 
 Coûts : le backtest prend ~20–30 s → cache disque `data/.perf_benchmark_cache.json`
-(TTL 12 h, invalidé par le nombre de snapshots) + cache RAM. `run_titan.sh`
-peut chauffer le cache en appelant l'endpoint.
+(TTL 12 h, invalidé par le nombre de snapshots) + cache RAM.
+
+Audit 2026-11-18 P0 #2 : le warm quotidien passait par l'endpoint, donc le
+backtest tournait DANS l'API (cgroup 2 Go) → OOM. Désormais `run_titan.sh`
+chauffe le cache hors API (`python -m modules.perf_benchmark --warm`) et
+l'API sert l'entrée disque jusqu'à BASKET_STALE_MAX_SEC même si un nouveau
+snapshot est apparu entre-temps ; elle ne recalcule que si aucune entrée
+exploitable n'existe.
 """
 from __future__ import annotations
 
@@ -39,6 +45,9 @@ LIVE_START = date(2026, 4, 22)
 BASKET_TOP_N = 20
 BASKET_SLIPPAGE_BPS = 10.0
 BASKET_CACHE_TTL_SEC = 12 * 3600
+# Entrée disque servie telle quelle (même périmée d'un snapshot) tant qu'elle
+# a moins de 48 h : le cron la régénère chaque matin hors API.
+BASKET_STALE_MAX_SEC = 48 * 3600
 _RAM_TTL_SEC = 15 * 60
 
 _lock = threading.Lock()
@@ -159,7 +168,8 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
                 entry = (disk.get("baskets") or {}).get(cache_key)
                 if entry:
                     age = time.time() - float(entry.get("computed_epoch", 0))
-                    if age < BASKET_CACHE_TTL_SEC and entry.get("n_snapshots") == n_snap:
+                    fresh = age < BASKET_CACHE_TTL_SEC and entry.get("n_snapshots") == n_snap
+                    if fresh or age < BASKET_STALE_MAX_SEC:
                         _ram_set(cache_key, entry)
                         return entry
         except Exception as exc:
@@ -194,6 +204,14 @@ def titan_basket_series(top_n: int = BASKET_TOP_N, force: bool = False) -> dict[
         except Exception as exc:
             logger.warning(f"[PerfBenchmark] backtest panier échoué : {exc}")
             periods = []
+        finally:
+            # Rend la RAM des snapshots décompressés (P0 #1) : la série est
+            # mise en cache sous forme compacte juste en dessous.
+            try:
+                from modules.backtest import clear_snapshot_cache
+                clear_snapshot_cache()
+            except Exception:
+                pass
         points: list[tuple[str, float]] = []
         idx = 100.0
         wins = 0
@@ -374,3 +392,26 @@ def invested_fraction(open_positions: list[dict[str, Any]], equity: float) -> fl
         except (TypeError, ValueError):
             continue
     return round(min(1.0, total / equity), 4) if math.isfinite(total) else None
+
+
+# ─────────────────────────────────────────────────────────────────
+# CLI — warm hors API (run_titan.sh step 4b)
+# ─────────────────────────────────────────────────────────────────
+
+def _main(argv: list[str] | None = None) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(prog="perf_benchmark")
+    ap.add_argument("--warm", action="store_true", help="recalcule le panier et écrit le cache disque")
+    ap.add_argument("--top-n", type=int, default=BASKET_TOP_N)
+    args = ap.parse_args(argv)
+    if not args.warm:
+        ap.print_help()
+        return 0
+    entry = titan_basket_series(args.top_n, force=True)
+    print(f"panier top-{entry.get('top_n')} : {entry.get('periods')} périodes, "
+          f"profil {entry.get('profile')}, calculé {entry.get('computed_at')}")
+    return 0 if entry.get("periods") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

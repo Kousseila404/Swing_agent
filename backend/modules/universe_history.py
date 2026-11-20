@@ -179,7 +179,7 @@ def list_snapshots() -> list[date]:
 # fondamentaux figés à la date d'exécution (look-ahead). On mémorise le
 # drapeau par (date, mtime) pour ne lire chaque fichier qu'une fois par
 # process, sans garder le snapshot en RAM.
-_BOOTSTRAP_INDEX: dict[date, tuple[int, bool]] = {}
+_BOOTSTRAP_INDEX: dict[str, tuple[int, bool]] = {}
 
 
 def _snapshot_is_bootstrap(snap: dict[str, Any]) -> bool:
@@ -197,7 +197,7 @@ def is_bootstrap(d: date) -> bool:
         mtime = p.stat().st_mtime_ns
     except OSError:
         return False
-    hit = _BOOTSTRAP_INDEX.get(d)
+    hit = _BOOTSTRAP_INDEX.get(str(p))
     if hit and hit[0] == mtime:
         return hit[1]
     try:
@@ -206,7 +206,7 @@ def is_bootstrap(d: date) -> bool:
         return False
     flag = _snapshot_is_bootstrap(snap)
     del snap
-    _BOOTSTRAP_INDEX[d] = (mtime, flag)
+    _BOOTSTRAP_INDEX[str(p)] = (mtime, flag)
     return flag
 
 

@@ -646,13 +646,34 @@ def _resample_snapshots(
     return out
 
 
+def _resample_dates(dates: list[date], min_period_days: float) -> list[date]:
+    """Même glouton que `_resample_snapshots`, appliqué aux dates AVANT lecture
+    (audit 2026-11-18 P0 #1 : on ne décompresse plus que les snapshots
+    réellement utilisés — ~1/7 de l'historique au lieu de la totalité)."""
+    if min_period_days <= 0 or len(dates) < 2:
+        return list(dates)
+    out = [dates[0]]
+    for d in dates[1:]:
+        if (d - out[-1]).days >= min_period_days:
+            out.append(d)
+    if out[-1] != dates[-1]:
+        out.append(dates[-1])
+    return out
+
+
 # Cache process-level des snapshots décompressés (audit 2026-09-17, optimisation).
-# Chaque `run_titan_top_n` relisait ~390 fichiers gz (~10 s) : le Scoring Lab
-# (14 variantes) et le benchmark payaient ça à chaque appel. Clé = répertoire
-# + (date, mtime) de chaque fichier → invalidation automatique après un
-# nouveau snapshot ; les tests qui redirigent HISTORY_DIR ont leur propre clé.
+# Clé = répertoire + (date, mtime) de chaque fichier → invalidation automatique
+# après un nouveau snapshot ; les tests qui redirigent HISTORY_DIR ont leur propre clé.
+#
+# Audit 2026-11-18 P0 #1 (OOM API) : le cache gardait jusqu'à 2 × 455 snapshots
+# décompressés (~2 Go, au-delà du MemoryMax du service). Désormais :
+#   - 1 seule entrée (_SNAP_CACHE_MAX = 1) ;
+#   - l'entrée périmée est libérée AVANT de charger la nouvelle (plus de pic ×2) ;
+#   - seules les dates resamplées (et live, bootstrap exclus par défaut) sont lues ;
+#   - au-delà de _SNAP_CACHE_MAX_SNAPSHOTS dates, rien n'est mis en cache.
 _SNAP_CACHE: dict[str, tuple[tuple, list[tuple[date, dict[str, Any]]]]] = {}
-_SNAP_CACHE_MAX = 2
+_SNAP_CACHE_MAX = 1
+_SNAP_CACHE_MAX_SNAPSHOTS = 120
 
 
 def _load_snapshots_cached(dates: list[date]) -> list[tuple[date, dict[str, Any]]]:
@@ -670,15 +691,27 @@ def _load_snapshots_cached(dates: list[date]) -> list[tuple[date, dict[str, Any]
     hit = _SNAP_CACHE.get(key)
     if hit and hit[0] == sig:
         return hit[1]
+    # Libère l'entrée périmée avant de charger (évite de tenir deux jeux en RAM).
+    _SNAP_CACHE.pop(key, None)
+    while len(_SNAP_CACHE) >= _SNAP_CACHE_MAX:
+        _SNAP_CACHE.pop(next(iter(_SNAP_CACHE)))
     loaded: list[tuple[date, dict[str, Any]]] = []
     for d in dates:
-        snap = universe_history.read_snapshot(d)
+        try:
+            snap = universe_history.read_snapshot(d)
+        except RuntimeError as e:
+            logger.warning(f"[Backtest] snapshot illisible ignoré : {e}")
+            continue
         if snap:
             loaded.append((d, snap))
-    if len(_SNAP_CACHE) >= _SNAP_CACHE_MAX:
-        _SNAP_CACHE.pop(next(iter(_SNAP_CACHE)))
-    _SNAP_CACHE[key] = (sig, loaded)
+    if len(loaded) <= _SNAP_CACHE_MAX_SNAPSHOTS:
+        _SNAP_CACHE[key] = (sig, loaded)
     return loaded
+
+
+def clear_snapshot_cache() -> None:
+    """Vide le cache (appelé après un run lourd pour rendre la RAM)."""
+    _SNAP_CACHE.clear()
 
 
 def run_titan_top_n(
@@ -696,6 +729,7 @@ def run_titan_top_n(
     restrict_to: list[str] | None = None,
     min_period_days: float = 7.0,
     rank_fn: Callable[..., list[tuple[str, float]]] | None = None,
+    include_bootstrap: bool = False,
 ) -> BacktestResult:
     """Backtest complet du pipeline TITAN sur l'historique disponible.
 
@@ -713,15 +747,26 @@ def run_titan_top_n(
         min_period_days: espacement minimum entre deux rebalances (défaut 7 —
             audit 2026-07-16, cf. `_resample_snapshots`). 0/1 = legacy
             (rebalance sur chaque snapshot quotidien disponible).
+        include_bootstrap: inclure les snapshots bootstrap rétroactifs
+            (fondamentaux figés = look-ahead). Défaut False depuis l'audit
+            2026-11-18 : seuls les snapshots live sont hors échantillon.
     """
-    dates = universe_history.list_snapshots()
+    all_dates = universe_history.list_snapshots()
+    if include_bootstrap:
+        dates = all_dates
+    else:
+        dates = [d for d in all_dates if not universe_history.is_bootstrap(d)]
+    n_bootstrap_excluded = len(all_dates) - len(dates)
     if len(dates) < 2:
         raise ValueError(
             f"Au moins 2 snapshots requis pour 1 période de rebalance. "
             f"Disponibles : {[d.isoformat() for d in dates]}"
         )
 
-    snapshots = _load_snapshots_cached(dates)
+    # Resample sur les dates AVANT lecture (P0 #1) — identique à l'ancien
+    # resample post-chargement, mais ne décompresse que les dates retenues.
+    n_snapshots_raw = len(dates)
+    snapshots = _load_snapshots_cached(_resample_dates(dates, min_period_days))
     n_bootstrap = sum(1 for _, snap in snapshots if (snap.get("macro") or {}).get("_bootstrap"))
     if len(snapshots) < 2:
         raise ValueError("Snapshots illisibles")
@@ -739,8 +784,6 @@ def run_titan_top_n(
     # lag, période médiane) pour qu'un rebalance ne tombe jamais entre deux
     # jours où la majorité de l'univers n'a pas été rafraîchie (cf.
     # `_resample_snapshots`).
-    n_snapshots_raw = len(snapshots)
-    snapshots = _resample_snapshots(snapshots, min_period_days)
 
     # Audit S1.1 — filtre point-in-time : à chaque date, on ne ranke que
     # les tickers qui étaient actifs à ce moment (registry delisted). Sans
@@ -916,6 +959,8 @@ def run_titan_top_n(
         "n_skipped_lag":        n_skipped_periods,
         "n_skipped_low_dq":     n_low_quality_snapshots,
         "n_bootstrap_snapshots": n_bootstrap,
+        "n_bootstrap_excluded":  n_bootstrap_excluded,
+        "include_bootstrap":     include_bootstrap,
         "lookahead_warning":     n_bootstrap > 0,
         "benchmark":            benchmark,
         "weighting":            weighting,
