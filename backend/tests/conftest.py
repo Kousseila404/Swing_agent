@@ -41,6 +41,12 @@ def _isolate_universe_history(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(es, "_LOCK_PATH", etoro_dir / ".lock")
     monkeypatch.delenv("ETORO_API_KEY", raising=False)
     monkeypatch.delenv("ETORO_USER_KEY", raising=False)
+    # Les tests ne doivent jamais dépendre du VRAI API_TOKEN de backend/.env :
+    # auth ouverte par défaut, chaque test d'auth fixe son propre token.
+    from modules import api_core
+    monkeypatch.setattr(api_core, "API_TOKEN", "")
+    monkeypatch.setattr(api_core, "ALLOW_UNAUTH", True)
+    monkeypatch.setattr(api_core, "THESIS_REVIEW_TOKEN", "")
 
 
 _PROD_DATA_GUARD_FILES = ("trade_journal.csv", "trade_journal.duckdb", "proposals.json")
