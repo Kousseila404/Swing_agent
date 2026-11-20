@@ -286,6 +286,32 @@ def get_shadow(_auth: None = Security(api_core.require_auth)):
     return out
 
 
+_CS_PLAN_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+
+
+@router.get("/core_satellite")
+def get_core_satellite(_auth: None = Security(api_core.require_auth)) -> dict[str, Any]:
+    """Stratégie cœur-satellite (ADR-022) : plan du mois (aucun ordre) + dernier run."""
+    import config
+    from modules import core_satellite as cs
+
+    out: dict[str, Any] = {
+        "active": str(getattr(config, "STRATEGY_MODE", "")).lower() == "core_satellite",
+        "state": cs._load_state(),
+        "params": {"core": cs.CORE_TICKER, "core_weight": cs.CORE_WEIGHT, "n": cs.SAT_N,
+                   "cap": cs.SAT_MAX_PER_SECTOR, "exit_rank": cs.SAT_EXIT_RANK, "regime_ma": cs.REGIME_MA},
+    }
+    if time.time() - _CS_PLAN_CACHE["ts"] > 600 or _CS_PLAN_CACHE["data"] is None:
+        try:
+            plan = cs.build_plan()
+            _CS_PLAN_CACHE.update(ts=time.time(), data={k: v for k, v in plan.items() if k != "entries"})
+        except Exception as exc:
+            logger.warning(f"[core_satellite] plan indisponible : {exc}")
+            _CS_PLAN_CACHE.update(ts=time.time(), data={"error": str(exc)})
+    out["plan"] = _CS_PLAN_CACHE["data"]
+    return out
+
+
 @router.get("/performance/gap")
 def get_performance_gap(months: int = Query(6, ge=1, le=12), top_n: int = Query(20, ge=5, le=50),
                         _auth: None = Security(api_core.require_auth)):

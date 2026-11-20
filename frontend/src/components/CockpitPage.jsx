@@ -16,7 +16,7 @@ import {
   CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 
-import { fetchEtoroOverview, fetchLtDecision, syncEtoro } from '../api/client';
+import { fetchCoreSatellite, fetchEtoroOverview, fetchLtDecision, syncEtoro } from '../api/client';
 import {
   useMarketStatus,
   usePerformanceBenchmark,
@@ -245,6 +245,55 @@ function RealMoneyCard({ onNavigate }) {
   );
 }
 
+// Stratégie cœur-satellite du compte paper (ADR-022) : plan du mois, sans ordre.
+function CoreSatelliteCard() {
+  const q = useQuery({ queryKey: ['core_satellite'], queryFn: fetchCoreSatellite, staleTime: 10 * 60_000, retry: false });
+  const d = q.data;
+  const title = 'Stratégie paper · 70 % RSP + 30 % momentum';
+  if (q.isLoading) return <Card title={title} icon="🧭"><div className="cockpit-empty">Calcul du plan…</div></Card>;
+  if (q.isError || !d) return <Card title={title} icon="🧭"><div className="cockpit-empty">Indisponible : {q.error?.message}</div></Card>;
+  const plan = d.plan || {};
+  const st = d.state || {};
+  const bull = plan.regime_bull;
+  const orders = plan.orders || [];
+  return (
+    <Card title={title} icon="🧭"
+          action={<span className="pill-row">
+            <Pill tone={d.active ? 'ok' : 'muted'}>{d.active ? 'active' : 'inactive'}</Pill>
+            <Pill tone={bull ? 'ok' : 'warn'}>{bull == null ? 'régime inconnu' : bull ? 'SPY > MM200 : satellite actif' : 'SPY < MM200 : 100 % RSP'}</Pill>
+          </span>}
+          note={`Paramètres figés 24 mois (ADR-022). Dernier rebalance : ${st.last_run || 'jamais'}${st.done_month ? ` (${st.done_month})` : ''}. Aucun edge démontré : stratégie de mesure, critères d'arrêt écrits d'avance.`}>
+      {plan.error ? <div className="cockpit-empty">Plan indisponible : {plan.error}</div> : (
+        <div className="cockpit-grid-2">
+          <div>
+            <h4 className="cockpit-note">Cibles du mois</h4>
+            <ul className="check-list">
+              {Object.entries(plan.targets || {}).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t, w]) => (
+                <li key={t}><span className="ticker">{t}</span><span className="cockpit-note">{fmtNum(w * 100, 1)} %</span></li>
+              ))}
+              {Object.keys(plan.targets || {}).length > 8 && <li className="cockpit-note">… {Object.keys(plan.targets).length - 8} autres titres satellite</li>}
+            </ul>
+          </div>
+          <div>
+            <h4 className="cockpit-note">Ordres au prochain rebalance ({orders.length})</h4>
+            {orders.length === 0 ? <div className="cockpit-note">Aucun : portefeuille aligné.</div> : (
+              <ul className="check-list">
+                {orders.slice(0, 10).map((o) => (
+                  <li key={o.ticker}>
+                    <Pill tone={o.delta_qty < 0 ? 'warn' : 'info'}>{o.kind}</Pill>
+                    <span>{o.ticker} {o.delta_qty > 0 ? '+' : ''}{o.delta_qty}{o.usd != null ? ` (${fmtNum(o.usd, 0)} $)` : ''}</span>
+                  </li>
+                ))}
+                {orders.length > 10 && <li className="cockpit-note">… {orders.length - 10} autres</li>}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function CockpitPage({ onNavigate }) {
   const marketQ     = useMarketStatus();
   const portfolioQ  = usePortfolio({ refetchInterval: 30_000 });
@@ -324,6 +373,9 @@ export default function CockpitPage({ onNavigate }) {
 
       {/* ── Argent réel (eToro) ── */}
       <RealMoneyCard onNavigate={onNavigate} />
+
+      {/* ── Stratégie du compte paper (ADR-022) ── */}
+      <CoreSatelliteCard />
 
       {/* ── KPI paper (Alpaca) ── */}
       <div className="kpi-grid">
