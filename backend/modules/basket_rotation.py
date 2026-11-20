@@ -75,6 +75,16 @@ def update_streaks(
     return {"streaks": streaks, "last_date": today, "ranks_seen": {t: ranks.get(t) for t in open_tickers}}
 
 
+def coverage_ok(history: list[int], n_scored: int, min_ratio: float = 0.9) -> tuple[bool, int | None]:
+    """(couverture suffisante ?, taille de référence) — médiane des tailles
+    d'univers récentes. Sans historique, on fait confiance au scoring."""
+    sizes = sorted(int(x) for x in history if x)
+    if not sizes:
+        return True, None
+    baseline = sizes[len(sizes) // 2]
+    return n_scored >= min_ratio * baseline, baseline
+
+
 def plan_exits(
     state: dict[str, Any],
     confirm_days: int,
@@ -96,8 +106,9 @@ def run_rotation(dry_run: bool = False) -> dict[str, Any]:
         from modules.tracker.killswitch import is_trading_allowed
         if not is_trading_allowed():
             return {"skipped": "killswitch"}
-    except Exception:
-        pass
+    except Exception as exc:  # audit P1-6 : fail-closed
+        logger.error(f"[Rotation] killswitch illisible — rotation annulée : {exc}")
+        return {"skipped": "killswitch illisible", "error": str(exc)}
 
     from modules.lt_exit_policy import compute_ranks
     from modules.sector_metrics import get_scored_universe
@@ -106,13 +117,26 @@ def run_rotation(dry_run: bool = False) -> dict[str, Any]:
     scored = get_scored_universe() or {}
     if not scored:
         return {"skipped": "univers vide"}
+    # Audit P1-3 : un ticker absent de l'univers scoré compte « hors panier ».
+    # Si le scoring est partiel (panne fournisseur), toutes les lignes non
+    # scorées accumuleraient une série et seraient vendues : on suspend la
+    # rotation (sans toucher aux séries) sous 90 % de la taille habituelle.
+    prev = _load_state()
+    ok_cov, baseline = coverage_ok(prev.get("universe_sizes") or [], len(scored))
+    if not ok_cov:
+        logger.warning(f"[Rotation] univers partiel ({len(scored)} vs ~{baseline}) — rotation suspendue")
+        return {"skipped": "univers partiel", "n_scored": len(scored), "baseline": baseline}
     ranks = compute_ranks(scored)
     df = load_journal()
     open_df = df[df["Status"] == "OPEN"]
     open_tickers = sorted({str(t).upper() for t in open_df["Ticker"].tolist()})
     today = date.today().isoformat()
 
-    state = update_streaks(_load_state(), open_tickers, ranks, int(config.BASKET_EXIT_RANK), today)
+    state = update_streaks(prev, open_tickers, ranks, int(config.BASKET_EXIT_RANK), today)
+    if prev.get("last_date") != today:
+        state["universe_sizes"] = ((prev.get("universe_sizes") or []) + [len(scored)])[-10:]
+    else:
+        state["universe_sizes"] = prev.get("universe_sizes") or []
     _save_state(state)
 
     # Exemption : dernière décision LT = ADD_ON (persistée par le tracker).

@@ -133,6 +133,18 @@ def run_rebalance(force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         adjust = getattr(broker, "adjust_position", None)
         if adjust is None:
             return {**result, "skipped": "broker sans adjust_position (paper)"}
+        # Audit P1-1 : hors séance (férié, horloge KO) les ordres échouent ou
+        # partent sans stop, et chaque essai consomme 1 des 3 tentatives du
+        # mois. On sort AVANT de compter une tentative.
+        status = getattr(broker, "market_status", None)
+        if status is not None:
+            try:
+                is_open = bool(status().get("is_open"))
+            except Exception as exc:
+                logger.warning(f"[Rebalance] horloge marché illisible — report : {exc}")
+                return {**result, "skipped": "horloge marché illisible"}
+            if not is_open:
+                return {**result, "skipped": "marché fermé"}
         for o in orders:
             r = adjust(o["ticker"], int(o["delta_qty"]))
             (result["executed"] if r.get("ok") else result["failed"]).append(r)
