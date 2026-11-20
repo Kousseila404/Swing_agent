@@ -153,6 +153,10 @@ BEAR_HEDGE_MIN_DAYS     = 3        # confirmation N-jours (anti-whipsaw)
 #   • Seuil relevé à −6 % (VIX 30+ : le book entier peut bouger de 4 % en une
 #     séance sans que la thèse d'aucune position ne soit cassée).
 KILLSWITCH_ACTION       = os.getenv("KILLSWITCH_ACTION", "freeze")
+# Audit 2026-11-18 P0 #8 : durée max d'un gel (jours calendaires). Au-delà, le
+# gel est levé avec alerte Telegram même si l'equity n'est pas revenue à
+# KILLSWITCH_RELIFT_RECOVERY_PCT du pic. 0 = pas de plafond (ancien comportement).
+KILLSWITCH_MAX_FREEZE_DAYS = int(os.getenv("KILLSWITCH_MAX_FREEZE_DAYS", "10"))
 MAX_DAILY_DRAWDOWN_PCT  = float(os.getenv("MAX_DAILY_DRAWDOWN_PCT", "6.0"))
 
 # Circuit breaker progressif (modules/risk.DrawdownCircuitBreaker) : le peak

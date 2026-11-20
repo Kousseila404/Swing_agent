@@ -70,8 +70,14 @@ def is_trading_allowed() -> bool:
     try:
         with open(TRADING_STATE_PATH, encoding="utf-8") as fh:
             state = json.load(fh)
-    except Exception:
-        return True
+        if not isinstance(state, dict):
+            raise ValueError("trading_state.json n'est pas un objet")
+    except Exception as exc:
+        # Audit 2026-11-18 (P1-6) : état illisible = on ne sait pas si un gel
+        # est en cours → fail-CLOSED (avant : trading autorisé). Le gel reste
+        # borné : réécrire/supprimer le fichier le lève.
+        logger.error(f"[Killswitch] trading_state.json illisible ({exc}) — trading BLOQUÉ par prudence.")
+        return False
 
     if not state.get("blocked", False):
         return True
@@ -79,6 +85,27 @@ def is_trading_allowed() -> bool:
     blocked_date = state.get("date", "")
     if blocked_date == date.today().isoformat():
         return False
+
+    # Audit 2026-11-18 P0 #8 — durée maximale de gel. Sans borne, l'hysteresis
+    # (reprise à 96 % du pic) pouvait geler les entrées pendant des mois.
+    max_days = int(getattr(config, "KILLSWITCH_MAX_FREEZE_DAYS", 10))
+    since_str = str(state.get("blocked_since") or blocked_date or "")
+    try:
+        frozen_days = (date.today() - date.fromisoformat(since_str[:10])).days
+    except ValueError:
+        frozen_days = 0
+    if max_days > 0 and frozen_days >= max_days:
+        msg = (f"[Killswitch] gel levé après {frozen_days} j (plafond "
+               f"KILLSWITCH_MAX_FREEZE_DAYS={max_days}) même sans reprise à "
+               f"{float(getattr(config, 'KILLSWITCH_RELIFT_RECOVERY_PCT', 0.96)):.0%} du pic.")
+        logger.warning(msg)
+        try:
+            from modules.alerter import _send_telegram_message
+            _send_telegram_message(f"⚠️ {msg}")
+        except Exception:
+            pass
+        _set_trading_blocked(False)
+        return True
 
     # Nouveau jour : appliquer l'hysteresis avant de relever.
     if not _has_equity_recovered(state):
@@ -159,6 +186,20 @@ def _set_trading_blocked(blocked: bool, *, peak_equity: float | None = None) -> 
         "date": date.today().isoformat(),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+    # `blocked_since` = premier jour du gel en cours (P0 #8) ; conservé quand
+    # l'hysteresis re-bloque jour après jour, effacé au relèvement.
+    if blocked:
+        state["blocked_since"] = date.today().isoformat()
+        try:
+            if TRADING_STATE_PATH.exists():
+                with open(TRADING_STATE_PATH, encoding="utf-8") as fh:
+                    prev = json.load(fh)
+                if prev.get("blocked") and prev.get("blocked_since"):
+                    state["blocked_since"] = str(prev["blocked_since"])
+                elif prev.get("blocked") and prev.get("date"):
+                    state["blocked_since"] = str(prev["date"])
+        except Exception:
+            pass
     # Préserve le peak existant (si re-écriture sans nouveau peak fourni) pour
     # ne pas perdre la référence d'hysteresis sur des appels successifs.
     if peak_equity is not None and peak_equity > 0:

@@ -260,3 +260,37 @@ def test_emergency_liquidate_all_no_open_still_blocks(_isolate_paths: Path):
     assert (out["Status"] == "WIN").sum() == 1
     persisted = json.loads((_isolate_paths / "trading_state.json").read_text())
     assert persisted["blocked"] is True
+
+
+# ─────────────────────────────────────────────────────────────────
+# Audit 2026-11-18 — P0 #8 (gel borné) + P1-6 (état illisible fail-closed)
+# ─────────────────────────────────────────────────────────────────
+
+def test_freeze_is_lifted_after_max_days_without_recovery(monkeypatch, _isolate_paths: Path):
+    import config as _config
+    monkeypatch.setattr(_config, "KILLSWITCH_MAX_FREEZE_DAYS", 10, raising=False)
+    monkeypatch.setattr(killswitch, "_has_equity_recovered", lambda s: False)
+    p = _isolate_paths / "trading_state.json"
+    since = (date.today() - timedelta(days=12)).isoformat()
+    p.write_text(json.dumps({"blocked": True, "date": (date.today() - timedelta(days=1)).isoformat(),
+                             "blocked_since": since, "peak_equity": 100_000}))
+    assert killswitch.is_trading_allowed() is True
+    assert json.loads(p.read_text())["blocked"] is False
+
+
+def test_freeze_kept_before_max_days_and_blocked_since_preserved(monkeypatch, _isolate_paths: Path):
+    import config as _config
+    monkeypatch.setattr(_config, "KILLSWITCH_MAX_FREEZE_DAYS", 10, raising=False)
+    monkeypatch.setattr(killswitch, "_has_equity_recovered", lambda s: False)
+    p = _isolate_paths / "trading_state.json"
+    since = (date.today() - timedelta(days=3)).isoformat()
+    p.write_text(json.dumps({"blocked": True, "date": (date.today() - timedelta(days=1)).isoformat(),
+                             "blocked_since": since}))
+    assert killswitch.is_trading_allowed() is False
+    persisted = json.loads(p.read_text())
+    assert persisted["blocked"] is True and persisted["blocked_since"] == since
+
+
+def test_unreadable_trading_state_blocks(_isolate_paths: Path):
+    (_isolate_paths / "trading_state.json").write_text("{corrompu")
+    assert killswitch.is_trading_allowed() is False

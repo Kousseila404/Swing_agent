@@ -23,6 +23,17 @@ const _authHeaders = () => {
   return t ? { Authorization: `Bearer ${t}` } : {};
 };
 
+// Audit 2026-11-18 P0 #11 — un 401/403 n'est plus silencieux : chaque appel
+// refusé émet `sq:auth-error` (écouté par AuthBanner, bandeau global).
+export const AUTH_ERROR_EVENT = 'sq:auth-error';
+const _signalAuth = (status, path) => {
+  if (status !== 401 && status !== 403) return;
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_ERROR_EVENT, { detail: { status, path } }));
+  } catch { /* SSR / tests sans window */ }
+};
+export const hasApiToken = () => Boolean(_getToken());
+
 // status = 0 quand le fetch a failed côté réseau (DNS, connexion refusée…).
 export class ApiError extends Error {
   constructor(message, status = 0) {
@@ -44,6 +55,7 @@ const get = async (path, opts = {}) => {
     throw new ApiError('Réseau indisponible', 0);
   }
   if (!r.ok) {
+    _signalAuth(r.status, path);
     let detail = `HTTP ${r.status}`;
     try {
       const d = await r.json();
@@ -69,7 +81,10 @@ const post = (path, body = {}) =>
   })
     .then(async r => {
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) return { ok: false, status: r.status, ...data };
+      if (!r.ok) {
+        _signalAuth(r.status, path);
+        return { ok: false, status: r.status, ...data };
+      }
       return { ok: true, ...data };
     })
     .catch(() => ({ ok: false, error: 'Réseau indisponible' }));
@@ -248,6 +263,7 @@ export const patchThesisReviewQueueStatus = async (ticker, entryId, status) => {
     throw new ApiError('Réseau indisponible', 0);
   }
   if (!r.ok) {
+    _signalAuth(r.status, path);
     let detail = `HTTP ${r.status}`;
     try {
       const d = await r.json();
@@ -270,6 +286,7 @@ export const patchMyPortfolioThesis = async (ticker, body) => {
     throw new ApiError('Réseau indisponible', 0);
   }
   if (!r.ok) {
+    _signalAuth(r.status, path);
     let detail = `HTTP ${r.status}`;
     try {
       const d = await r.json();
@@ -291,7 +308,10 @@ const _del = (path) =>
   fetch(`${BASE}${path}`, { method: 'DELETE', headers: { ..._authHeaders() } })
     .then(async r => {
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) return { ok: false, status: r.status, ...data };
+      if (!r.ok) {
+        _signalAuth(r.status, path);
+        return { ok: false, status: r.status, ...data };
+      }
       return { ok: true, ...data };
     })
     .catch(() => ({ ok: false, error: 'Réseau indisponible' }));
@@ -307,7 +327,10 @@ const _put = (path, body = {}) =>
   })
     .then(async r => {
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) return { ok: false, status: r.status, ...data };
+      if (!r.ok) {
+        _signalAuth(r.status, path);
+        return { ok: false, status: r.status, ...data };
+      }
       return { ok: true, ...data };
     })
     .catch(() => ({ ok: false, error: 'Réseau indisponible' }));
