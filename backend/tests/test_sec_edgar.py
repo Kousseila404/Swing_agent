@@ -28,13 +28,15 @@ def test_compute_pillar_score_with_error():
 
 
 def test_pillar_score_bullish_signals_boost():
-    """Calibration Lot 17 stricte : +15 (distinct≥8) +10 (cluster) +5 (≥15/90j) = +30 → 80."""
+    """Calibration audit 2026-11-18 : +15 (≥3 acheteurs) +10 (cluster)
+    +5 (achat net ≥ 500 k$ / 90 j) = +30 → 80."""
     a = InsiderActivity(
         ticker="BBB",
         buy_count_30d=10,
         distinct_insiders_buying_30d=8,
         cluster_buying=True,
         buy_count_90d=15,
+        net_buys_90d_usd=1_000_000.0,
         n_filings_scanned=15,
     )
     out = compute_insider_pillar_score(a)
@@ -43,18 +45,13 @@ def test_pillar_score_bullish_signals_boost():
 
 
 def test_pillar_score_moderate_distinct():
-    """5 insiders distincts → +8 mais pas +15."""
-    a = InsiderActivity(
-        ticker="MMM",
-        buy_count_30d=6,
-        distinct_insiders_buying_30d=5,
-        cluster_buying=False,
-        buy_count_90d=8,
-        n_filings_scanned=8,
-    )
-    out = compute_insider_pillar_score(a)
-    # 50 + 8 (distinct≥5) = 58
-    assert out["score"] == 58.0
+    """2 acheteurs distincts → +8 ; 1 seul → +4."""
+    a = InsiderActivity(ticker="MMM", buy_count_30d=2, distinct_insiders_buying_30d=2,
+                        buy_count_90d=2, n_filings_scanned=8)
+    assert compute_insider_pillar_score(a)["score"] == 58.0
+    a1 = InsiderActivity(ticker="MMM", buy_count_30d=1, distinct_insiders_buying_30d=1,
+                         buy_count_90d=1, n_filings_scanned=8)
+    assert compute_insider_pillar_score(a1)["score"] == 54.0
 
 
 def test_pillar_score_caps_at_100():
@@ -70,16 +67,16 @@ def test_pillar_score_caps_at_100():
     assert out["score"] <= 100.0
 
 
-def test_pillar_score_heavy_selling_penalty():
+def test_pillar_score_selling_is_neutral():
+    """Les ventes (souvent routinières : 10b5-1, impôts RSU) ne pénalisent plus."""
     a = InsiderActivity(
         ticker="DDD",
-        buy_count_30d=1,
+        buy_count_30d=0,
         sell_count_30d=10,
         n_filings_scanned=11,
     )
     out = compute_insider_pillar_score(a)
-    # 50 base, sell > 2× buy and sell ≥ 3 → -10 → 40
-    assert out["score"] == 40.0
+    assert out["score"] == 50.0
 
 
 def test_pillar_score_components_exposed():
@@ -292,3 +289,66 @@ def test_filings_error_tickers_lists_only_failing_tickers(tmp_path, monkeypatch)
 def test_filings_error_tickers_empty_cache_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(sec_edgar, "_FILINGS_CACHE_DIR", tmp_path / "missing")
     assert sec_edgar.filings_error_tickers() == []
+
+
+# ─── Audit 2026-11-18 P0 #3 — parsing XML Form 4 ─────────────────────────
+
+_FORM4_XML = """<?xml version="1.0"?>
+<ownershipDocument>
+  <reportingOwner><reportingOwnerId><rptOwnerCik>0001780525</rptOwnerCik></reportingOwnerId></reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <transactionCoding><transactionCode>{code}</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>1000</value></transactionShares>
+        <transactionPricePerShare><value>50.5</value></transactionPricePerShare>
+      </transactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>"""
+
+
+def test_parse_form4_purchase():
+    d = sec_edgar.parse_form4_xml(_FORM4_XML.format(code="P"))
+    assert d is not None
+    assert d["owners"] == ["1780525"]
+    assert d["buy_shares"] == 1000 and d["buy_usd"] == 50500.0
+    assert d["sell_shares"] == 0
+
+
+def test_parse_form4_grant_is_neither_buy_nor_sell():
+    d = sec_edgar.parse_form4_xml(_FORM4_XML.format(code="A"))
+    assert d is not None and d["buy_shares"] == 0 and d["sell_shares"] == 0
+
+
+def test_parse_form4_garbage_returns_none():
+    assert sec_edgar.parse_form4_xml("<not-xml") is None
+
+
+def test_fetch_insider_activity_counts_only_real_purchases(tmp_path, monkeypatch):
+    """Avant : chaque Form 4 = un achat. Maintenant : seuls les codes P comptent,
+    et l'insider est le rptOwnerCik (pas le préfixe d'accession)."""
+    today = date.today().isoformat()
+    payload = {"filings": {"recent": {
+        "form": ["4", "4", "4"],
+        "filingDate": [today, today, today],
+        "accessionNumber": ["0000000001-26-000001", "0000000001-26-000002", "0000000001-26-000003"],
+        "primaryDocument": ["xsl/a.xml", "xsl/b.xml", "xsl/c.xml"],
+    }}}
+    docs = {
+        "a.xml": _FORM4_XML.format(code="S"),
+        "b.xml": _FORM4_XML.format(code="M"),
+        "c.xml": _FORM4_XML.format(code="P"),
+    }
+    monkeypatch.setattr(sec_edgar, "_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(sec_edgar, "_FORM4_CACHE_DIR", tmp_path / "form4")
+    monkeypatch.setattr(sec_edgar, "ticker_to_cik", lambda t: "0000320193")
+    monkeypatch.setattr(sec_edgar, "_fetch_json", lambda url: payload)
+    monkeypatch.setattr(sec_edgar, "_fetch_text", lambda url: docs[url.rsplit("/", 1)[-1]])
+    a = fetch_insider_activity("ZZZ", use_cache=False)
+    assert a.buy_count_90d == 1
+    assert a.sell_count_90d == 1
+    assert a.distinct_insiders_buying_30d == 1
+    assert a.cluster_buying is False
+    assert a.n_form4_parsed_90d == 3
+    assert a.net_buys_90d_usd == 0.0  # +50 500 (P) − 50 500 (S)

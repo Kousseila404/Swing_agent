@@ -676,34 +676,38 @@ def compute_insider_pillar_score(activity: InsiderActivity) -> dict[str, Any]:
             "reason": activity.error,
         }
 
-    # Lot 17 — calibration plus stricte. Une mega-cap a souvent 5-10 insiders
-    # avec activity routinière (RSU vesting). Le signal n'apparaît que pour
-    # des burst inhabituels.
+    # Audit 2026-11-18 P0 #3 — recalibré sur les vrais achats (code P du
+    # Form 4). Les achats sur le marché par plusieurs dirigeants sont le seul
+    # signal insider documenté ; les ventes sont surtout routinières (plans
+    # 10b5-1, impôts sur RSU) → aucune pénalité. Sans achat : neutre (50).
     score = 50.0
     components: dict[str, Any] = {
         "buy_count_30d": activity.buy_count_30d,
         "sell_count_30d": activity.sell_count_30d,
+        "buy_count_90d": activity.buy_count_90d,
         "distinct_insiders_30d": activity.distinct_insiders_buying_30d,
         "cluster_buying": activity.cluster_buying,
+        "net_buys_90d_usd": activity.net_buys_90d_usd,
+        "parser_version": activity.parser_version,
     }
-    # +10 si ≥ 8 insiders distincts 30j (rare = vraie pression positive)
-    if activity.distinct_insiders_buying_30d >= 8:
+    n_buyers = activity.distinct_insiders_buying_30d
+    if n_buyers >= 3:
         score += 15.0
-    elif activity.distinct_insiders_buying_30d >= 5:
+    elif n_buyers == 2:
         score += 8.0
-    # +10 si cluster (3+ insiders distincts dans 7j — déjà filtré rigoureux)
+    elif n_buyers == 1:
+        score += 4.0
     if activity.cluster_buying:
         score += 10.0
-    # +5 bonus volume 90j
-    if activity.buy_count_90d >= 15:
+    if activity.buy_count_90d >= 1 and activity.net_buys_90d_usd >= 500_000:
         score += 5.0
-    # Pénalité heavy selling
-    if activity.sell_count_30d > activity.buy_count_30d * 2 and activity.sell_count_30d >= 3:
-        score -= 10.0
 
     score = max(0.0, min(100.0, score))
-    # data_quality : 0 si rien scanné, 1 si on a au moins quelques filings.
-    dq = min(1.0, activity.n_filings_scanned / 5.0)
+    n_tried = activity.n_form4_parsed_90d + activity.n_form4_unparsed_90d
+    if n_tried > 0:
+        dq = activity.n_form4_parsed_90d / n_tried
+    else:
+        dq = min(1.0, activity.n_filings_scanned / 5.0)
     return {
         "score": round(score, 2),
         "components": components,
