@@ -235,6 +235,9 @@ fi
 #     Évalue les gates (killswitch, CB, régime macro, slots libres, cash)
 #     et enqueue jusqu'à N propositions à valider manuellement dans l'UI.
 #     Skipped silencieusement si API_TOKEN absent (auth fail-closed côté API).
+echo "── Step 3c-ter : price_panel (clôtures ajustées datées — WFO/shadow, audit 2026-11-18 P0 #5)"
+timeout 600 "$PYTHON" -m modules.price_panel --refresh || echo "WARN: price_panel refresh (non bloquant — shadow repliera sur current_price)"
+
 echo "── Step 3c-bis/4 : shadow_portfolios (forward-test A/B des profils) + portfolio_stop"
 "$PYTHON" -m modules.shadow_portfolios > /dev/null 2>&1 || echo "WARN: shadow_portfolios (non bloquant)"
 "$PYTHON" -m modules.portfolio_stop || echo "WARN: portfolio_stop (non bloquant)"

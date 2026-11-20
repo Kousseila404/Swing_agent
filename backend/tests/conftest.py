@@ -27,6 +27,11 @@ def _isolate_universe_history(tmp_path_factory, monkeypatch):
         uh, "HISTORY_DIR",
         tmp_path_factory.mktemp("universe_history_isolated"),
     )
+    # Audit 2026-11-18 — le panel de clôtures prod ne doit jamais être lu
+    # (ni écrit) par les tests : fichier temporaire absent par défaut.
+    from modules import price_panel as pp
+    monkeypatch.setattr(pp, "PANEL_PATH", tmp_path_factory.mktemp("price_panel_isolated") / "panel.json.gz")
+    pp._cache.update(mtime=None, series={})
 
 
 _PROD_DATA_GUARD_FILES = ("trade_journal.csv", "trade_journal.duckdb", "proposals.json")

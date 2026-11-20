@@ -11,7 +11,7 @@ Couvre :
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -231,7 +231,7 @@ def test_run_walk_forward_raises_when_history_too_short(monkeypatch):
 def test_run_walk_forward_returns_empty_when_no_pairs(monkeypatch):
     """Snapshots existent mais sans prix valides → ValueError sur paires
     insuffisantes (chemin de defense distinct du précédent)."""
-    fake_dates = [date(2026, 4, 20 + i) for i in range(6)]
+    fake_dates = [date(2026, 4, 1) + timedelta(days=7 * i) for i in range(6)]
     monkeypatch.setattr(wfo.universe_history, "list_snapshots", lambda: fake_dates)
 
     # Snapshots sans current_price → 0 paires utilisables.
@@ -241,3 +241,18 @@ def test_run_walk_forward_returns_empty_when_no_pairs(monkeypatch):
     )
     with pytest.raises(ValueError, match="Moins de 3 paires utilisables"):
         wfo.run_walk_forward(train_days=2, test_days=1)
+
+
+def test_run_walk_forward_excludes_bootstrap_snapshots(monkeypatch):
+    """Audit 2026-11-18 P0 #4 — les snapshots bootstrap (look-ahead) sont
+    exclus par défaut ; seuls les snapshots live comptent."""
+    dates = [date(2026, 1, 1) + timedelta(days=7 * i) for i in range(12)]
+    monkeypatch.setattr(wfo.universe_history, "list_snapshots", lambda: dates)
+    boot = set(dates[:8])
+    monkeypatch.setattr(wfo.universe_history, "is_bootstrap", lambda d: d in boot)
+    monkeypatch.setattr(
+        wfo.universe_history, "read_snapshot",
+        lambda d: {"tickers": {"AAPL": {"quality_score": 50.0}}},
+    )
+    with pytest.raises(ValueError, match="Au moins 5 snapshots.*Disponibles : 4"):
+        wfo.run_walk_forward(train_days=7, test_days=7)

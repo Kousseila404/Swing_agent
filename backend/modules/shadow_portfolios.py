@@ -112,20 +112,35 @@ def rebalance(port: dict[str, Any], basket: list[str], prices: dict[str, float],
     new_holdings, turnover = _plan(nav)
     new_holdings, turnover = _plan(max(0.0, nav - turnover * rate))
     cost = turnover * rate
-    port["holdings"] = new_holdings
     cash = nav - sum(sh * prices[t] for t, sh in new_holdings.items()) - cost
     if cash < 0:  # résidu d'arrondi : on réduit légèrement les lignes
         invested = nav - cost
         scale = invested / max(1e-9, invested - cash)
         new_holdings = {t: sh * scale for t, sh in new_holdings.items()}
         cash = nav - sum(sh * prices[t] for t, sh in new_holdings.items()) - cost
+    port["holdings"] = new_holdings
+    port["cash"] = cash
     port["cumulative_cost"] = float(port.get("cumulative_cost") or 0) + cost
     return {"turnover_usd": round(turnover, 2), "cost_usd": round(cost, 2), "n": len(tradable)}
 
 
-def step(state: dict[str, Any], scored: dict[str, dict[str, Any]], today: str) -> dict[str, Any]:
-    """Un pas quotidien pour tous les profils (pure : état in/out)."""
-    prices = {t: float(r["current_price"]) for t, r in scored.items() if float((r or {}).get("current_price") or 0) > 0}
+def step(
+    state: dict[str, Any],
+    scored: dict[str, dict[str, Any]],
+    today: str,
+    fresh_prices: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Un pas quotidien pour tous les profils (pure : état in/out).
+
+    `fresh_prices` (audit 2026-11-18 P0 #5) : clôtures ajustées du jour
+    (`modules.price_panel`). Quand il est fourni, il REMPLACE `current_price`
+    de l'univers (figé jusqu'à 7 j par la rotation du scheduler) ; un ticker
+    absent est alors non négociable aujourd'hui (pas de repli sur le prix figé).
+    """
+    if fresh_prices:
+        prices = {t: float(p) for t, p in fresh_prices.items() if p and float(p) > 0}
+    else:
+        prices = {t: float(r["current_price"]) for t, r in scored.items() if float((r or {}).get("current_price") or 0) > 0}
     out = state.setdefault("profiles", {})
     report: dict[str, Any] = {}
     for name in PROFILES:
@@ -200,8 +215,18 @@ def run_daily() -> dict[str, Any]:
     scored = get_scored_universe() or {}
     if not scored:
         return {"skipped": "univers vide"}
+    fresh: dict[str, float] = {}
+    try:
+        from modules import price_panel
+        fresh = price_panel.latest_closes(list(scored))
+    except Exception as exc:
+        logger.warning(f"[Shadow] panel de prix indisponible : {exc}")
+    # Couverture < 90 % → panel incomplet/périmé : on garde l'ancien comportement.
+    if len(fresh) < 0.9 * len(scored):
+        logger.warning(f"[Shadow] panel de prix incomplet ({len(fresh)}/{len(scored)}) — repli sur current_price")
+        fresh = {}
     state = load_state()
-    report = step(state, scored, date.today().isoformat())
+    report = step(state, scored, date.today().isoformat(), fresh_prices=fresh or None)
     save_state(state)
     logger.info(f"[Shadow] {len(report)} profils valorisés : " + ", ".join(f"{k}={v.get('nav')}" for k, v in report.items()))
     return report
