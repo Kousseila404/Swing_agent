@@ -269,6 +269,33 @@ def check_universe_fresh(now: datetime) -> Check:
     return Check("universe_fresh", status, f"universe.json âgé de {age_h} h", age_h)
 
 
+def check_unjournaled_orders() -> Check:
+    """Ordres acceptés par le broker mais absents du journal (audit P1-5)."""
+    from modules.broker_gateway import UNJOURNALED_PATH
+    try:
+        lines = [ln for ln in UNJOURNALED_PATH.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except OSError:
+        return Check("unjournaled_orders", OK, "aucun ordre hors journal", 0)
+    if not lines:
+        return Check("unjournaled_orders", OK, "aucun ordre hors journal", 0)
+    return Check("unjournaled_orders", CRIT, f"{len(lines)} ordre(s) passé(s) mais non journalisé(s)", len(lines),
+                 "réconcilier puis vider data/unjournaled_orders.jsonl")
+
+
+def check_etoro_snapshot(now: datetime) -> Check:
+    """Fraîcheur du snapshot du compte réel eToro (ADR-019)."""
+    from modules import etoro_sync
+    snap = etoro_sync.load_latest()
+    if snap is None:
+        return Check("etoro_snapshot", WARN, "aucun snapshot eToro", None,
+                     "configurer ETORO_API_KEY/ETORO_USER_KEY ou ingérer un snapshot")
+    age = etoro_sync.snapshot_age_hours(snap, now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC))
+    if age is None or age > 72:
+        return Check("etoro_snapshot", WARN, f"snapshot eToro âgé de {age} h", age,
+                     "synchro API absente ou en échec (logs/etoro_sync.log)")
+    return Check("etoro_snapshot", OK, f"snapshot eToro âgé de {age} h", age)
+
+
 def check_log_errors(now: datetime) -> Check:
     cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M")
     counts: dict[str, int] = {}
@@ -320,7 +347,7 @@ def run_checks() -> Report:
         ("proposals_flow", (now,)), ("pipeline_daily", (now,)), ("api_alive", ()),
         ("oom_kills", ()), ("tracker_heartbeat", (now, market_open)), ("deployment", ()),
         ("equity_sanity", ()), ("universe_fresh", (now,)), ("log_errors", (now,)),
-        ("host_resources", ()),
+        ("host_resources", ()), ("unjournaled_orders", ()), ("etoro_snapshot", (now,)),
     ):
         try:
             checks.append(g[f"check_{name}"](*args))
