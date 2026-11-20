@@ -49,6 +49,9 @@ def _isolate_universe_history(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(_scoring, "ACTIVE_WEIGHT_PROFILE", "equal_7")
     import config as _cfg
     monkeypatch.setattr(_cfg, "BASKET_MAX_PER_SECTOR", 0)
+    monkeypatch.setattr(_cfg, "STRATEGY_MODE", "basket", raising=False)
+    from modules import auto_approve as _aa
+    monkeypatch.setattr(_aa, "STRATEGY_MODE", "basket")
     # Les tests ne doivent jamais dépendre du VRAI API_TOKEN de backend/.env :
     # auth ouverte par défaut, chaque test d'auth fixe son propre token.
     from modules import api_core
