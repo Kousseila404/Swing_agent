@@ -43,7 +43,8 @@ def test_rank_with_cap_and_buffer_selection():
     ranks = cs.rank_with_cap(scores, sec, cap=2)
     assert [t for t in sorted(ranks, key=ranks.get)][:4] == ["E0", "E1", "T0", "T1"]
     # Titre détenu de rang ≤ exit_rank conservé même hors top-n ; plafond respecté.
-    sel = cs.select_satellite(ranks, sec, held={"T3"}, n=4, exit_rank=8, cap=2)
+    assert ranks["T3"] == 10  # débordement sectoriel : relégué après les titres dans le quota
+    sel = cs.select_satellite(ranks, sec, held={"T3"}, n=4, exit_rank=10, cap=2)
     assert "T3" in sel and len(sel) == 4
     assert sum(1 for t in sel if t[0] == "T") <= 2
     # Détenu au-delà du tampon → remplacé.
