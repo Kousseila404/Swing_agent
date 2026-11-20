@@ -167,7 +167,15 @@ WEIGHT_PROFILES: dict[str, dict[str, float]] = {
     "momentum_tilt": {"quality": 0.14, "value": 0.10, "risk": 0.08, "sentiment": 0.0,
                       "momentum": 0.30, "piotroski": 0.13, "growth": 0.10,
                       "revisions": 0.15, "insider": 0.0},
+    # V15 (2026-11-20) — le composite n'est PAS une moyenne de piliers : voir
+    # `_apply_v15`. Ces poids ne servent qu'au calcul intermédiaire du
+    # composite « legacy » (equal_7), conservé dans `titan_composite_legacy`.
+    "v15_value_quality": {"quality": 1, "value": 1, "risk": 1, "sentiment": 0,
+                          "momentum": 1, "piotroski": 1, "growth": 1, "revisions": 1, "insider": 0},
 }
+
+# Profils dont le composite final est remplacé par le score V15.
+V15_PROFILES = frozenset({"v15_value_quality"})
 
 
 def _load_weight_profile() -> tuple[str, dict[str, float]]:
@@ -419,6 +427,78 @@ def _percentile_rank(
 # au-dessous (rares, ex: Communication Services minoritaire), le fallback
 # global reste actif.
 _MIN_SECTOR_SIZE_FOR_RELATIVE = 12
+
+
+# ── TITAN V15 — Value sector-neutre filtrée par la qualité ─────────────────
+# Étude 2026-11-20 (documentation/audits/2026-11-20-titan-v15.md), snapshots
+# live 04-22→11-18, 1ʳᵉ clôture après snapshot, 10 bps :
+#   • IC 21 j sector-neutre : EV/EBITDA +0,09 (t 2,0), P/E fwd +0,07 — stables
+#     sur les deux moitiés ; composite equal_7 −0,055, risk −0,08 (t −2,5),
+#     momentum −0,06, growth/revisions/insider ≤ 0, quality/piotroski ≈ 0.
+#   • Walk-forward 21 sem. : equal_7 top-20 −14 pts vs univers EW ;
+#     value + filtre qualité +5 à +14 pts selon la variante (toutes > 0).
+# Construction fixée A PRIORI (Piotroski 2000 : la qualité sert à écarter
+# les value traps, pas à classer) — paramètres non optimisés sur la fenêtre :
+#   value_core = moyenne des percentiles intra-secteur de EV/EBITDA, P/E fwd,
+#                P/B (plus bas = mieux, valeurs ≤ 0 ignorées, ≥ 2 sur 3 requis)
+#   gate       = quality intra-secteur > 20e pct ET piotroski > 20e pct
+#   score      = value_core si gate, sinon min(value_core, V15_GATED_CAP)
+V15_VALUE_FIELDS = ("ev_to_ebitda", "forward_pe", "price_to_book")
+V15_GATE_PCT = 20.0
+V15_GATED_CAP = 40.0
+
+
+def compute_v15_scores(scored: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Calcule le score V15 pour chaque ticker scoré (pure, sans effet de bord).
+
+    Retourne {ticker: {"titan_v15_score", "v15_value_core", "v15_gate",
+    "v15_n_metrics"}} ; `titan_v15_score` est None si < 2 métriques de valeur.
+    """
+    sectors = {k: str(r.get("sector") or "Unknown") for k, r in scored.items()}
+
+    def _pos(x: Any) -> float | None:
+        try:
+            f = float(x)
+        except (TypeError, ValueError):
+            return None
+        return f if math.isfinite(f) and f > 0 else None
+
+    ranks = {
+        f: _percentile_rank_by_sector({k: _pos(r.get(f)) for k, r in scored.items()}, sectors,
+                                      higher_is_better=False)
+        for f in V15_VALUE_FIELDS
+    }
+    q_pct = _percentile_rank_by_sector(
+        {k: r.get("quality_score") for k, r in scored.items()}, sectors, higher_is_better=True)
+    p_pct = _percentile_rank({k: r.get("piotroski_score") for k, r in scored.items()}, higher_is_better=True)
+
+    out: dict[str, dict[str, Any]] = {}
+    for k in scored:
+        vals = [ranks[f][k] for f in V15_VALUE_FIELDS if ranks[f].get(k) is not None]
+        if len(vals) < 2:
+            out[k] = {"titan_v15_score": None, "v15_value_core": None, "v15_gate": False,
+                      "v15_n_metrics": len(vals)}
+            continue
+        core = sum(vals) / len(vals)
+        qv, pv = q_pct.get(k), p_pct.get(k)
+        gate = qv is not None and pv is not None and qv > V15_GATE_PCT and pv > V15_GATE_PCT
+        score = core if gate else min(core, V15_GATED_CAP)
+        out[k] = {"titan_v15_score": round(score, 2), "v15_value_core": round(core, 2),
+                  "v15_gate": gate, "v15_n_metrics": len(vals)}
+    return out
+
+
+def _apply_v15(scored: dict[str, dict[str, Any]], replace_composite: bool) -> None:
+    """Ajoute les champs V15 ; si `replace_composite`, V15 devient le composite
+    (l'ancien est conservé dans `titan_composite_legacy`). Un ticker sans
+    score V15 (données de valeur insuffisantes) reçoit 0 : jamais classé."""
+    v15 = compute_v15_scores(scored)
+    for k, rec in scored.items():
+        rec.update(v15[k])
+        if replace_composite:
+            rec["titan_composite_legacy"] = rec["titan_composite_score"]
+            rec["titan_composite_score"] = v15[k]["titan_v15_score"] or 0.0
+            rec["titan_weight_mode"] = "v15_value_quality"
 
 
 def _percentile_rank_by_sector(
@@ -1472,6 +1552,10 @@ def _score_universe(
     # NB : `rec` (record scoré) et non `r` — `r` est déjà lié plus haut au
     # score du pilier Risk (float), le réutiliser ici ferait croire à mypy que
     # ces enregistrements sont des float.
+    # TITAN V15 : champs toujours calculés (shadow / lab / UI) ; remplace le
+    # composite seulement si le profil actif le demande (rollback = env).
+    _apply_v15(scored, replace_composite=ACTIVE_WEIGHT_PROFILE in V15_PROFILES)
+
     composites = [rec["titan_composite_score"] for rec in scored.values()]
     if len(composites) >= 2:
         mu = statistics.fmean(composites)
