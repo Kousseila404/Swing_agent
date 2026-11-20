@@ -241,6 +241,13 @@ def check_deployment() -> Check:
     equity = float(eq.get("current_equity") or 0)
     pct = round(100 * invested / equity, 1) if equity > 0 and invested > 0 else None
     value = {"open_positions": n_open, "target": target, "invested_pct": pct}
+    # ADR-022 : en cœur-satellite, le nombre de lignes varie (1 en régime
+    # baissier = 100 % RSP) ; seul le taux investi compte.
+    if str(getattr(config, "STRATEGY_MODE", "")).lower() == "core_satellite":
+        if pct is not None and pct < 80:
+            return Check("deployment", WARN, f"cœur-satellite investi à {pct} % seulement", value,
+                         "Vérifier data/.core_satellite_state.json et auto_approve.log.")
+        return Check("deployment", OK, f"cœur-satellite : {n_open} ligne(s), investi ≈ {pct} %", value)
     ratio = n_open / target if target else 1
     if ratio < 0.5:
         return Check("deployment", WARN,
