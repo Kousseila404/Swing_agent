@@ -174,6 +174,47 @@ def list_snapshots() -> list[date]:
     return out
 
 
+# Index « bootstrap » (audit 2026-11-18 P0 #1/#4) — les snapshots produits
+# rétroactivement par simfin/universe_history_bootstrap portent des
+# fondamentaux figés à la date d'exécution (look-ahead). On mémorise le
+# drapeau par (date, mtime) pour ne lire chaque fichier qu'une fois par
+# process, sans garder le snapshot en RAM.
+_BOOTSTRAP_INDEX: dict[date, tuple[int, bool]] = {}
+
+
+def _snapshot_is_bootstrap(snap: dict[str, Any]) -> bool:
+    macro = snap.get("macro") or {}
+    return bool(macro.get("_bootstrap") or macro.get("_bootstrap_lookahead"))
+
+
+def is_bootstrap(d: date) -> bool:
+    """True si le snapshot daté `d` vient d'un bootstrap rétroactif.
+
+    Fichier absent ou corrompu → False (l'appelant le filtrera à la lecture).
+    """
+    p = _snapshot_path(d)
+    try:
+        mtime = p.stat().st_mtime_ns
+    except OSError:
+        return False
+    hit = _BOOTSTRAP_INDEX.get(d)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    try:
+        snap = read_snapshot(d) or {}
+    except RuntimeError:
+        return False
+    flag = _snapshot_is_bootstrap(snap)
+    del snap
+    _BOOTSTRAP_INDEX[d] = (mtime, flag)
+    return flag
+
+
+def list_live_snapshots() -> list[date]:
+    """Dates des snapshots matérialisés en live (bootstrap exclus)."""
+    return [d for d in list_snapshots() if not is_bootstrap(d)]
+
+
 def iter_snapshots(
     start: date | None = None,
     end: date | None = None,
