@@ -87,8 +87,13 @@ sont le déploiement continu).
   MM200 → premier rebalance cœur-satellite (lundi 11-23, 15-20 h UTC) =
   100 % RSP.
 - Argent réel eToro ≈ 9,6 k$ : 58 % copy-trading, 27 % actions, 14 % cash.
-- **En attente côté utilisateur** : `sudo systemctl restart swing-api`
-  (l'API tourne le code du 11-20 06:15), `crontab deploy/crontab.txt`
-  (sentinel + synchro eToro), clés API eToro (`ETORO_API_KEY`,
-  `ETORO_USER_KEY`).
+- 23:28 UTC : API redémarrée (tout le code du 11-20 actif, vérifié) et
+  crontab installée (sentinel 30 min + synchro eToro 22:30) ; ancienne
+  crontab sauvegardée dans `~/.crontab.bak-20261120`.
+- **Reste côté utilisateur** : clés API eToro (`ETORO_API_KEY`,
+  `ETORO_USER_KEY` dans `backend/.env`) — sans elles le snapshot eToro reste
+  celui du 11-20 et le sentinel passera en WARN après 72 h.
+- **À surveiller lundi 11-23** (15-20 h UTC) : 1er rebalance cœur-satellite
+  (100 % RSP, régime baissier) ; le WARN sentinel « deployment 38 % » doit
+  disparaître ensuite.
 - Suite : 1 502 tests verts, ruff/mypy/eslint propres.
