@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -113,8 +114,25 @@ def check_auth(credentials: HTTPAuthorizationCredentials | None) -> None:
             status_code=503,
             detail="Auth non configurée — set API_TOKEN ou ALLOW_UNAUTHENTICATED=true",
         )
-    if credentials is None or credentials.credentials != API_TOKEN:
+    if credentials is None or not hmac.compare_digest(credentials.credentials, API_TOKEN):
         raise HTTPException(status_code=401, detail="Token invalide ou manquant")
+
+
+def read_auth_status(token: str) -> int | None:
+    """Statut HTTP de refus pour une LECTURE, ou None si autorisée.
+
+    Même règle que `require_review_or_full_auth` (token complet OU token de
+    revue, fail-closed sans API_TOKEN) — utilisée par le middleware de lecture
+    d'api.py. Comparaison en temps constant (audit §7 P2).
+    """
+    if not API_TOKEN:
+        return None if ALLOW_UNAUTH else 503
+    if token and (
+        hmac.compare_digest(token, API_TOKEN)
+        or (THESIS_REVIEW_TOKEN and hmac.compare_digest(token, THESIS_REVIEW_TOKEN))
+    ):
+        return None
+    return 401
 
 
 def require_auth(
@@ -140,7 +158,7 @@ def require_review_or_full_auth(
     if (
         THESIS_REVIEW_TOKEN
         and credentials is not None
-        and credentials.credentials == THESIS_REVIEW_TOKEN
+        and hmac.compare_digest(credentials.credentials, THESIS_REVIEW_TOKEN)
     ):
         return
     check_auth(credentials)

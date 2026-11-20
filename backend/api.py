@@ -42,6 +42,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 # Ajoute backend/ au PYTHONPATH pour que `import config` et les `from modules …`
@@ -220,6 +221,45 @@ class _SecurityHeadersMiddleware:
 
 
 app.add_middleware(_SecurityHeadersMiddleware)
+
+
+# Audit 2026-11-18 §7 P1 — 30 GET /api/* répondaient sans token, et nginx
+# laisse passer /api/ sans basic-auth (`auth_basic off`) : watchlist, notes,
+# propositions, alertes de prix… lisibles par n'importe qui. Toute lecture
+# exige désormais le token complet OU le token de revue, sauf les deux sondes
+# appelées sans token par le cron (run_titan.sh, sentinel, metrics_agent).
+# Les écritures gardent leur propre `require_auth` strict par route.
+_PUBLIC_API_PATHS = frozenset({"/api/market_status", "/api/data_health"})
+
+
+class _ReadAuthMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] == "http"
+            and scope.get("method") in ("GET", "HEAD")
+            and scope.get("path", "").startswith("/api/")
+            and scope["path"] not in _PUBLIC_API_PATHS
+        ):
+            token = ""
+            for k, v in scope.get("headers", []):
+                if k == b"authorization":
+                    raw = v.decode("latin-1")
+                    if raw[:7].lower() == "bearer ":
+                        token = raw[7:].strip()
+                    break
+            status = api_core.read_auth_status(token)
+            if status is not None:
+                detail = ("Token invalide ou manquant" if status == 401
+                          else "Auth non configurée — set API_TOKEN ou ALLOW_UNAUTHENTICATED=true")
+                await JSONResponse({"detail": detail}, status_code=status)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_ReadAuthMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

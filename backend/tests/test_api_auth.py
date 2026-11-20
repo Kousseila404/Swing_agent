@@ -76,25 +76,44 @@ def test_mutant_endpoint_401_with_wrong_token(monkeypatch, method, path, body):
     assert resp.status_code == 401
 
 
-def test_readonly_endpoints_unauthenticated_ok(monkeypatch):
-    """Les endpoints GET publics ne sont PAS affectés par l'auth."""
-    monkeypatch.setattr(api_core, "API_TOKEN", "")
+def test_reads_require_token_except_probes(monkeypatch):
+    """Audit 2026-11-18 §7 : toute lecture /api/* exige un token (nginx laisse
+    passer /api/ sans basic-auth), sauf les sondes cron sans token."""
+    monkeypatch.setattr(api_core, "API_TOKEN", "s3cret")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
+    monkeypatch.setattr(api_core, "THESIS_REVIEW_TOKEN", "rev")
 
     client = TestClient(api.app)
-    for path in ("/api/status", "/api/macro", "/api/proposals"):
-        resp = client.get(path)
-        assert resp.status_code == 200, f"{path} should be public (got {resp.status_code})"
+    for path in ("/api/status", "/api/macro", "/api/proposals", "/api/watchlist"):
+        assert client.get(path).status_code == 401, path
+        assert client.get(path, headers={"Authorization": "Bearer wrong"}).status_code == 401, path
+        assert client.get(path, headers={"Authorization": "Bearer s3cret"}).status_code != 401, path
+    # Le token de revue (lecture seule) passe les lectures.
+    assert client.get("/api/proposals", headers={"Authorization": "Bearer rev"}).status_code == 200
+    # Préflight CORS jamais bloqué.
+    assert client.options("/api/proposals").status_code != 401
+
+
+def test_reads_fail_closed_without_configured_token(monkeypatch):
+    monkeypatch.setattr(api_core, "API_TOKEN", "")
+    monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
+    assert TestClient(api.app).get("/api/proposals").status_code == 503
+
+
+def test_cron_probes_stay_public(monkeypatch):
+    monkeypatch.setattr(api_core, "API_TOKEN", "s3cret")
+    monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
+    assert TestClient(api.app).get("/api/market_status").status_code != 401
 
 
 def test_sectors_refresh_momentum_requires_auth(monkeypatch):
-    """/api/sectors sans refresh_momentum = public ; avec = auth requise."""
+    """/api/sectors : lecture avec token OK ; refresh sans token = 401."""
     monkeypatch.setattr(api_core, "API_TOKEN", "s3cret")
     monkeypatch.setattr(api_core, "ALLOW_UNAUTH", False)
 
     client = TestClient(api.app)
-    # Lecture du cache : public, pas de 401 (peut être 200 ou 500 selon data)
-    resp_cached = client.get("/api/sectors")
+    # Lecture du cache avec token : pas de 401 (peut être 200 ou 500 selon data)
+    resp_cached = client.get("/api/sectors", headers={"Authorization": "Bearer s3cret"})
     assert resp_cached.status_code != 401
 
     # Refresh = auth required → 401 sans token
