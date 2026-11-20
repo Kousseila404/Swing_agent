@@ -549,12 +549,13 @@ def manual_proposal(
     if not sl or not tp:
         raise HTTPException(422, f"SL/TP non calculables pour {ticker}")
 
-    # Sizing : par défaut 5% du capital de référence (DEFAULT_TOTAL_CAPITAL=100k
-    # → 5k par position, aligné avec max_holdings=20). L'utilisateur édite via
+    # Sizing : par défaut 1/N de l'equity réelle du compte (audit 2026-11-18
+    # P0 #7 — avant : 100 k$ codés en dur). L'utilisateur édite via
     # ApproveBatch overrides s'il veut autre chose à l'exécution.
     target_usd = req.target_amount_usd
     if target_usd is None:
-        target_usd = auto_proposer.DEFAULT_TOTAL_CAPITAL / auto_proposer.DEFAULT_MAX_HOLDINGS
+        capital, _src = auto_proposer._resolve_total_capital()
+        target_usd = capital / auto_proposer.DEFAULT_MAX_HOLDINGS
     if target_usd <= 0:
         raise HTTPException(400, "target_amount_usd doit être > 0")
     size = max(1, int(target_usd / float(price)))

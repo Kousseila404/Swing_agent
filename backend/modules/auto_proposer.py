@@ -98,7 +98,33 @@ DEFAULT_MIN_PROPOSAL_USD = float(getattr(config, "MIN_PROPOSAL_USD", 500.0))  # 
 # (audit 2026-09-17 : 250 → 2 500 $ ; une ligne à 400 $ sur un book de 100 k$
 #  ne pèse rien et coûte du slippage/attention — MU à 1 action, WDC à 412 $.)
 VOL_TARGET_VIX_MIN = 25.0  # vol-targeting global seulement si VIX ≥ 25
-DEFAULT_TOTAL_CAPITAL = 100_000.0
+DEFAULT_TOTAL_CAPITAL = 100_000.0  # repli seulement — cf. _resolve_total_capital
+# Audit 2026-11-18 P0 #7 : le capital était codé à 100 k$ quel que soit le
+# compte, et le plancher par ligne fixe (500 $) — sur ~10 k$ le panier 1/20
+# × régime × vol-target tombait sous le plancher → 0 proposition. Désormais :
+#   • capital = equity réelle du broker (repli : config.ACCOUNT_SIZE) ;
+#   • plancher par ligne = min(MIN_PROPOSAL_USD, MIN_LINE_FRACTION × capital/N).
+MIN_LINE_FRACTION = 0.25
+
+
+def _resolve_total_capital() -> tuple[float, str]:
+    """Equity du compte broker ; repli explicite sur config.ACCOUNT_SIZE."""
+    try:
+        from modules.broker_gateway import get_broker
+        eq = float(get_broker().get_account_equity())
+        if eq > 0:
+            return eq, "broker"
+    except Exception as e:
+        logger.warning(f"[AutoProposer] equity broker indisponible ({e}) — repli ACCOUNT_SIZE")
+    return float(getattr(config, "ACCOUNT_SIZE", DEFAULT_TOTAL_CAPITAL)), "config.ACCOUNT_SIZE"
+
+
+def effective_min_proposal_usd(total_capital: float, max_holdings: int,
+                               configured: float = DEFAULT_MIN_PROPOSAL_USD) -> float:
+    """Plancher par ligne proportionnel à la taille du compte."""
+    if total_capital <= 0 or max_holdings <= 0:
+        return configured
+    return round(min(configured, MIN_LINE_FRACTION * total_capital / max_holdings), 2)
 # Audit TITAN 2026-08-16 (backend/docs/titan/audit_titan_2026-08-16.md) —
 # backtest cross-sectionnel 5 ans (361 snapshots) : le bucket TITAN<60 a un
 # alpha démeané négatif à tous horizons et un taux de stop-loss touché 3×
@@ -596,10 +622,10 @@ def _build_proposal_from_alloc(
 
 def plan_proposals(
     *,
-    total_capital: float = DEFAULT_TOTAL_CAPITAL,
+    total_capital: float | None = None,
     max_holdings: int = DEFAULT_MAX_HOLDINGS,
     min_free_slots: int = DEFAULT_MIN_FREE_SLOTS,
-    min_proposal_usd: float = DEFAULT_MIN_PROPOSAL_USD,
+    min_proposal_usd: float | None = None,
     allowed_regimes: tuple[str, ...] = DEFAULT_ALLOWED_REGIMES,
     ttl_hours: float | None = None,
     allow_fractional_shares: bool = False,
@@ -631,8 +657,14 @@ def plan_proposals(
       - `ok=True` si gates passent, avec proposals = top-N candidats (incluant
         over_cap et éventuellement already_held selon include_held).
     """
+    capital_source = "param"
+    if total_capital is None:
+        total_capital, capital_source = _resolve_total_capital()
+    if min_proposal_usd is None:
+        min_proposal_usd = effective_min_proposal_usd(total_capital, max_holdings)
     gates: list[GateResult] = []
     diagnostics: dict[str, Any] = {
+        "capital_source": capital_source,
         "params": {
             "total_capital":     total_capital,
             "max_holdings":      max_holdings,
