@@ -160,11 +160,20 @@ def rebalance(port: dict[str, Any], basket: list[str], prices: dict[str, float],
     return {"turnover_usd": round(turnover, 2), "cost_usd": round(cost, 2), "n": len(tradable)}
 
 
+# Profils « sélecteur » (ADR-022) : panier calculé par une fonction
+# (holdings actuels → tickers), rebalance tous les N jours.
+#   • cs_momentum_12_1 : satellite cœur-satellite à 100 % (momentum 12-1
+#     sector-z, 30 titres, 4/secteur, tampon rang 60) — mensuel ;
+#   • rsp : benchmark S&P 500 équipondéré réel.
+SELECTOR_REBALANCE_DAYS: dict[str, int] = {"cs_momentum_12_1": 28, "rsp": 28}
+
+
 def step(
     state: dict[str, Any],
     scored: dict[str, dict[str, Any]],
     today: str,
     fresh_prices: dict[str, float] | None = None,
+    selectors: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Un pas quotidien pour tous les profils (pure : état in/out).
 
@@ -202,8 +211,50 @@ def step(
         port["nav"].append([today, round(nav, 2)])
         port["nav"] = port["nav"][-750:]
         report[name] = {"nav": round(nav, 2), "rebalanced": due, **info}
+    for name, select in (selectors or {}).items():
+        port = out.setdefault(name, {"cash": START_NAV, "holdings": {}, "nav": [], "last_rebalance": None,
+                                     "last_prices": {}, "cumulative_cost": 0.0, "started": today})
+        if port.get("nav") and port["nav"][-1][0] == today:
+            report[name] = {"skipped": "déjà valorisé aujourd'hui"}
+            continue
+        last_rb = port.get("last_rebalance")
+        every = SELECTOR_REBALANCE_DAYS.get(name, REBALANCE_EVERY_DAYS)
+        due = last_rb is None or (date.fromisoformat(today) - date.fromisoformat(last_rb)).days >= every
+        info = {}
+        if due:
+            try:
+                basket = list(select(set(port.get("holdings") or {})))
+            except Exception as exc:
+                logger.warning(f"[Shadow] sélecteur {name} : {exc}")
+                basket = []
+            if basket:
+                info = rebalance(port, basket, prices, COST_BPS)
+                port["last_rebalance"] = today
+                port["basket"] = basket
+        nav = mark_to_market(port, prices)
+        port["nav"].append([today, round(nav, 2)])
+        port["nav"] = port["nav"][-750:]
+        report[name] = {"nav": round(nav, 2), "rebalanced": due and bool(info), **info}
     state["updated_at"] = datetime.now().isoformat(timespec="seconds")
     return report
+
+
+def _cs_selectors() -> dict[str, Any]:
+    """Sélecteurs IO (panel de prix) pour les profils cœur-satellite."""
+    from modules import core_satellite as cs
+    from modules import price_panel
+
+    series = price_panel._series()
+    sectors = cs._sectors()
+    mom = cs.momentum_12_1({t: v for t, v in series.items() if t in sectors}, date.today().isoformat())
+    if len(mom) < 0.8 * max(len(sectors), 1):
+        logger.warning(f"[Shadow] momentum 12-1 incomplet ({len(mom)}/{len(sectors)}) — profils cœur-satellite en attente")
+        return {}
+    ranks = cs.rank_with_cap(cs.sector_zscores(mom, sectors), sectors, cs.SAT_MAX_PER_SECTOR)
+    return {
+        "cs_momentum_12_1": lambda held: cs.select_satellite(ranks, sectors, held),
+        "rsp": lambda held: [cs.CORE_TICKER],
+    }
 
 
 def summary(state: dict[str, Any]) -> dict[str, Any]:
@@ -256,7 +307,7 @@ def run_daily() -> dict[str, Any]:
     fresh: dict[str, float] = {}
     try:
         from modules import price_panel
-        fresh = price_panel.latest_closes(list(scored))
+        fresh = price_panel.latest_closes(list(scored) + ["RSP", "SPY"])
     except Exception as exc:
         logger.warning(f"[Shadow] panel de prix indisponible : {exc}")
     # Couverture < 90 % → panel incomplet/périmé : on garde l'ancien comportement.
@@ -264,7 +315,13 @@ def run_daily() -> dict[str, Any]:
         logger.warning(f"[Shadow] panel de prix incomplet ({len(fresh)}/{len(scored)}) — repli sur current_price")
         fresh = {}
     state = load_state()
-    report = step(state, scored, date.today().isoformat(), fresh_prices=fresh or None)
+    selectors: dict[str, Any] = {}
+    if fresh:
+        try:
+            selectors = _cs_selectors()
+        except Exception as exc:
+            logger.warning(f"[Shadow] sélecteurs cœur-satellite indisponibles : {exc}")
+    report = step(state, scored, date.today().isoformat(), fresh_prices=fresh or None, selectors=selectors)
     save_state(state)
     logger.info(f"[Shadow] {len(report)} profils valorisés : " + ", ".join(f"{k}={v.get('nav')}" for k, v in report.items()))
     return report

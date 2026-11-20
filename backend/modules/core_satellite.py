@@ -111,7 +111,9 @@ def rank_with_cap(scores: dict[str, float], sectors: dict[str, str], cap: int) -
     """Rangs (1 = meilleur) ; au-delà de `cap` titres d'un secteur, relégués
     après tous les titres « dans le quota » (même règle que compute_ranks)."""
     order = sorted(scores, key=lambda t: (-scores[t], t))
-    inside, overflow, count = [], [], {}
+    inside: list[str] = []
+    overflow: list[str] = []
+    count: dict[str, int] = {}
     for t in order:
         sec = sectors.get(t) or "Unknown"
         (inside if count.get(sec, 0) < cap else overflow).append(t)
@@ -305,7 +307,7 @@ def _execute(plan: dict[str, Any], broker: Any, allow_buys: bool) -> dict[str, A
                 ok = broker.close_position(t, px, status, "LONG", update_csv=True)
                 if ok:
                     _tag_close_reason(t, "CORE_SATELLITE_REBAL")
-                res = {"ok": bool(ok)}
+                res: dict[str, Any] = {"ok": bool(ok)}
             elif kind == "open":
                 px = float(o["usd"] / delta)
                 scan = SimpleNamespace(
