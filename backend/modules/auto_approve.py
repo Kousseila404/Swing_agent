@@ -42,7 +42,13 @@ TITAN_MIN_NOMINAL      = 80.0
 TITAN_MIN_OVERRIDE     = 70.0
 SUPPORT_MIN_OVERRIDE   = 90.0
 PIOTROSKI_MIN_OVERRIDE = 7
-RISK_MIN               = 40.0   # pilier Risk (0-100) sous lequel on ne rentre jamais
+RISK_MIN               = 40.0   # pilier Risk (0-100) sous lequel on ne rentre jamais (mode legacy)
+# Mode panier : plancher « catastrophe » seulement. Audit 2026-11-20 : le pilier
+# « Risk » mesure la solidité du BILAN (D/E, current & quick ratio — pas la
+# volatilité), son IC 21 j est négatif (−0,083, t −2,6) et le seuil 40 bloquait
+# 10/30 titres du panier V15 (aériennes, télécoms, assureurs : current ratio
+# structurellement bas), alors qu'aucun backtest validé n'inclut ce filtre.
+RISK_MIN_BASKET        = float(os.getenv("AUTO_APPROVE_RISK_MIN_BASKET", "10"))
 ALLOWED_VERDICTS       = ("STRONG_BUY", "BUY")
 
 
@@ -81,8 +87,8 @@ def _qualifies_basket(ctx: dict[str, Any], rank: int | None) -> tuple[bool, str]
         return False, f"buy_signal={verdict}"
     risk = ctx.get("risk_score")
     try:
-        if risk is not None and float(risk) < RISK_MIN:
-            return False, f"Risk {float(risk):.0f} < {RISK_MIN:.0f}"
+        if risk is not None and float(risk) < RISK_MIN_BASKET:
+            return False, f"Bilan (Risk) {float(risk):.0f} < {RISK_MIN_BASKET:.0f}"
     except (TypeError, ValueError):
         pass
     return True, f"panier : rang #{rank}/{BASKET_TOP_N}, TITAN {float(titan or 0):.1f}, verdict {verdict or '—'}"

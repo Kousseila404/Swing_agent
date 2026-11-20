@@ -73,3 +73,30 @@ def test_lab_v15_rank_fn_applies_sector_cap():
     top = scoring_lab.make_v15_rank_fn(2)(snap, 4)
     sectors = [snap["tickers"][t]["sector"] for t, _ in top]
     assert len(top) == 4 and sectors.count("Tech") == 2 and sectors.count("Energy") == 2
+
+
+# ── Bugs audit live 2026-11-20 ───────────────────────────────────────────────
+
+def test_momentum_is_true_12_1_and_52w_high_on_252_sessions():
+    import pandas as pd
+
+    from modules.sector_metrics._momentum import MOMENTUM_FETCH_DAYS, _compute_momentum_stats
+    from data_providers.yfinance_provider import _days_to_period
+    assert _days_to_period(MOMENTUM_FETCH_DAYS) == "2y"  # ≥ 13 mois chez yfinance
+    # 500 séances : un pic à 1000 il y a 400 séances (hors 52 sem.), puis 100→ linéaire.
+    px = [100.0] * 500
+    px[100] = 1000.0
+    for i in range(227, 500):
+        px[i] = 100.0 + (i - 227)          # rampe sur les 273 dernières clôtures
+    st = _compute_momentum_stats(pd.Series(px))
+    expected = (px[-22] / px[-273] - 1) * 100  # 252 séances, dernier mois exclu
+    assert abs(st["return_pct"] - expected) < 1e-9
+    assert abs(st["high_52w_ratio"] - 1.0) < 1e-9  # le pic d'il y a 400 séances est ignoré
+
+
+def test_basket_gate_uses_catastrophe_floor_not_40():
+    from modules import auto_approve as aa
+    ok, why = aa._qualifies_basket({"titan_score": 85.0, "risk_score": 25.0}, 1)
+    assert ok, why  # bilan 25 (ex. compagnie aérienne) : n'est plus bloqué
+    ok, why = aa._qualifies_basket({"titan_score": 85.0, "risk_score": 5.0}, 1)
+    assert not ok and "Bilan" in why

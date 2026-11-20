@@ -679,7 +679,7 @@ export default function TickerAnalysisModal({ ticker, onClose }) {
 
                 <KV label="Quality" value={fmtNum(data.titan.quality, 1)} />
                 <KV label="Value" value={fmtNum(data.titan.value, 1)} />
-                <KV label="Risk" value={fmtNum(data.titan.risk, 1)} />
+                <KV label="Bilan (levier/liquidité)" value={fmtNum(data.titan.risk, 1)} />
                 <KV label="Momentum" value={fmtNum(data.titan.momentum, 1)} />
 
                 <KV label="Growth" value={fmtNum(data.titan.growth, 1)} />

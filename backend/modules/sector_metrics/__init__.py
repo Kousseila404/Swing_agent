@@ -11,7 +11,7 @@
 ║    Étape 2 — Agrégation en 4 sous-scores 0-100 :                            ║
 ║      • quality_score   = mean(ROE, Operating Margin)                        ║
 ║      • value_score     = mean(EV/EBITDA fallback Fwd P/E, FCF yield)        ║
-║      • risk_score      = mean(Debt/Equity inv., Current Ratio)              ║
+║      • risk_score      = solidité BILAN : D/E inv., Current & Quick ratio   ║
 ║      • sentiment_score = mean(Reco inv., Upside Target %)                   ║
 ║    Étape 3 — TITAN Composite = 0.30·Q + 0.25·V + 0.20·R + 0.25·S            ║
 ║                                                                              ║

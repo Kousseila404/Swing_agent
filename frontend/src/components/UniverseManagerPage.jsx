@@ -1379,7 +1379,7 @@ function CompareModal({ tickers, onClose, onOpenAnalysis }) {
     { key: 'titan_composite_score', label: 'TITAN' },
     { key: 'quality_score',         label: 'Quality' },
     { key: 'value_score',           label: 'Value' },
-    { key: 'risk_score',            label: 'Risk' },
+    { key: 'risk_score',            label: 'Bilan' },
     { key: 'sentiment_score',       label: 'Sentiment' },
     { key: 'momentum_score',        label: 'Momentum' },
     { key: 'piotroski_score',       label: 'Piotroski' },
