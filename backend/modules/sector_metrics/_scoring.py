@@ -474,7 +474,7 @@ def compute_v15_scores(scored: dict[str, dict[str, Any]]) -> dict[str, dict[str,
 
     out: dict[str, dict[str, Any]] = {}
     for k in scored:
-        vals = [ranks[f][k] for f in V15_VALUE_FIELDS if ranks[f].get(k) is not None]
+        vals: list[float] = [v for f in V15_VALUE_FIELDS if (v := ranks[f].get(k)) is not None]
         if len(vals) < 2:
             out[k] = {"titan_v15_score": None, "v15_value_core": None, "v15_gate": False,
                       "v15_n_metrics": len(vals)}

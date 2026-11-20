@@ -12,7 +12,7 @@ def _row(sector, ev, pe, pb, q=60.0, pio=60.0, comp=50.0):
 
 def _universe():
     u = {}
-    for i in range(10):  # secteur « cher » : multiples ×3, comparé à ses pairs seulement
+    for i in range(15):  # ≥ 12 par secteur (sinon repli rang global) ; secteur « cher » : multiples ×3, comparé à ses pairs seulement
         u[f"T{i}"] = _row("Tech", 30 + i * 3, 30 + i * 3, 9 + i)
         u[f"E{i}"] = _row("Energy", 4 + i, 6 + i, 1 + i * 0.2)
     return u
@@ -22,7 +22,7 @@ def test_v15_is_sector_neutral_and_cheaper_is_better():
     v = _scoring.compute_v15_scores(_universe())
     # Le moins cher de chaque secteur a le même score (neutralité sectorielle).
     assert v["T0"]["titan_v15_score"] == v["E0"]["titan_v15_score"]
-    assert v["T0"]["titan_v15_score"] > v["T5"]["titan_v15_score"] > v["T9"]["titan_v15_score"]
+    assert v["T0"]["titan_v15_score"] > v["T5"]["titan_v15_score"] > v["T14"]["titan_v15_score"]
 
 
 def test_v15_quality_gate_caps_value_traps():

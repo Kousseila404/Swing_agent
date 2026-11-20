@@ -107,7 +107,9 @@ def compute_ranks(
             rows.append((t, float(v), str((r or {}).get("sector") or "Unknown")))
     rows.sort(key=lambda x: -x[1])
     if max_per_sector and max_per_sector > 0:
-        inside, overflow, count = [], [], {}
+        inside: list[tuple[str, float, str]] = []
+        overflow: list[tuple[str, float, str]] = []
+        count: dict[str, int] = {}
         for row in rows:
             n = count.get(row[2], 0)
             (inside if n < max_per_sector else overflow).append(row)
