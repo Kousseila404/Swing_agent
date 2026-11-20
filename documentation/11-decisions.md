@@ -134,7 +134,7 @@ Conséquence : un client interne qui lit l'API doit envoyer
 `Authorization: Bearer $API_TOKEN` ; les tests ne lisent plus le vrai token
 de `.env` (conftest).
 
-## ADR-021 · 2026-11-20 — TITAN V15 : value sector-neutre filtrée qualité remplace le composite
+## ADR-021 · 2026-11-20 — TITAN V15 : value sector-neutre filtrée qualité remplace le composite — **RETIRÉ le jour même** (réfuté sur 15 ans PIT, voir ADR-022)
 Contexte : le composite `equal_7` classait à l'envers sur la fenêtre live
 (top-20 +2,7 % vs bottom-20 +20,5 %, IC 21 j −0,055) ; seule la Value a un IC
 positif et stable. Décision : profil `v15_value_quality` (composite = moyenne
@@ -145,3 +145,30 @@ officiel (détails : audits/2026-11-20-titan-v15.md). Critères d'arrêt écrits
 d'avance ; rollback = env. Conséquence : le panier paper tourne
 progressivement (10/14 lignes sortiront via la rotation) ; la règle manuelle
 « TITAN ≥ 80 » change de sens.
+
+## ADR-022 · 2026-11-20 — Compte paper : 70 % RSP + 30 % satellite momentum 12-1
+Contexte : recherche multi-agents (audits/2026-11-20-recherche-scoring.md) —
+aucun score de sélection n'a d'edge démontré après biais de survivance ; V15
+réfuté (−1,9 à −2,9 %/an sur 15 ans PIT) ; momentum 12-1 seul candidat
+plausible (0-2 %/an). Décision (utilisateur, sur recommandation du validateur) :
+`STRATEGY_MODE=core_satellite` (`modules/core_satellite.py`).
+
+**Paramètres pré-enregistrés — interdiction de modification avant 24 mois**
+(chaque variante testée est consignée) :
+- cœur RSP 70 % ; satellite 30 % équipondéré sur 30 titres ;
+- score satellite = rendement t−252 → t−21 séances (clôtures ajustées,
+  `price_panel`), z-score intra-secteur, 4 titres max par secteur ;
+- rebalance mensuel (1ʳᵉ séance ouverte du mois, en séance, ≤ 3 tentatives) ;
+- tampon : un titre détenu reste tant que son rang ≤ 60 ;
+- régime : SPY < MM200 au rebalance → satellite en RSP (100 % RSP) ;
+- stop catastrophe GTC −35 % chez le broker ; aucune sortie logicielle du
+  tracker sur les lignes `Signal = CORE_SATELLITE` ;
+- killswitch gelé ou illisible → seulement ventes + achat RSP.
+
+**Critères d'arrêt** (satellite vs RSP et vs univers EW, nets de coûts ; shadow
+`cs_momentum_12_1` et `rsp`) : drawdown relatif < −20 % → arrêt et revue ;
+excès cumulé < −8 pts à 12 mois → 100 % RSP ; excès < 0 à 24 mois → 100 % RSP
+définitivement ; rotation > 31 %/mois ou coûts > 60 bps/an → revue de
+l'implémentation ; écart de poids compte vs shadow > 10 % → gel (bug).
+Ce dispositif protège d'un échec, il ne prouvera pas d'edge (t = 2 demanderait
+~25 ans pour 2 %/an). Rollback : `STRATEGY_MODE=basket`.

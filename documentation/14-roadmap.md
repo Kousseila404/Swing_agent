@@ -2,6 +2,8 @@
 
 Par ordre de valeur attendue sur le PnL, avec le critère de « fini ».
 
+> 🧭 **2026-11-20 — compte paper en cœur-satellite (ADR-022)** : 70 % RSP + 30 % momentum 12-1, paramètres figés 24 mois ; recherche : [audits/2026-11-20-recherche-scoring.md](audits/2026-11-20-recherche-scoring.md). Prochaine brique utile : univers S&P 500 point-in-time avec délistés.
+>
 > ✅ **2026-11-20 — audit « boost »** : voir [audits/2026-11-20-audit-boost.md](audits/2026-11-20-audit-boost.md) — 13 P0 traités, P1 chaîne d'ordres (sauf P1-2) et auth des lectures corrigés ; leviers restants classés (§5).
 >
 > ⚠️ **2026-11-18 — audit intégral** : voir [audits/2026-11-18-audit-integral.md](audits/2026-11-18-audit-integral.md) (13 P0, roadmap 90 jours proposée). Les priorités ci-dessous sont à réviser à sa lumière.
