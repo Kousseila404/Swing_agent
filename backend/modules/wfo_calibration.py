@@ -326,6 +326,7 @@ def run_walk_forward(
     grid_step: float | None = None,
     include_bootstrap: bool = False,
     use_price_panel: bool | None = None,
+    min_period_days: float = 7.0,
 ) -> WfoResult:
     """Walk-forward : roule (train, test) sur les snapshots disponibles.
 
@@ -355,6 +356,12 @@ def run_walk_forward(
     else:
         all_dates = [d for d in raw_dates if not universe_history.is_bootstrap(d)]
     n_bootstrap_excluded = len(raw_dates) - len(all_dates)
+    # Espacement ≥ 7 j entre deux snapshots (même règle que le backtest,
+    # cf. backtest._resample_dates) : les snapshots live sont quotidiens, des
+    # rendements à 1 jour se chevauchent et rendent le grid search ~5× plus
+    # lent sans information indépendante supplémentaire.
+    from modules.backtest import _resample_dates
+    all_dates = _resample_dates(all_dates, min_period_days)
     if use_price_panel is None:
         try:
             from modules import price_panel as _pp_mod
@@ -538,6 +545,7 @@ def run_walk_forward(
             "lag_auto_reduced":     lag_auto_reduced,
             "grid_step":            grid_step_used,
             "include_bootstrap":    include_bootstrap,
+            "min_period_days":      min_period_days,
             "n_bootstrap_excluded": n_bootstrap_excluded,
             "price_source":         "price_panel" if use_price_panel else "snapshot_current_price",
             "date_range": {
