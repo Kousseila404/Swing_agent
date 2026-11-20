@@ -351,6 +351,11 @@ def evaluate_trades(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
       (df, closed_count, modified_count) — modified = trailing stops mis à jour.
     """
     open_mask   = df["Status"] == "OPEN"
+    # ADR-022 : les positions de la stratégie cœur-satellite ne reçoivent AUCUNE
+    # sortie logicielle (TS, TIMEOUT, LT, earnings) — elles ne bougent qu'au
+    # rebalance mensuel ; protection = stop catastrophe GTC chez le broker.
+    if "Signal" in df.columns:
+        open_mask = open_mask & (df["Signal"].astype(str).str.upper() != "CORE_SATELLITE")
     open_trades = df[open_mask]
 
     if open_trades.empty:

@@ -182,7 +182,7 @@ CB_PAUSE_DAYS           = 5
 #     rédhibitoire + Risk ≥ 40 → achat, budgets larges ;
 #   • rotation : rang > BASKET_EXIT_RANK pendant BASKET_EXIT_CONFIRM_DAYS jours
 #     consécutifs → vente (sauf ADD_ON fondamental). Stops catastrophe inchangés.
-STRATEGY_MODE            = os.getenv("STRATEGY_MODE", "basket")   # "basket" | "legacy"
+STRATEGY_MODE            = os.getenv("STRATEGY_MODE", "basket")   # "basket" | "legacy" | "core_satellite" (ADR-022)
 BASKET_TOP_N             = int(os.getenv("BASKET_TOP_N", "20"))
 BASKET_EXIT_RANK         = int(os.getenv("BASKET_EXIT_RANK", "40"))
 BASKET_EXIT_CONFIRM_DAYS = int(os.getenv("BASKET_EXIT_CONFIRM_DAYS", "5"))

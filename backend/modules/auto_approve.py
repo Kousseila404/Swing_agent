@@ -227,6 +227,19 @@ def select_candidates(
 
 def run_auto_approve() -> dict[str, Any]:
     """Point d'entrée cron. Retourne un résumé (pour logs/tests)."""
+    # ADR-022 : en mode cœur-satellite, aucune proposition n'est auto-approuvée ;
+    # seul le rebalance mensuel (avec sa propre gestion du killswitch) tourne.
+    if STRATEGY_MODE == "core_satellite":
+        try:
+            from modules.core_satellite import run_monthly
+            res = run_monthly()
+        except Exception as exc:
+            logger.error(f"[AutoApprove] cœur-satellite échoué : {exc}", exc_info=True)
+            res = {"error": str(exc)}
+        return {"mode": "core_satellite", "core_satellite": {k: v for k, v in res.items()
+                                                             if k not in ("orders", "entries", "executed")},
+                "qualified": 0, "approved": 0}
+
     allowed, why = _system_allows_entries()
     if not allowed:
         logger.warning(f"[AutoApprove] Entrées gelées — {why}. Rien à faire.")
