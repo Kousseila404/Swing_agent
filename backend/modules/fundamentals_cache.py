@@ -85,19 +85,46 @@ def _now() -> float:
 # ─────────────────────────────────────────────────────────────────
 
 class _CacheStore:
-    """Storage thread-safe du cache. Mirror RAM + persistance disque atomic."""
+    """Storage du cache : mirror RAM + persistance disque atomique.
+
+    Audit 2026-11-18 P0 #6 — le cache est partagé entre plusieurs process
+    (API, universe_scheduler, enrichissements cron). Avant : chaque process
+    chargeait l'index UNE fois puis réécrivait tout son mirror périmé à chaque
+    `put` (écrasant les entrées des autres), via un fichier temporaire au nom
+    commun. Désormais :
+      • toute écriture se fait sous verrou fichier (`filelock`) en
+        lire-modifier-écrire : on relit le disque, on applique la mutation,
+        on écrit via un tmp propre au process, puis rename ;
+      • les lectures rechargent le mirror si le fichier a changé (mtime).
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._mem: dict[str, dict[str, Any]] = {}
         self._loaded = False
+        self._mtime: int | None = None
 
-    def _load_unlocked(self) -> None:
-        """Charge le snapshot disque dans le mirror RAM. Idempotent."""
-        if self._loaded:
+    def _disk_mtime(self) -> int | None:
+        try:
+            return CACHE_PATH.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _file_lock(self):
+        from filelock import FileLock
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return FileLock(str(CACHE_LOCK_PATH), timeout=60)
+
+    def _load_unlocked(self, force: bool = False) -> None:
+        """(Re)charge le snapshot disque dans le mirror RAM si nécessaire."""
+        mtime = self._disk_mtime()
+        if self._loaded and not force and mtime == self._mtime:
             return
-        if not CACHE_PATH.exists():
+        if mtime is None:
+            if not self._loaded:
+                self._mem = {}
             self._loaded = True
+            self._mtime = None
             return
         try:
             raw = gzip.decompress(CACHE_PATH.read_bytes())
@@ -110,18 +137,44 @@ class _CacheStore:
             )
             self._mem = {}
         self._loaded = True
+        self._mtime = mtime
 
     def _persist_unlocked(self) -> None:
-        """Écrit le mirror RAM sur disque. Atomic via tmp+rename."""
+        """Écrit le mirror RAM sur disque. Atomic via tmp (propre au process) + rename.
+        L'appelant détient le verrou fichier."""
+        import os
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            tmp = CACHE_PATH.with_suffix(CACHE_PATH.suffix + ".tmp")
+            tmp = CACHE_PATH.with_suffix(CACHE_PATH.suffix + f".{os.getpid()}.tmp")
             tmp.write_bytes(gzip.compress(
                 json.dumps(self._mem, ensure_ascii=False).encode("utf-8")
             ))
             tmp.replace(CACHE_PATH)
+            self._mtime = self._disk_mtime()
         except OSError as e:
             logger.warning(f"[FundamentalsCache] persist failed: {e}")
+
+    def mutate(self, fn) -> Any:
+        """Lire-modifier-écrire sous verrous thread + fichier. `fn(mem)` modifie
+        le dict en place et retourne (changed: bool, result)."""
+        with self._lock:
+            try:
+                with self._file_lock():
+                    self._load_unlocked(force=True)
+                    changed, result = fn(self._mem)
+                    if changed:
+                        self._persist_unlocked()
+                    return result
+            except Exception as e:  # Timeout du verrou : on ne bloque pas le scoring
+                logger.warning(f"[FundamentalsCache] écriture ignorée (verrou) : {e}")
+                self._load_unlocked()
+                changed, result = fn(self._mem)
+                return result
+
+    def snapshot(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            self._load_unlocked()
+            return dict(self._mem)
 
     def get(self, ticker: str) -> dict[str, Any] | None:
         """Retourne l'entrée brute {ratios: {...}, cached_at_epoch: ...} ou None."""
@@ -130,16 +183,18 @@ class _CacheStore:
             return self._mem.get(ticker.upper().strip())
 
     def put(self, ticker: str, ratios: FinancialRatios) -> None:
-        """Met en cache + persist atomic."""
+        """Met en cache + persist atomic (sous verrou fichier)."""
         key = ticker.upper().strip()
         entry = {
             "ratios":          asdict(ratios),
             "cached_at_epoch": _now(),
         }
-        with self._lock:
-            self._load_unlocked()
-            self._mem[key] = entry
-            self._persist_unlocked()
+
+        def _apply(mem: dict[str, dict[str, Any]]) -> tuple[bool, None]:
+            mem[key] = entry
+            return True, None
+
+        self.mutate(_apply)
 
     def stats(self) -> dict[str, Any]:
         """Stats diagnostiques pour /api/data_health."""
@@ -162,6 +217,7 @@ class _CacheStore:
         with self._lock:
             self._mem = {}
             self._loaded = True
+            self._mtime = None
             try:
                 if CACHE_PATH.exists():
                     CACHE_PATH.unlink()
@@ -375,9 +431,7 @@ def list_flagged_tickers() -> list[str]:
     """Retourne la liste (triée) des tickers du cache avec au moins un flag
     dq_sanitize=. Utilisé par l'endpoint refresh_flagged.
     """
-    with _store._lock:  # noqa: SLF001
-        _store._load_unlocked()  # noqa: SLF001
-        entries = dict(_store._mem)  # noqa: SLF001
+    entries = _store.snapshot()
     flagged: list[str] = []
     for ticker, entry in entries.items():
         err = (entry.get("ratios") or {}).get("error") or ""
@@ -394,9 +448,7 @@ def list_flagged_tickers_with_tags() -> dict[str, list[str]]:
     (`dq_sanitize=tag1|tag2`), juste associé au ticker plutôt que sommé
     globalement. Pour /api/data_health : détail par ticker (Étape 8).
     """
-    with _store._lock:  # noqa: SLF001
-        _store._load_unlocked()  # noqa: SLF001
-        entries = dict(_store._mem)  # noqa: SLF001
+    entries = _store.snapshot()
     result: dict[str, list[str]] = {}
     for ticker, entry in entries.items():
         err = (entry.get("ratios") or {}).get("error") or ""
@@ -417,9 +469,7 @@ def cache_sanitize_stats() -> dict[str, Any]:
     en amont. `flags` = {flag_name: count}, `n_tickers_flagged` = tickers
     avec au moins un flag.
     """
-    with _store._lock:  # noqa: SLF001  — même module, coupling OK
-        _store._load_unlocked()  # noqa: SLF001
-        entries = dict(_store._mem)  # noqa: SLF001  — snapshot pour éviter hold
+    entries = _store.snapshot()
     flags_count: dict[str, int] = {}
     n_flagged = 0
     for entry in entries.values():
@@ -450,13 +500,13 @@ def invalidate_tickers(tickers: list[str]) -> int:
     if not tickers:
         return 0
     wanted = {t.upper().strip() for t in tickers if t}
-    removed = 0
-    with _store._lock:  # noqa: SLF001
-        _store._load_unlocked()  # noqa: SLF001
-        for key in list(_store._mem.keys()):  # noqa: SLF001
+
+    def _apply(mem: dict[str, dict[str, Any]]) -> tuple[bool, int]:
+        removed = 0
+        for key in list(mem.keys()):
             if key in wanted:
-                del _store._mem[key]  # noqa: SLF001
+                del mem[key]
                 removed += 1
-        if removed:
-            _store._persist_unlocked()  # noqa: SLF001
-    return removed
+        return removed > 0, removed
+
+    return int(_store.mutate(_apply) or 0)

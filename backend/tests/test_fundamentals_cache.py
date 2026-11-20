@@ -307,3 +307,21 @@ def test_invalidate_tickers_case_insensitive(isolated_cache):
     # Le store normalize en upper — on teste qu'on supprime bien (2 entrées
     # identiques mais case-trim-normalized).
     assert removed == 1
+
+
+def test_two_processes_do_not_overwrite_each_other(tmp_path, monkeypatch):
+    """Audit 2026-11-18 P0 #6 — deux stores (≈ deux process : API + cron)
+    qui écrivent des tickers différents ne doivent pas s'écraser."""
+    monkeypatch.setattr(fc, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(fc, "CACHE_PATH", tmp_path / "index.json.gz")
+    monkeypatch.setattr(fc, "CACHE_LOCK_PATH", tmp_path / "index.json.gz.lock")
+    a, b = fc._CacheStore(), fc._CacheStore()
+    # Les deux chargent l'état initial (vide) avant toute écriture.
+    assert a.get("AAA") is None and b.get("BBB") is None
+    a.put("AAA", FinancialRatios(ticker="AAA"))
+    b.put("BBB", FinancialRatios(ticker="BBB"))
+    a.put("CCC", FinancialRatios(ticker="CCC"))
+    fresh = fc._CacheStore()
+    assert {"AAA", "BBB", "CCC"} <= set(fresh.snapshot())
+    # Et `a` voit l'écriture de `b` sans redémarrer (rechargement sur mtime).
+    assert a.get("BBB") is not None
