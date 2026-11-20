@@ -152,6 +152,9 @@ def _build_pairs(
     snap_score: dict[str, Any],
     snap_price_t: dict[str, Any],
     snap_price_t1: dict[str, Any],
+    d_t: date | None = None,
+    d_t1: date | None = None,
+    use_panel: bool = False,
 ) -> list[dict[str, Any]]:
     """Construit les rows {pillar1, ..., pillar7, fwd_return} en croisant
     trois snapshots :
@@ -162,21 +165,37 @@ def _build_pairs(
 
     Pour `snap_score == snap_price_t` (cas par défaut, no-lag), le comportement
     est identique à la version pré-S3.x.
+
+    Audit 2026-11-18 P0 #5 : avec `use_panel` (et `d_t`/`d_t1`), les prix
+    viennent des clôtures ajustées datées de `modules.price_panel` et non plus
+    de `current_price` (figé jusqu'à 7 j par la rotation du scheduler). Un
+    ticker absent du panel est ignoré (pas de repli sur le prix figé).
     """
+    if use_panel and d_t is not None and d_t1 is not None:
+        from modules import price_panel as _pp
+    else:
+        _pp = None  # type: ignore[assignment]
     score_tickers = snap_score.get("tickers") or {}
     px_t_tickers = snap_price_t.get("tickers") or {}
     px_t1_tickers = snap_price_t1.get("tickers") or {}
     rows: list[dict[str, Any]] = []
     for tk, score_row in score_tickers.items():
-        row_t = px_t_tickers.get(tk)
-        row_t1 = px_t1_tickers.get(tk)
-        if not row_t or not row_t1:
-            continue
-        try:
-            px_t = float(row_t.get("current_price"))
-            px_t1 = float(row_t1.get("current_price"))
-        except (TypeError, ValueError):
-            continue
+        if _pp is not None:
+            p0 = _pp.close_on_or_before(tk, d_t)  # type: ignore[arg-type]
+            p1 = _pp.close_on_or_before(tk, d_t1)  # type: ignore[arg-type]
+            if p0 is None or p1 is None:
+                continue
+            px_t, px_t1 = p0, p1
+        else:
+            row_t = px_t_tickers.get(tk)
+            row_t1 = px_t1_tickers.get(tk)
+            if not row_t or not row_t1:
+                continue
+            try:
+                px_t = float(row_t.get("current_price"))
+                px_t1 = float(row_t1.get("current_price"))
+            except (TypeError, ValueError):
+                continue
         if not (math.isfinite(px_t) and math.isfinite(px_t1) and px_t > 0):
             continue
         fwd = (px_t1 / px_t) - 1.0
@@ -305,6 +324,8 @@ def run_walk_forward(
     *,
     publication_lag_days: int = 5,
     grid_step: float | None = None,
+    include_bootstrap: bool = False,
+    use_price_panel: bool | None = None,
 ) -> WfoResult:
     """Walk-forward : roule (train, test) sur les snapshots disponibles.
 
@@ -325,7 +346,21 @@ def run_walk_forward(
 
     Le fold avance de `test_days` à chaque étape (non-overlapping test).
     """
-    all_dates = universe_history.list_snapshots()
+    # Audit 2026-11-18 P0 #4 : les snapshots bootstrap (fondamentaux figés à
+    # la date du bootstrap = look-ahead) sont exclus par défaut. Seuls les
+    # snapshots matérialisés en live sont hors échantillon.
+    raw_dates = universe_history.list_snapshots()
+    if include_bootstrap:
+        all_dates = raw_dates
+    else:
+        all_dates = [d for d in raw_dates if not universe_history.is_bootstrap(d)]
+    n_bootstrap_excluded = len(raw_dates) - len(all_dates)
+    if use_price_panel is None:
+        try:
+            from modules import price_panel as _pp_mod
+            use_price_panel = _pp_mod.available()
+        except Exception:
+            use_price_panel = False
     if len(all_dates) < 5:
         raise ValueError(
             f"Au moins 5 snapshots requis pour 1 fold (train+test+forward). "
@@ -352,11 +387,23 @@ def run_walk_forward(
     grid_step_used = float(grid_step) if grid_step is not None else _GRID_STEP
 
     # Charge tous les snapshots en mémoire (pour 5 ans × 500 tk × 50 KB ≈ 50 MB).
+    # Audit 2026-11-18 : on ne garde que les piliers + le prix par ticker
+    # (un snapshot complet pèse ~4 Mo en RAM ; 455 snapshots ≈ 2 Go).
     snapshots: list[tuple[date, dict[str, Any]]] = []
     for d in all_dates:
-        snap = universe_history.read_snapshot(d)
+        try:
+            snap = universe_history.read_snapshot(d)
+        except RuntimeError as e:
+            logger.warning(f"[WFO] snapshot illisible ignoré : {e}")
+            continue
         if snap:
-            snapshots.append((d, snap))
+            slim = {
+                tk: {k: row.get(k) for k in (*PILLARS, "current_price") if k in row}
+                for tk, row in (snap.get("tickers") or {}).items()
+                if isinstance(row, dict)
+            }
+            snapshots.append((d, {"tickers": slim}))
+            del snap
     if len(snapshots) < 5:
         raise ValueError("Snapshots illisibles")
 
@@ -381,12 +428,12 @@ def run_walk_forward(
 
     pair_rows: list[tuple[date, list[dict[str, Any]]]] = []
     n_skipped_lag = 0
-    for (d0, s0), (_d1, s1) in zip(snapshots[:-1], snapshots[1:], strict=False):
+    for (d0, s0), (d1, s1) in zip(snapshots[:-1], snapshots[1:], strict=False):
         snap_score = _score_snap_for(d0)
         if snap_score is None:
             n_skipped_lag += 1
             continue
-        rows = _build_pairs(snap_score, s0, s1)
+        rows = _build_pairs(snap_score, s0, s1, d0, d1, use_panel=bool(use_price_panel))
         if rows:
             pair_rows.append((d0, rows))
 
@@ -490,6 +537,9 @@ def run_walk_forward(
             "publication_lag_days_requested": requested_lag,
             "lag_auto_reduced":     lag_auto_reduced,
             "grid_step":            grid_step_used,
+            "include_bootstrap":    include_bootstrap,
+            "n_bootstrap_excluded": n_bootstrap_excluded,
+            "price_source":         "price_panel" if use_price_panel else "snapshot_current_price",
             "date_range": {
                 "start": snapshots[0][0].isoformat(),
                 "end":   snapshots[-1][0].isoformat(),
