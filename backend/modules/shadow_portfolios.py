@@ -97,20 +97,28 @@ def rebalance(port: dict[str, Any], basket: list[str], prices: dict[str, float],
     tradable = [t for t in basket if prices.get(t)]
     if not tradable or nav <= 0:
         return {"turnover_usd": 0.0}
-    target_usd = nav / len(tradable)
-    old_val = {t: float(sh) * prices.get(t, port["last_prices"].get(t, 0)) for t, sh in (port.get("holdings") or {}).items()}
-    new_holdings: dict[str, float] = {}
-    turnover = 0.0
-    for t in tradable:
-        sh = target_usd / prices[t]
-        new_holdings[t] = sh
-        turnover += abs(sh * prices[t] - old_val.get(t, 0.0))
-    for t, v in old_val.items():
-        if t not in new_holdings:
-            turnover += abs(v)
-    cost = turnover * cost_bps / 10_000.0
+    old_val = {t: float(sh) * prices.get(t, (port.get("last_prices") or {}).get(t, 0)) for t, sh in (port.get("holdings") or {}).items()}
+
+    def _plan(investable: float) -> tuple[dict[str, float], float]:
+        target_usd = investable / len(tradable)
+        holdings = {t: target_usd / prices[t] for t in tradable}
+        turn = sum(abs(target_usd - old_val.get(t, 0.0)) for t in tradable)
+        turn += sum(abs(v) for t, v in old_val.items() if t not in holdings)
+        return holdings, turn
+
+    # Les frais sont prélevés sur la NAV AVANT d'investir (audit 2026-11-18 :
+    # investir 100 % puis payer les frais laissait un cash négatif ~−45 $).
+    rate = cost_bps / 10_000.0
+    new_holdings, turnover = _plan(nav)
+    new_holdings, turnover = _plan(max(0.0, nav - turnover * rate))
+    cost = turnover * rate
     port["holdings"] = new_holdings
-    port["cash"] = nav - sum(sh * prices[t] for t, sh in new_holdings.items()) - cost
+    cash = nav - sum(sh * prices[t] for t, sh in new_holdings.items()) - cost
+    if cash < 0:  # résidu d'arrondi : on réduit légèrement les lignes
+        invested = nav - cost
+        scale = invested / max(1e-9, invested - cash)
+        new_holdings = {t: sh * scale for t, sh in new_holdings.items()}
+        cash = nav - sum(sh * prices[t] for t, sh in new_holdings.items()) - cost
     port["cumulative_cost"] = float(port.get("cumulative_cost") or 0) + cost
     return {"turnover_usd": round(turnover, 2), "cost_usd": round(cost, 2), "n": len(tradable)}
 
