@@ -137,20 +137,24 @@ def _qualifies(ctx: dict[str, Any]) -> tuple[bool, str]:
 
 
 def _system_allows_entries() -> tuple[bool, str]:
-    """Killswitch (trading_state) + circuit breaker (pause) — fail-open si illisible."""
+    """Killswitch (trading_state) + circuit breaker (pause) — fail-CLOSED si
+    illisible (audit 2026-11-18 P1-6 : auto-approuver un achat sans savoir si
+    un gel est actif est pire que rater une journée)."""
     try:
         from modules.tracker.killswitch import is_trading_allowed
         if not is_trading_allowed():
             return False, "killswitch actif (trading_state.blocked)"
     except Exception as exc:
-        logger.debug(f"[AutoApprove] killswitch illisible : {exc}")
+        logger.error(f"[AutoApprove] killswitch illisible — entrées refusées : {exc}")
+        return False, f"killswitch illisible ({exc})"
     try:
         from modules.tracker.state import read_circuit_breaker_state
         cb = read_circuit_breaker_state() or {}
         if bool(cb.get("is_paused")):
             return False, "circuit breaker en pause"
     except Exception as exc:
-        logger.debug(f"[AutoApprove] circuit breaker illisible : {exc}")
+        logger.error(f"[AutoApprove] circuit breaker illisible — entrées refusées : {exc}")
+        return False, f"circuit breaker illisible ({exc})"
     return True, "ok"
 
 

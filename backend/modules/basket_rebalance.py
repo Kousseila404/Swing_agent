@@ -119,8 +119,9 @@ def run_rebalance(force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         from modules.tracker.killswitch import is_trading_allowed
         if not is_trading_allowed():
             return {"skipped": "killswitch"}
-    except Exception:
-        pass
+    except Exception as exc:  # audit P1-6 : fail-closed
+        logger.error(f"[BasketRebalance] killswitch illisible — rebalance annulé : {exc}")
+        return {"skipped": "killswitch illisible", "error": str(exc)}
     pv = preview()
     orders = pv["orders"]
     result: dict[str, Any] = {"date": today.isoformat(), "orders": orders, "executed": [], "failed": []}
