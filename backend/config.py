@@ -187,6 +187,9 @@ BASKET_TOP_N             = int(os.getenv("BASKET_TOP_N", "20"))
 BASKET_EXIT_RANK         = int(os.getenv("BASKET_EXIT_RANK", "40"))
 BASKET_EXIT_CONFIRM_DAYS = int(os.getenv("BASKET_EXIT_CONFIRM_DAYS", "5"))
 BASKET_MAX_EXITS_PER_RUN = 3
+# Plafond de titres par secteur dans le CLASSEMENT du panier (0 = désactivé).
+# TITAN V15 (2026-11-20) : 4 sur un top-30 ≈ 13 % par secteur max.
+BASKET_MAX_PER_SECTOR    = int(os.getenv("BASKET_MAX_PER_SECTOR", "0"))
 # Plancher par proposition (USD) — cf. auto_proposer.DEFAULT_MIN_PROPOSAL_USD
 MIN_PROPOSAL_USD         = float(os.getenv("MIN_PROPOSAL_USD", "500"))
 

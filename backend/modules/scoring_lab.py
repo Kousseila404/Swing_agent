@@ -90,6 +90,33 @@ def make_rank_fn(*, field: str | None = None, weights: dict[str, float] | None =
     return _rank
 
 
+def make_v15_rank_fn(max_per_sector: int | None = None):
+    """Classement TITAN V15 recalculé sur chaque snapshot (les snapshots
+    antérieurs au 2026-11-20 ne portent pas `titan_v15_score`)."""
+    from modules.sector_metrics._scoring import compute_v15_scores
+
+    def _rank(snapshot: dict[str, Any], top_n: int, *, active_filter=None, score_field: str = "titan_composite_score"):
+        tickers = snapshot.get("tickers") or {}
+        v15 = compute_v15_scores(tickers)
+        rows = [(t, x["titan_v15_score"]) for t, x in v15.items()
+                if x["titan_v15_score"] is not None and (active_filter is None or t in active_filter)]
+        rows.sort(key=lambda x: -x[1])
+        if not max_per_sector:
+            return rows[:top_n]
+        out: list[tuple[str, float]] = []
+        count: dict[str, int] = {}
+        for t, sc in rows:
+            sec = str((tickers.get(t) or {}).get("sector") or "Unknown")
+            if count.get(sec, 0) >= max_per_sector:
+                continue
+            count[sec] = count.get(sec, 0) + 1
+            out.append((t, sc))
+            if len(out) >= top_n:
+                break
+        return out
+    return _rank
+
+
 VARIANTS: list[dict[str, Any]] = [
     {"id": "top5",  "label": "TITAN top 5",  "group": "basket", "top_n": 5},
     {"id": "top10", "label": "TITAN top 10", "group": "basket", "top_n": 10},
@@ -105,8 +132,10 @@ VARIANTS: list[dict[str, Any]] = [
     {"id": "profile_momentum_tilt", "label": "Profil momentum_tilt · top 20", "group": "profile", "top_n": 20, "weights": PROFILES["momentum_tilt"]},
     {"id": "profile_momentum_revisions", "label": "Profil momentum+revisions · top 20", "group": "profile", "top_n": 20, "weights": PROFILES["momentum_revisions"]},
     {"id": "profile_equal_8", "label": "Profil équipondéré 8 piliers · top 20", "group": "profile", "top_n": 20, "weights": PROFILES["equal_8"]},
+    {"id": "v15_top30_cap4", "label": "TITAN V15 value+qualité · top 30, 4/secteur", "group": "profile", "top_n": 30, "v15_cap": 4},
+    {"id": "v15_top20", "label": "TITAN V15 value+qualité · top 20", "group": "profile", "top_n": 20, "v15_cap": 0},
 ]
-QUICK_IDS = {"top20", "universe_ew", "bottom20", "momentum_top20"}
+QUICK_IDS = {"top20", "universe_ew", "bottom20", "momentum_top20", "v15_top30_cap4"}
 
 
 def _live_stats(periods: list[dict[str, Any]]) -> dict[str, Any]:
@@ -147,7 +176,8 @@ def run_lab(quick: bool = False) -> dict[str, Any]:
     for v in VARIANTS:
         if quick and v["id"] not in QUICK_IDS:
             continue
-        rank_fn = make_rank_fn(field=v.get("field"), weights=v.get("weights"), reverse=v.get("reverse", True))
+        rank_fn = (make_v15_rank_fn(v["v15_cap"]) if "v15_cap" in v
+                   else make_rank_fn(field=v.get("field"), weights=v.get("weights"), reverse=v.get("reverse", True)))
         t1 = time.time()
         try:
             res = run_titan_top_n(top_n=v["top_n"], benchmark=None, slippage_bps=SLIPPAGE_BPS,

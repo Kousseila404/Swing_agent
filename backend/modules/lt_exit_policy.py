@@ -83,15 +83,37 @@ ADD_ON_MAX_RANK = 40
 ADD_ON_MIN_RISK_PILLAR = 40.0
 
 
-def compute_ranks(scored_universe: dict[str, dict[str, Any]]) -> dict[str, int]:
-    """{ticker: rang} par `titan_composite_score` décroissant (1 = meilleur)."""
+def compute_ranks(
+    scored_universe: dict[str, dict[str, Any]], max_per_sector: int | None = None,
+) -> dict[str, int]:
+    """{ticker: rang} par `titan_composite_score` décroissant (1 = meilleur).
+
+    `max_per_sector` (défaut : config.BASKET_MAX_PER_SECTOR, 0 = désactivé) :
+    les titres d'un secteur au-delà des N premiers sont relégués APRÈS tous
+    les titres « dans le quota » (ordre conservé). Le top-N du panier, l'entrée
+    (auto-approve) et la sortie (rotation) voient ainsi le même classement
+    plafonné — audit 2026-11-20 : 6 énergies sur 20 dans le panier equal_7.
+    """
+    if max_per_sector is None:
+        try:
+            import config
+            max_per_sector = int(getattr(config, "BASKET_MAX_PER_SECTOR", 0) or 0)
+        except Exception:
+            max_per_sector = 0
     rows = []
     for t, r in (scored_universe or {}).items():
         v = (r or {}).get("titan_composite_score")
         if isinstance(v, (int, float)) and math.isfinite(float(v)):
-            rows.append((t, float(v)))
+            rows.append((t, float(v), str((r or {}).get("sector") or "Unknown")))
     rows.sort(key=lambda x: -x[1])
-    return {t: i + 1 for i, (t, _) in enumerate(rows)}
+    if max_per_sector and max_per_sector > 0:
+        inside, overflow, count = [], [], {}
+        for row in rows:
+            n = count.get(row[2], 0)
+            (inside if n < max_per_sector else overflow).append(row)
+            count[row[2]] = n + 1
+        rows = inside + overflow
+    return {t: i + 1 for i, (t, _, _) in enumerate(rows)}
 
 # Drawdown depuis entrée déclenchant EXIT_CATASTROPHE même si SL pas
 # touché (clamp gap overnight + conviction perdue). Aligné sur _MAX_SL_PCT.

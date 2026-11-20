@@ -41,11 +41,18 @@ PROFILES: dict[str, dict[str, float] | None] = {
     # Audit 2026-11-20 : le panier equal_7 détenait 7/20 pétrolières +
     # 3 semis ; ce profil teste si la concentration explique l'écart vs EW.
     "equal_7_sector_cap": None,
+    # TITAN V15 (2026-11-20) : value sector-neutre filtrée qualité — score
+    # calculé par _scoring.compute_v15_scores, panier top-30, 4 / secteur.
+    "v15_value_quality": {"titan_v15_score": 1.0},
 }
+
+# Taille de panier par profil (défaut TOP_N).
+PROFILE_TOP_N: dict[str, int] = {"v15_value_quality": 30}
 
 # Variantes : profil → (profil de poids de base, nb max de titres par secteur).
 PROFILE_VARIANTS: dict[str, tuple[str, int]] = {
     "equal_7_sector_cap": ("equal_7", 3),
+    "v15_value_quality": ("v15_value_quality", 4),
 }
 
 
@@ -186,10 +193,11 @@ def step(
         info: dict[str, Any] = {}
         if due:
             cap = PROFILE_VARIANTS.get(name, (name, None))[1]
-            basket = select_basket(scored, weights, TOP_N, max_per_sector=cap)
+            top_n = PROFILE_TOP_N.get(name, TOP_N)
+            basket = select_basket(scored, weights, top_n, max_per_sector=cap)
             info = rebalance(port, basket, prices, COST_BPS)
             port["last_rebalance"] = today
-            port["basket"] = basket[:TOP_N] if weights else f"universe:{len(basket)}"
+            port["basket"] = basket[:top_n] if weights else f"universe:{len(basket)}"
         nav = mark_to_market(port, prices)
         port["nav"].append([today, round(nav, 2)])
         port["nav"] = port["nav"][-750:]
