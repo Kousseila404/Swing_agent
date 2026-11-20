@@ -60,3 +60,35 @@ sont le déploiement continu).
 - Suite : 1 428 tests verts, lint/typage propres, frontend construit.
 - Premier passage complet de la nouvelle chaîne : 2026-09-18, 06:00 UTC
   (propositions) puis 15:00 UTC (achats).
+
+## 2026-11-06 → 11-20 — Audits, argent réel, fin de la sélection par score
+- 11-06 : audit des pertes — proposer mort depuis le 09-18 (`KeyError`),
+  SL/TS évalués sur des prix hors séance, aucun edge hors échantillon.
+- 11-18 : architecture d'agents (sentinel de résultats + triage IA, 5 agents
+  `sq-*`) ; audit intégral 11 agents (`audits/2026-11-18-audit-integral.md`) :
+  IC TITAN live négatif, OOM `_SNAP_CACHE`, insider faux, copy-trading invisible.
+- 11-20 après-midi : les 11 premiers P0 corrigés (OOM, warm hors API,
+  insider, WFO sans bootstrap, prix shadow, lock fundamentals, sizing 10 k$,
+  killswitch borné, CI, requirements, bannière 401).
+- 11-20 soir (`audits/2026-11-20-audit-boost.md`) :
+  - argent réel eToro visible (`etoro_sync`, carte Cockpit, ADR-019) ;
+  - toutes les lectures `/api/*` authentifiées (ADR-020) ;
+  - chaîne d'ordres P1-1/3/4/5/6 (séance, univers partiel, double achat,
+    ordre non journalisé, killswitch fail-closed) ; sentinel +2 contrôles ;
+  - TITAN V15 (value + filtre qualité) déployé puis **retiré** le soir même ;
+  - recherche 6 agents (`audits/2026-11-20-recherche-scoring.md`) : aucun
+    score de sélection n'a d'edge démontré après biais de survivance
+    (+5,5 à +6,6 pts/an) ; bugs momentum 8M-1M, dividende ×100, seuil Risk ;
+  - compte paper passé en **cœur-satellite** : 70 % RSP + 30 % momentum
+    12-1, paramètres figés 24 mois (ADR-022).
+
+## État au 2026-11-20 23:30 UTC
+- Compte paper : 14 positions basket, equity ≈ 93,8 k$ ; SPY −5,5 % sous
+  MM200 → premier rebalance cœur-satellite (lundi 11-23, 15-20 h UTC) =
+  100 % RSP.
+- Argent réel eToro ≈ 9,6 k$ : 58 % copy-trading, 27 % actions, 14 % cash.
+- **En attente côté utilisateur** : `sudo systemctl restart swing-api`
+  (l'API tourne le code du 11-20 06:15), `crontab deploy/crontab.txt`
+  (sentinel + synchro eToro), clés API eToro (`ETORO_API_KEY`,
+  `ETORO_USER_KEY`).
+- Suite : 1 502 tests verts, ruff/mypy/eslint propres.

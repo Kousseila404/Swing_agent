@@ -71,3 +71,17 @@ Après modification d'une valeur lue par l'API, `make redeploy`. Les crons relis
 | `LOG_JSON` | log | logs JSON une ligne |
 | `JOURNAL_READ_BACKEND=csv` | duckdb_journal | force la lecture CSV |
 | `SWINGQUANT_TEST_GUARD=1` | tests | garde-fou données prod |
+
+## Ajouts 2026-11-20 (hors `config.py` ou nouvelles variables)
+
+| Constante / module | Variable d'env | Défaut | Note |
+|---|---|---|---|
+| `config.STRATEGY_MODE` | `STRATEGY_MODE` | `basket` | `basket` \| `legacy` \| **`core_satellite`** (ADR-022, valeur prod au 2026-11-20) |
+| `config.BASKET_MAX_PER_SECTOR` | `BASKET_MAX_PER_SECTOR` | `0` | plafond par secteur dans `compute_ranks` (0 = off) |
+| `_scoring.ACTIVE_WEIGHT_PROFILE` | `TITAN_WEIGHT_PROFILE` | `v14_1` | prod : `equal_7` (info/UI seulement en cœur-satellite) ; `v15_value_quality` disponible mais **réfuté** |
+| `auto_approve.RISK_MIN_BASKET` | `AUTO_APPROVE_RISK_MIN_BASKET` | `10` | plancher « Bilan » en mode basket (pilier Risk = solidité du bilan) |
+| `etoro_sync` | `ETORO_API_KEY`, `ETORO_USER_KEY` | — | clés API publique eToro (lecture seule) ; absentes → synchro no-op |
+| `etoro_sync` | `ETORO_API_BASE` | `https://public-api.etoro.com` | |
+| `core_satellite.*` | — | — | paramètres **figés 24 mois** dans le module (ADR-022), pas d'env volontairement |
+| `price_panel.DEFAULT_DAYS` | — | `420` | 2 ans de clôtures (momentum 12-1) |
+| `_momentum.MOMENTUM_FETCH_DAYS` | — | `400` | période yfinance « 2y » ; fenêtre exacte 252 + 21 séances |

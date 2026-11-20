@@ -2,8 +2,8 @@
 
 Six agents : 2 revues de littérature (value/qualité ; momentum/risque/construction),
 3 études empiriques (prix 2005-2026 ; fondamentaux SEC point-in-time 2011-2026 ;
-fenêtre live 2026), 1 validateur statistique. Données et scripts :
-scratchpad de session `agent_prices/`, `agent_pit/`, `agent_live/` (non versionnés).
+fenêtre live 2026), 1 validateur statistique. Résumés chiffrés et scripts versionnés dans [2026-11-20-recherche/](2026-11-20-recherche/README.md)
+(données brutes non versionnées, régénérables).
 
 ## Résultat
 
