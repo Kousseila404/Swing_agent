@@ -66,6 +66,7 @@ from routers import (
 from routers import (
     data_health as data_health_router,
 )
+from routers import etoro as etoro_router  # noqa: E402
 from routers import (
     jobs as jobs_router,
 )
@@ -90,7 +91,6 @@ from routers import (
 from routers import (
     peers as peers_router,
 )
-from routers import etoro as etoro_router  # noqa: E402
 from routers import performance as performance_router  # noqa: E402
 from routers import (
     portfolio as portfolio_router,

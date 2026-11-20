@@ -32,6 +32,15 @@ def _isolate_universe_history(tmp_path_factory, monkeypatch):
     from modules import price_panel as pp
     monkeypatch.setattr(pp, "PANEL_PATH", tmp_path_factory.mktemp("price_panel_isolated") / "panel.json.gz")
     pp._cache.update(mtime=None, series={})
+    # Snapshot eToro réel (données personnelles) : jamais lu ni écrit par les tests.
+    from modules import etoro_sync as es
+    etoro_dir = tmp_path_factory.mktemp("etoro_isolated")
+    monkeypatch.setattr(es, "ETORO_DIR", etoro_dir)
+    monkeypatch.setattr(es, "LATEST_PATH", etoro_dir / "latest.json")
+    monkeypatch.setattr(es, "HISTORY_PATH", etoro_dir / "history.json")
+    monkeypatch.setattr(es, "_LOCK_PATH", etoro_dir / ".lock")
+    monkeypatch.delenv("ETORO_API_KEY", raising=False)
+    monkeypatch.delenv("ETORO_USER_KEY", raising=False)
 
 
 _PROD_DATA_GUARD_FILES = ("trade_journal.csv", "trade_journal.duckdb", "proposals.json")
